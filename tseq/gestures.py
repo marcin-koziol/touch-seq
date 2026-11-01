@@ -93,3 +93,14 @@ class Slide(Gesture):
 
     def move(self, pos):
         self.set(max(0.0, min(1.0, (self.track.bottom() - pos.y()) / self.track.height())))
+
+
+class SlideH(Gesture):
+    """Horizontal slider: the finger's place across `track` is the value (0 at the left, 1 at the right)."""
+
+    def __init__(self, track, set_, pos):
+        self.track, self.set = track, set_
+        self.move(pos)
+
+    def move(self, pos):
+        self.set(max(0.0, min(1.0, (pos.x() - self.track.left()) / self.track.width())))

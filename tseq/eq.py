@@ -8,7 +8,7 @@ from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QPainterPath, QPen, QPolygonF
 
 from .constants import BG, BORDER, DIM, PALETTE, TEXT
-from .gestures import Gesture, Slide
+from .gestures import Gesture, SlideH
 
 F_MIN, F_MAX, MAX_DB = 20.0, 20000.0, 24.0
 TYPES = ("BELL", "LO SHELF", "HI SHELF", "LOW CUT", "HI CUT")
@@ -100,6 +100,11 @@ class EqEditor:
             out.append((host.value(plugin, k), host.value(plugin, k + 1), host.value(plugin, k + 2),
                         int(host.value(plugin, k + 3) + 0.5)))
         return out
+
+    @staticmethod
+    def width_at(part):
+        """The strip's position (0..1) as a band's Q: 0.2 at the left, 10 at the right, log in between."""
+        return 0.2 * (10.0 / 0.2) ** max(0.0, min(1.0, part))
 
     def set_band(self, index, freq=None, gain=None, q=None, kind=None):
         k = index * 4
@@ -259,8 +264,9 @@ class EqEditor:
         handle = QRectF(slider.left() + part * (slider.width() - 10 * s), slider.top() + 4 * s, 10 * s,
                         slider.height() - 8 * s)
         self.panel.box(p, handle, colour, None, radius=4)
-        self.panel.region(slider, lambda pos: Slide(slider, lambda v: self.set_band(
-            self.band, q=0.2 * (10.0 / 0.2) ** max(0.0, min(1.0, v))), pos))
+        # the strip is horizontal, so the gesture reads the finger's x (SlideH), not its height
+        self.panel.region(slider, lambda pos: SlideH(
+            slider, lambda v: self.set_band(self.band, q=self.width_at(v)), pos))
         self.panel.text(p, readout, f"{hz(freq)} Hz   ·   {gain:+.1f} dB   ·   Q {q:.2f}", TEXT, 13,
                         Qt.AlignRight | Qt.AlignVCenter, bold=True)
 

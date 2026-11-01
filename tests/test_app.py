@@ -1129,3 +1129,16 @@ touched.clear()
 ts.BandPoint(ed, 0).move(QPointF(600, 0))  # dragging a band: right and up is high and loud
 assert touched[0][0] == 0 and touched[0][1] > 19000 and touched[1][1] > 20, touched
 print("eq editor OK")
+
+# --- the EQ's width strip follows the finger sideways (a horizontal control, not a vertical one) ---
+moved = []
+strip = ts.QRectF(0, 0, 200, 44)
+mh_slide = ts.SlideH(strip, lambda v: moved.append(round(v, 2)), QPointF(50, 10))
+assert moved == [0.25], moved
+mh_slide.move(QPointF(100, 40))  # the same x as before but a different height: the value must not care
+assert moved[-1] == 0.5, moved
+mh_slide.move(QPointF(150, 2))
+assert moved[-1] == 0.75, moved
+assert abs(ts.EqEditor.width_at(0.0) - 0.2) < 1e-6 and abs(ts.EqEditor.width_at(1.0) - 10.0) < 1e-6
+assert abs(ts.EqEditor.width_at(0.5) - 1.4142) < 0.01, "halfway is Q 1.4, log between 0.2 and 10"
+print("width strip OK")
