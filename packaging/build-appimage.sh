@@ -41,6 +41,12 @@ mkdir -p AppDir/usr/lib/lv2
 cp -r xyfx-build/bin/touchseq-xyfx.lv2 AppDir/usr/lib/lv2/
 tar -C xyfx-build/bin -czf "$DIST/touchseq-xyfx-$VERSION-$ARCH.tar.gz" touchseq-xyfx.clap touchseq-xyfx.lv2
 
+echo "== Monitor"
+cmake -B monitor-build -S "$ROOT/monitor" -DCMAKE_BUILD_TYPE=Release >/dev/null
+cmake --build monitor-build -j"$(nproc)" >/dev/null
+monitor-build/monitor-test
+install -Dm755 monitor-build/bin/touchseq-monitor.clap AppDir/usr/lib/clap/touchseq-monitor.clap
+
 echo "== app"
 install -Dm644 "$ROOT/touchseq.py" AppDir/usr/share/touch-seq/touchseq.py
 install -Dm644 "$ROOT/plugins.py" AppDir/usr/share/touch-seq/plugins.py

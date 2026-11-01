@@ -14,7 +14,7 @@ from PySide6.QtGui import QColor, QLinearGradient, QPen
 import plugins
 
 from .model import Bus
-from .constants import BG, BORDER, DIM, PALETTE, PANEL, SLOTS, TEXT, WARN, XYFX_LABELS
+from .constants import BG, BORDER, DIM, MONITOR_LABELS, PALETTE, PANEL, SLOTS, TEXT, WARN, XYFX_LABELS
 from .gestures import Drag, Gesture, Hold, ScrollOrTap
 from .ui import Panel, param_color, split
 
@@ -65,6 +65,7 @@ class HostPanel(Panel):
         self.buffer = buffer  # the audio graph's buffer size in samples this machine was left on (0: system)
         self.states_dirty = False  # a parameter changed since the plugins' states were last saved
         self.meters = {}  # Strip -> {"l", "r", "peak", "at"}: what its chain's output is doing
+        self.monitor = None  # the monitor plugin's ref, looked up once (False: not installed)
         if self.buffer:
             plugins.set_quantum(self.buffer)  # before the engine starts, so the plugins see that size
         try:
@@ -80,6 +81,7 @@ class HostPanel(Panel):
                 if ref:
                     self.load(strip, k, ref, restore=True)
         self.rewire()
+        self.ensure_monitors()  # audio tracks without effects: a node for their input
         threading.Thread(target=self.watch_output, daemon=True).start()
 
     # --- chains ---------------------------------------------------------------
@@ -575,6 +577,32 @@ class HostPanel(Panel):
                     sub="tap: next bus" if buses else "no bus yet")
         self.button(p, plus, "+ BUS", lambda: self.add_bus(tr), sub="effects")
         return r.bottom() + 8 * s
+
+    # --- the monitor node -----------------------------------------------------
+    def monitor_ref(self):
+        """The transparent gain/pan plugin (monitor/ in this repo) an audio track needs to have a node at all:
+        without one Carla has nothing to meter and no fader to set. None when it is not installed."""
+        if self.monitor is None:
+            catalog = getattr(self, "catalog", None)
+            if catalog is not None and catalog.ready:
+                self.monitor = next((r for r in catalog.plugins if r.label in MONITOR_LABELS), None)
+            if not self.monitor:  # not in the catalog (installed after the scan): look for the file itself
+                self.monitor = plugins.find_monitor()
+            self.monitor = self.monitor or False
+        return self.monitor or None
+
+    def ensure_monitor(self, tr):
+        """Put the monitor in an audio track that has no plugins (an empty one is a bare patch: no meter, no
+        fader). Once per track: removing it during a session keeps it removed until the next load."""
+        if not tr.audio or any(tr.strip.slots):
+            return
+        ref = self.monitor_ref()
+        if ref:
+            self.set_slot(tr.strip, 0, ref)
+
+    def ensure_monitors(self):
+        for tr in self.project.tracks:
+            self.ensure_monitor(tr)
 
     # --- meters ---------------------------------------------------------------
     @staticmethod

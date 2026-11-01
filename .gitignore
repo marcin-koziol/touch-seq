@@ -8,6 +8,7 @@ touch.log
 # build output
 __pycache__/
 xyfx/build/
+monitor/build/
 build/
 dist/
 *.AppImage

@@ -47,8 +47,9 @@ screen; everything else keeps running.
   **MASTER** (3 effects, e.g. a global reverb) to the audio output. **External MIDI** tracks have no chain at
   all — the panel shows their output port instead, with **MIDI OUT** to change it
 - **audio tracks** have a chain too (slot 0 is an effect, not an instrument): the input is patched into it, so
-  effects and the fader work as soon as there is one; without effects the input goes straight where the track
-  is routed, and its level is the bus'/master's
+  effects and the fader work as soon as there is one. A track with no effects gets **Touch-Seq Monitor**, a
+  transparent gain/pan node (`monitor/` in this repo, built like XYFX) — it is what gives a bare input a
+  level to meter and a fader to set; remove it and the input is a plain patch again (no meter, no fader)
 - **effects buses**: a track's chain can go into a bus instead of straight into the master — **→ MASTER** under
   the chain cycles through the buses, **+ BUS** makes a new one. A bus has its own 3 slots and its own level,
   so one reverb can process just the two of five tracks you route into it; buses are their own columns in the

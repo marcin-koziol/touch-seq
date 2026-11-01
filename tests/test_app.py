@@ -263,6 +263,9 @@ class StubHost(ts.Panel):
     def save_states(self):
         type(self).saved_states += 1
         self.states_dirty = False
+    monitor = None
+    def ensure_monitor(self, tr):
+        pass
     def draw(self, p):
         p.fillRect(self.rect(), ts.QColor(ts.BG))
     def close(self):
@@ -1080,3 +1083,17 @@ mh_out.meters, mh_out.host.level = {}, 0.5
 mh_out.sample_meters()
 assert mh_out.host.reads == [("T2.1 Rev", False)], mh_out.host.reads
 print("input meter OK")
+
+# an audio track with no plugins gets the monitor node (its input then has a meter and a fader)
+mh_mon = FakeHostPanel(ts.Project(tracks=[ts.Track("audio", 1, 1), ts.Track("melody", 1, 2)]))
+mon = type("Ref", (), {"label": "touchseq.monitor", "name": "Touch-Seq Monitor"})()
+mh_mon.monitor = mon
+placed = []
+mh_mon.set_slot = lambda strip, k, ref: placed.append((strip, k, ref.label))
+mh_mon.ensure_monitors()
+assert placed == [(mh_mon.project.tracks[0].strip, 0, "touchseq.monitor")], placed
+mh_mon.project.tracks[0].strip.slots[1] = mon  # a track that already has an effect is left alone
+placed.clear()
+mh_mon.ensure_monitors()
+assert not placed, placed
+print("monitor node OK")

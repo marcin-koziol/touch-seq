@@ -77,3 +77,5 @@ PARAM_FAMILIES = [
 
 
 XYFX_LABELS = {"touchseq.xyfx", "urn:touch-seq:xyfx"}  # CLAP id, LV2 URI (xyfx/ in this repo)
+# a transparent gain/pan node the app puts in an audio track with no effects (monitor/ in this repo)
+MONITOR_LABELS = {"touchseq.monitor", "urn:touch-seq:monitor"}

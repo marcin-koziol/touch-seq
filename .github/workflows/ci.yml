@@ -39,3 +39,14 @@ jobs:
       - run: cmake -B xyfx/build -S xyfx -DCMAKE_BUILD_TYPE=Release && cmake --build xyfx/build -j"$(nproc)"
       - name: DSP test
         run: xyfx/build/xyfx-test
+
+  monitor:
+    name: Monitor plugin (CLAP + LV2)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - run: cmake -B monitor/build -S monitor -DCMAKE_BUILD_TYPE=Release && cmake --build monitor/build -j"$(nproc)"
+      - name: DSP test
+        run: monitor/build/monitor-test

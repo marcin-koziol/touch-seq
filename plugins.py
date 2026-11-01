@@ -306,6 +306,18 @@ def audio_inputs():
     return sorted(inputs, key=lambda i: (i[1].lower(), port_order(i[2])))
 
 
+def find_monitor():
+    """The monitor plugin's ref, looked for in the usual CLAP folders: it ships with the app (the AppImage sets
+    CLAP_PATH, a checkout installs it with monitor/install.sh), so it must not need a catalog RESCAN."""
+    for folder in SEARCH["clap"]:
+        path = folder / "touchseq-monitor.clap"
+        if path.is_file():
+            refs = run_discovery("clap", str(path))  # the file is the monitor: take what it reports
+            if refs:
+                return refs[0]
+    return None
+
+
 def audio_input_choices():
     """The inputs of audio_inputs() as (port, "device · channel"), the shape the picker dialogs take."""
     return [(port, f"{label} · {name}") for port, label, name in audio_inputs()]

@@ -154,6 +154,7 @@ class Rack(Window):
 
     def add_track(self, kind, value=""):
         self.seq.add_track(kind, value)
+        self.host.ensure_monitor(self.seq.sel)  # a new audio track gets its monitor node right away
         self.dirty = True
         self.autosave()
         self.close_dialog()
