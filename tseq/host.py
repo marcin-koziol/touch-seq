@@ -210,6 +210,8 @@ class HostPanel(Panel):
 
     def unload(self, strip, k):
         plugin = self.loaded.pop((strip, k), None)
+        if plugin is self.eq.plugin:
+            self.eq.forget()
         if plugin:
             self.host.show_ui(plugin, False)
             self.host.remove(plugin)
@@ -617,7 +619,8 @@ class HostPanel(Panel):
         changed = False
         for strip in live:
             chain = self.chain(strip)
-            if not chain:
+            if not chain:  # no plugin, no node: its meter goes rather than freezing at the last value
+                self.meters.pop(strip, None)
                 continue
             tr = self.track_of(strip)
             into = bool(tr and tr.audio)  # an audio track shows what arrives at its chain, not what leaves it
@@ -804,6 +807,9 @@ class HostPanel(Panel):
         sel = self.sel if self.sel and self.sel[0] is strip else None
         plugin = self.loaded.get(sel) if sel else None
         self.box(p, r, "#11141b", "#2a3040", 1.5)
+        if not plugin or plugin.ref.label not in EQ_LABELS:
+            if self.eq.plugin is not None:
+                self.eq.forget()  # not our EQ (or nothing) on screen: stop reading its analyser
         if not plugin:
             msg = "tap a plugin to edit it" if sel is None else "plugin not loaded"
             self.text(p, r, msg, "#5b6577", 14)

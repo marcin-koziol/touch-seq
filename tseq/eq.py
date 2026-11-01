@@ -112,11 +112,18 @@ class EqEditor:
             if value is not None:
                 self.panel.set_param(self.plugin, k + n, value)
 
+    def forget(self):
+        """The plugin went away (its slot was emptied or replaced): stop reading it."""
+        self.plugin, self.spectrum = None, [0.0] * len(self.spectrum)
+
     def tick(self):
         """The plugin measures its output; read the analyser back (it writes output parameters - the only
         numbers a host can hand us, there are no audio buffers here)."""
         plugin = self.plugin
         if not (plugin and self.panel.host):
+            return
+        if plugin not in self.panel.loaded.values():  # unloaded under us: it would raise on its id
+            self.forget()
             return
         indices = self.panel.host.output_params(plugin)
         if len(indices) == len(self.spectrum):
@@ -142,6 +149,8 @@ class EqEditor:
 
     # --- drawing ------------------------------------------------------------
     def draw(self, p, r, plugin):
+        if plugin is not self.plugin:
+            self.spectrum = [0.0] * len(self.spectrum)  # another EQ: its own analyser
         self.plugin = plugin
         s = self.panel.s
         graph = QRectF(r.left(), r.top(), r.width(), r.height() * 0.66)

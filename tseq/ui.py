@@ -3,6 +3,7 @@ regions, one gesture per touch), the primitives every panel draws with, and `Win
 layout, dialogs over the rack, the repaint clock)."""
 import re
 import time
+import traceback
 
 from PySide6.QtCore import QPointF, QRectF, Qt, QTimer
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QLinearGradient, QPainter, QPen, QRadialGradient
@@ -171,6 +172,7 @@ class Window(QWidget):
         self.dialog_rect = QRectF()
         self.owner = {}  # touch id -> panel
         self.dirty = False  # something may have been edited since the last save
+        self.broken = set()  # panels whose tick raised: reported once, the clock keeps going
         QTimer(self, interval=40, timeout=self.tick).start()
 
     # --- input ----------------------------------------------------------
@@ -277,7 +279,12 @@ class Window(QWidget):
     def tick(self):
         panels = self.panels + ([self.dialog[2]] if self.dialog else [])
         for panel in panels:
-            panel.tick()
+            try:
+                panel.tick()
+            except Exception:  # a ticker that breaks must not stop the clock: the screen would freeze
+                if id(panel) not in self.broken:
+                    self.broken.add(id(panel))
+                    traceback.print_exc()
         if self.animating() or any(p.stale for p in panels):
             for panel in panels:
                 panel.stale = False

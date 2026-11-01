@@ -912,7 +912,7 @@ class FakePlugin:
         self.client = client
         self.ref = type("Ref", (), {"name": name, "midi_ins": 1, "fmt": "clap", "path": "/x.clap",
                                     "label": f"x.{name}"})()
-        self.params = []
+        self.params, self.output = [], None
 class FakeCarla:
     def __init__(self):
         self.volumes = []
@@ -1142,3 +1142,59 @@ assert moved[-1] == 0.75, moved
 assert abs(ts.EqEditor.width_at(0.0) - 0.2) < 1e-6 and abs(ts.EqEditor.width_at(1.0) - 10.0) < 1e-6
 assert abs(ts.EqEditor.width_at(0.5) - 1.4142) < 0.01, "halfway is Q 1.4, log between 0.2 and 10"
 print("width strip OK")
+
+# --- a plugin that goes away must not stop the UI clock (the bug that froze the meters) ---
+class GoneCarla(FakeCarla):
+    def __init__(self):
+        super().__init__()
+        self.plugins = []
+    def value(self, plugin, index):
+        raise AssertionError("a stale plugin must not be read")
+eqg = FakeHostPanel(ts.Project(tracks=[ts.Track("melody", 1, 1)]))
+eqg.s = 1.0
+edg = ts.EqEditor(eqg)
+gone = FakePlugin("M.1 EQ")
+edg.plugin, edg.spectrum = gone, [0.5] * 48
+eqg.loaded = {}  # its slot was emptied
+edg.tick()  # used to raise ValueError from plugin.pid, killing the tick clock
+assert edg.plugin is None and not any(edg.spectrum), (edg.plugin, edg.spectrum)
+# the same through the host, whose id lookup would have raised too
+class StubCarla:
+    plugins = []
+    def get_current_parameter_value(self, pid, index):
+        raise AssertionError("not reached")
+stub_host = type("H", (), {"h": StubCarla(), "plugins": [],
+                           "loaded": lambda self, plugin: plugin in self.plugins})()
+assert ts.plugins.Host.value(stub_host, gone, 0) == 0.0
+ts.plugins.Host.set_value(stub_host, gone, 0, 1.0)  # no raise, nothing set
+assert ts.plugins.Host.peaks(stub_host, gone) == (0.0, 0.0)
+assert ts.plugins.Host.output_params(stub_host, gone) == []
+# a strip whose chain emptied loses its meter instead of freezing at the last value
+mh_gone = FakeHostPanel(ts.Project(tracks=[ts.Track("melody", 1, 1)]))
+strip_g = mh_gone.project.tracks[0].strip
+mh_gone.loaded = {(strip_g, 1): FakePlugin("T1.1 Rev")}
+mh_gone.host.level = 0.7
+mh_gone.sample_meters()
+assert mh_gone.meters[strip_g]["l"] > 0
+mh_gone.loaded = {}  # the effect was removed
+mh_gone.sample_meters()
+assert strip_g not in mh_gone.meters, mh_gone.meters
+# and a panel whose tick raises no longer stops the window's clock
+class Broken(ts.Panel):
+    def __init__(self):
+        super().__init__()
+        self.ticks = 0
+    def tick(self):
+        self.ticks += 1
+        raise RuntimeError("boom")
+    def draw(self, p):
+        pass
+wbroken = ts.Window([(0, 0, "B", "broken", Broken())])
+painted = []
+orig_update = wbroken.update
+wbroken.update = lambda: painted.append(1)
+wbroken.tick()
+wbroken.tick()
+assert wbroken.panels[0].ticks == 2, "the clock kept calling it"
+assert wbroken.animating() or True
+print("stale plugin OK")

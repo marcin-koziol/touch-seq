@@ -223,26 +223,32 @@ class Host:
         self.h.remove_plugin(plugin.pid)
         self.plugins.remove(plugin)
 
+    def loaded(self, plugin):
+        return plugin in self.plugins
+
     def value(self, plugin, index):
-        return self.h.get_current_parameter_value(plugin.pid, index)
+        return self.h.get_current_parameter_value(plugin.pid, index) if self.loaded(plugin) else 0.0
 
     def text(self, plugin, index):
         return self.h.get_parameter_text(plugin.pid, index)
 
     def set_value(self, plugin, index, value):
-        self.h.set_parameter_value(plugin.pid, index, value)
+        if self.loaded(plugin):
+            self.h.set_parameter_value(plugin.pid, index, value)
 
     def output_params(self, plugin):
         """Indices of a plugin's output parameters: our EQ writes its analyser's spectrum there (a host can
         only read numbers, and Touch-Seq has no audio buffers of its own to measure)."""
-        if plugin.output is None:
+        if plugin.output is None and self.loaded(plugin):
             plugin.output = [i for i in range(self.h.get_parameter_count(plugin.pid))
                              if self.h.get_parameter_data(plugin.pid, i)["type"] != self.cb.PARAMETER_INPUT]
-        return plugin.output
+        return plugin.output or []
 
     def peaks(self, plugin, into=False):
         """A plugin's output peaks as (left, right), linear (0.0 = silence): Carla's own meter data. `into`
         reads what arrives at its inputs instead (an audio track's input level)."""
+        if not self.loaded(plugin):
+            return 0.0, 0.0
         side = self.h.get_input_peak_value if into else self.h.get_output_peak_value
         return (side(plugin.pid, True), side(plugin.pid, False))
 
