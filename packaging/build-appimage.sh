@@ -52,6 +52,8 @@ ln -sf touch-seq.png AppDir/.DirIcon
 "$PYBIN" -c "import sys; sys.path.insert(0, 'AppDir/usr/share/touch-seq'); import touchseq; print('app', touchseq.__version__)"
 
 echo "== AppImage"
+rm -rf "AppDir/opt/python$PY/include"  # C headers: not needed to run
+chmod -R a+rX AppDir  # the extracted Python's folders are 0700; others must be able to run the AppImage
 curl -fsSL -o appimagetool \
     "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-$ARCH.AppImage"
 chmod +x appimagetool
