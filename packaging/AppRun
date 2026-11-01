@@ -1,0 +1,8 @@
+#!/bin/sh
+# Touch-Seq AppImage entry: the bundled Python runs the app with the bundled Carla and XYFX.
+HERE="$(dirname "$(readlink -f "$0")")"
+export CARLA_PREFIX="$HERE/usr"
+# the bundled XYFX first; LV2_PATH replaces lilv's defaults, so they are listed too
+export CLAP_PATH="$HERE/usr/lib/clap${CLAP_PATH:+:$CLAP_PATH}"
+export LV2_PATH="$HERE/usr/lib/lv2:${LV2_PATH:-$HOME/.lv2:/usr/local/lib/lv2:/usr/lib/lv2}"
+exec "$HERE/opt/python3.12/bin/python3.12" "$HERE/usr/share/touch-seq/touchseq.py" "$@"

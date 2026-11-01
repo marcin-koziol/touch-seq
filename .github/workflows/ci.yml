@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  app:
+    name: app tests (offscreen)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Qt / MIDI runtime libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libxkbcommon0 libfontconfig1 libdbus-1-3 libasound2t64 libjack-jackd2-0
+      - run: pip install -r packaging/requirements.txt
+      - name: tests/test_app.py
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python tests/test_app.py "$RUNNER_TEMP/screens"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-screenshots
+          path: ${{ runner.temp }}/screens/*.png
+
+  xyfx:
+    name: XYFX plugin (CLAP + LV2)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - run: cmake -B xyfx/build -S xyfx -DCMAKE_BUILD_TYPE=Release && cmake --build xyfx/build -j"$(nproc)"
+      - name: DSP test
+        run: xyfx/build/xyfx-test

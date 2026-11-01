@@ -1,0 +1,14 @@
+# local setup and user data
+config.json
+projects/
+project.json*
+*.plugins/
+touch.log
+
+# build output
+__pycache__/
+xyfx/build/
+build/
+dist/
+*.AppImage
+build.log

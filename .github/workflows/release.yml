@@ -1,0 +1,59 @@
+name: Release
+
+# Tag vX.Y.Z -> AppImages (x86_64, aarch64), XYFX plugin archives and the Carla source they bundle,
+# attached to a GitHub release. Run by hand (workflow_dispatch) to just build the artifacts.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  appimage:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-22.04  # oldest glibc we build on: the AppImage needs glibc >= 2.35
+          - arch: aarch64
+            runner: ubuntu-22.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake pkg-config git curl file \
+            libx11-dev libxext-dev libxcursor-dev libxrandr-dev libgl-dev
+      - name: build AppImage
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: packaging/build-appimage.sh
+      - name: Carla source (GPL: the exact code bundled)
+        if: matrix.arch == 'x86_64'
+        run: |
+          src=build/appimage-x86_64/carla-src
+          git -C "$src" archive --format=tar.gz --prefix=carla-$(git -C "$src" rev-parse --short HEAD)/ \
+            -o "$PWD/dist/carla-source-$(git -C "$src" rev-parse --short HEAD).tar.gz" HEAD
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.arch }}
+          path: dist/*
+
+  release:
+    needs: appimage
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true

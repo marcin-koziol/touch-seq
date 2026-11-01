@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Touch-Seq
+Comment=Touchscreen live-performance front end for the Carla plugin host
+Exec=touch-seq
+Icon=touch-seq
+Categories=AudioVideo;Audio;Midi;Sequencer;
+Terminal=false
