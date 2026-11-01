@@ -1435,3 +1435,97 @@ assert back.tracks[0].in_port == "keystep" and back.tracks[0].in_channel == 7
 _f.write_text(ts.dump_project(ts.Project(tracks=[ts.Track("melody", 1, 1)])))
 assert "in_port" not in _f.read_text(), "a track with no input does not store one"
 print("input saved OK")
+
+# --- metronome and count-in: the clicks come before the pattern, then on every beat ---
+class FakeClicker:
+    def __init__(self):
+        self.events, self.prepared, self.closed = [], 0, 0
+
+    def prepare(self):
+        self.prepared += 1
+        return True
+
+    def at(self, when, accent=False):
+        self.events.append((when, accent))
+
+    def close(self):
+        self.closed += 1
+
+    @property
+    def open(self):
+        return self.prepared > self.closed
+
+prc = ts.Project(bpm=600, tracks=[ts.Track("melody", 1, 1)], count_in=1)  # 600 bpm: a beat is 0.1 s
+outc = FakeOut(); ec2 = ts.Engine(prc, outc)
+ec2.clicker = FakeClicker()
+ec2.start()
+assert ec2.counting and not ec2.playing, "one bar of count-in first"
+assert [0xFA] not in [m for _, m in outc.log], "the transport has not started yet"
+time.sleep(0.25)
+assert ec2.counting and len(ec2.clicker.events) >= 2, ec2.clicker.events
+time.sleep(0.4)
+assert ec2.playing and not ec2.counting, "the pattern starts after the count-in"
+assert [0xFA] in [m for _, m in outc.log]
+clicks = list(ec2.clicker.events)
+assert [a for _, a in clicks].count(True) == 1 and [a for _, a in clicks].count(False) == 3, clicks
+print("count-in clicks:", [accent for _, accent in clicks])
+ec2.clicker.events.clear()
+ec2.set_click(True)
+time.sleep(0.3)  # now the metronome follows the playing pattern
+assert len(ec2.clicker.events) >= 2 and any(a for _, a in ec2.clicker.events), ec2.clicker.events
+ec2.stop()
+assert not ec2.playing
+ec2.set_click(True)
+assert prc.click and ec2.clicker.prepared >= 2
+ec2.set_click(False)
+assert not prc.click and ec2.clicker.closed >= 1
+# stop cancels a count-in
+ec2.start()
+assert ec2.counting
+ec2.stop()
+assert not ec2.counting and not ec2.playing
+print("metronome OK")
+
+# --- the keyboard's own transport: MIDI start/stop, and the CCs some controllers send ---
+prt = ts.Project(tracks=[ts.Track("melody", 1, 1)])
+prt.tracks[0].in_port = "keys"
+outt = FakeOut(); et2 = ts.Engine(prt, outt); tt = ts.Performer(prt, et2, ts.Sequencer(prt, et2))
+tt.inputs = FakeInputs()
+et2.clicker = FakeClicker()
+
+def play_msg(*msg):
+    tt.inputs.msgs.append(("Arturia KeyStep MIDI 1", list(msg)))
+    tt.tick()
+
+play_msg(0xFA)
+assert et2.playing, "MIDI start plays"
+play_msg(0xFC)
+assert not et2.playing, "MIDI stop stops"
+play_msg(0xFB)
+assert et2.playing, "MIDI continue plays too"
+play_msg(0xB0, 116, 127)
+assert not et2.playing, "CC 116 stops"
+play_msg(0xB0, 115, 127)
+assert et2.playing, "CC 115 plays"
+play_msg(0xB0, 115, 0)  # a button release must not do anything
+assert et2.playing
+et2.stop()
+# with a count-in, the keyboard's start counts in as well
+prt.count_in = 1
+play_msg(0xFA)
+assert et2.counting and not et2.playing, "the count-in applies to the keyboard too"
+et2.stop()
+assert not et2.counting and not et2.playing
+print("keyboard transport OK")
+
+# --- the metronome settings travel with the project ---
+prm = ts.Project(tracks=[ts.Track("melody", 1, 1)], click=True, count_in=2)
+_f = OUT / "click.json"
+_f.write_text(ts.dump_project(prm))
+back = ts.load_project(_f)
+assert back.click is True and back.count_in == 2
+_f.write_text(ts.dump_project(ts.Project(tracks=[ts.Track("melody", 1, 1)])))
+text = _f.read_text()
+assert "click" not in text and "count_in" not in text, "off is not stored"
+assert ts.load_project(_f).click is False and ts.load_project(_f).count_in == 0
+print("click settings OK")

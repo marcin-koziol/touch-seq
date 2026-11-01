@@ -48,8 +48,8 @@ class Rack(Window):
         QTimer(self, interval=30000, timeout=host.save_states).start()
 
     def animating(self):
-        # the playhead, and the blinking borders of queued pattern/scene switches
-        return self.engine.playing or super().animating()
+        # the playhead, the count-in and the blinking borders of queued pattern/scene switches
+        return self.engine.playing or self.engine.counting or super().animating()
 
     def autosave(self):
         # Runs in the UI thread, which is the only one changing the project structure; the engine

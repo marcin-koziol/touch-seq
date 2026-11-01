@@ -173,7 +173,8 @@ class Sequencer(Panel):
         self.engine.preview(tr, DRUM_KIT[v][1])
 
     def toggle_play(self):
-        self.engine.stop() if self.engine.playing else self.engine.start()
+        e = self.engine
+        e.stop() if (e.playing or e.counting) else e.start()
 
     def toggle_mode(self, mode):
         self.mode = None if self.mode == mode else mode
@@ -318,14 +319,15 @@ class Sequencer(Panel):
 
     def draw_top(self, p, r):
         s, e = self.s, self.engine
-        play, bpm, bar, grid, edit, _, *scenes, save = split(
-            r, [86 * s, 96 * s, 110 * s, 72 * s, 72 * s, 0] + [50 * s] * SCENES + [72 * s], 6 * s)
+        play, bpm, bar, click, count, grid, edit, _, *scenes, save = split(
+            r, [76 * s, 86 * s, 104 * s, 52 * s, 52 * s, 62 * s, 62 * s, 0] + [42 * s] * SCENES + [62 * s], 6 * s)
 
-        self.button(p, play, "", self.toggle_play, on=e.playing, color=PLAY)
+        active = e.playing or e.counting
+        self.button(p, play, "", self.toggle_play, on=e.playing, color=PLAY, pending=e.counting)
         c, k = play.center(), play.height() * 0.22
         p.setPen(Qt.NoPen)
-        p.setBrush(QColor(BG if e.playing else TEXT))
-        if e.playing:
+        p.setBrush(QColor(BG if active else TEXT))
+        if active:
             p.drawRect(QRectF(c.x() - k, c.y() - k, 2 * k, 2 * k))
         else:
             p.drawPolygon(QPolygonF([QPointF(c.x() - k, c.y() - k * 1.2), QPointF(c.x() - k, c.y() + k * 1.2),
@@ -336,15 +338,22 @@ class Sequencer(Panel):
                        on_tap=lambda: setattr(self, "popup", "bpm"))
 
         self.box(p, bar, PANEL)
-        si = e.step_index
-        beat = (si % STEPS_PER_BAR) // 4 if si >= 0 else -1
-        self.text(p, bar.adjusted(10 * s, 0, 0, 0), f"{si // STEPS_PER_BAR + 1 if si >= 0 else '-'}",
-                  TEXT, 20, Qt.AlignLeft | Qt.AlignVCenter, bold=True)
-        cell = (bar.width() - 54 * s) / 4
+        si, counting = e.step_index, e.counting
+        if counting:  # the count-in: beats left, dots walking to the downbeat
+            label, beat = f"-{int(e.count_left)}", (4 - int(e.count_left)) % 4
+        else:
+            label = f"{si // STEPS_PER_BAR + 1}" if si >= 0 else "-"
+            beat = (si % STEPS_PER_BAR) // 4 if si >= 0 else -1
+        self.text(p, bar.adjusted(10 * s, 0, 0, 0), label, TEXT, 20, Qt.AlignLeft | Qt.AlignVCenter, bold=True)
+        cell = (bar.width() - 44 * s) / 4
         for b in range(4):
-            br = QRectF(bar.left() + 44 * s + b * cell, bar.center().y() - 7 * s, cell - 6 * s, 14 * s)
+            br = QRectF(bar.left() + 34 * s + b * cell, bar.center().y() - 7 * s, cell - 6 * s, 14 * s)
             self.box(p, br, PLAY if b == beat else "#222734", None, radius=3)
 
+        self.button(p, click, "CLICK", lambda: e.set_click(not pr.click), on=pr.click, color="#4ade80",
+                    sub="on" if pr.click else "off")
+        self.button(p, count, "COUNT", lambda: setattr(pr, "count_in", (pr.count_in + 1) % 3), on=pr.count_in > 0,
+                    sub="off" if not pr.count_in else f"{pr.count_in} bar" + ("s" if pr.count_in > 1 else ""))
         self.button(p, grid, "GRID", lambda: setattr(self, "view", "grid"), on=self.view == "grid")
         self.button(p, edit, "EDIT", lambda: setattr(self, "view", "edit"), on=self.view == "edit")
 

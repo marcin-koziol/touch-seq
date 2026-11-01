@@ -5,6 +5,7 @@ import time
 
 import rtmidi
 
+from .click import Clicker
 from .constants import PPQN, STEPS_PER_BAR, TICKS_PER_STEP
 from .model import Track
 
@@ -154,6 +155,10 @@ class Engine:
         self.rec = {}  # Track -> replace (bool): the tracks recording live playing into them
         self.rec_fresh = set()  # (lane, step) just played in ahead of the playhead: not replayed, not erased
         self.rec_taken = set()  # (lane, step) recorded since recording started: REC doesn't erase them
+        self.clicker = Clicker()  # the metronome's tick (silent until it is switched on)
+        self.counting = False  # the count-in before the first bar
+        self.count_left = 0  # count-in beats still to play
+        self.count_beat = 0.0  # when the next count-in tick is due
         threading.Thread(target=self.run, daemon=True).start()
 
     # --- thread ---------------------------------------------------------
@@ -164,9 +169,13 @@ class Engine:
                 for key, (off, _) in list(self.sounding.items()):
                     if off <= now:
                         self.note_off(key)
-                if self.playing and now >= self.next_tick:
+                if self.counting:
+                    self.count(now)
+                elif self.playing and now >= self.next_tick:
                     self.tick(now)
-                wake = min([self.next_tick if self.playing else now + 0.005, *(o for o, _ in self.sounding.values())])
+                wake = min([self.next_tick if self.playing else now + 0.005,
+                            self.count_beat if self.counting else now + 0.005,
+                            *(o for o, _ in self.sounding.values())])
             time.sleep(max(0.0, min(wake - time.perf_counter(), 0.005)))
 
     def tick(self, now):
@@ -184,6 +193,8 @@ class Engine:
             self.apply_pending()
         step_len = TICKS_PER_STEP * 60 / (self.project.bpm * PPQN)
         self.step_time, self.step_len = t, step_len
+        if self.project.click and self.step_index % 4 == 0:  # a beat: higher on the first of the bar
+            self.clicker.at(t, accent=self.step_index % STEPS_PER_BAR == 0)
         for tr in self.project.tracks:
             pat = tr.current
             i = self.pos.get(tr, self.step_index) % pat.length  # a track added mid-play joins in step
@@ -232,16 +243,53 @@ class Engine:
         self.pos[tr] = 0
 
     # --- control (UI thread) --------------------------------------------
-    def start(self):
+    def start(self, count=True):
+        """Play. With a count-in set on the project, the bars of clicks come first (and the pattern waits)."""
         with self.lock:
-            self.playing, self.ticks, self.step_index = True, 0, -1
-            self.pos.clear()
-            self.playhead.clear()
-            self.next_tick = time.perf_counter() + 0.005
-            self.out.send_message([0xFA])
+            if self.playing or self.counting:
+                return
+            bars = self.project.count_in if count else 0
+            if not bars:
+                self.begin()
+                return
+            self.counting, self.count_left = True, bars * 4
+            self.count_beat = time.perf_counter() + 0.03  # a moment for the click stream to get going
+            self.clicker.prepare()
+
+    def begin(self):
+        """The pattern itself: called by the count-in when its last beat is done."""
+        self.playing, self.ticks, self.step_index = True, 0, -1
+        self.pos.clear()
+        self.playhead.clear()
+        self.next_tick = time.perf_counter() + 0.005
+        if self.project.click:
+            self.clicker.prepare()
+        self.out.send_message([0xFA])
+
+    def count(self, now):
+        """The count-in: a tick per beat, the first of each bar higher, and the pattern starts on the next."""
+        beat = 60.0 / self.project.bpm
+        while self.count_left > 0 and now >= self.count_beat:
+            self.clicker.at(self.count_beat, accent=int(self.count_left) % 4 == 0)
+            self.count_left -= 1
+            self.count_beat += beat
+        if self.count_left <= 0 and now >= self.count_beat:
+            self.counting = False
+            self.begin()
+
+    def set_click(self, on):
+        """The metronome: on keeps the click stream ready (a silent node between beats), off lets it go."""
+        self.project.click = bool(on)
+        if self.project.click:
+            self.clicker.prepare()
+        elif not self.counting:
+            self.clicker.close()
 
     def stop(self):
         with self.lock:
+            if self.counting:  # still counting in: just give up before anything started
+                self.counting, self.count_left = False, 0
+                return
             self.playing = False
             self.out.send_message([0xFC])
             for key in list(self.sounding):
@@ -325,3 +373,4 @@ class Engine:
     def close(self):
         if self.playing:
             self.stop()
+        self.clicker.close()

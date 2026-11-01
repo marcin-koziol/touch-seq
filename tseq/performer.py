@@ -230,11 +230,32 @@ class Performer(Panel):
                 if not tr.audio and tr.in_port and tr.in_port.lower() in port.lower()
                 and (not tr.in_channel or tr.in_channel == channel)]
 
+    def transport(self, msg):
+        """A keyboard's transport buttons: MIDI Start/Continue/Stop, or the CCs controllers often send instead
+        (115 play, 116 stop). A start counts in when the project has one."""
+        status = msg[0]
+        if status in (0xFA, 0xFB):
+            play = True
+        elif status == 0xFC:
+            play = False
+        elif msg[2] <= 0:  # a button going up: not a command
+            return
+        else:
+            play = msg[1] == 115
+        if play:
+            if not self.engine.playing and not self.engine.counting:
+                self.engine.start()
+        elif self.engine.playing or self.engine.counting:
+            self.engine.stop()
+
     def external(self, port, msg):
         """A message from a MIDI input: every track listening to it plays the note (a keyboard's chords can
         go to more than one track) and records it when armed. Bend, mod wheel and the rest go to the
         instrument, so a keyboard's controller works the track like its own UI would."""
         status = msg[0]
+        if status in (0xFA, 0xFB, 0xFC) or (status == 0xB0 and len(msg) > 2 and msg[1] in (115, 116)):
+            self.transport(msg)  # the keyboard's own play/stop
+            return
         kind, channel = status & 0xF0, (status & 0x0F) + 1
         tracks = self.listening(port, channel)
         if not tracks:

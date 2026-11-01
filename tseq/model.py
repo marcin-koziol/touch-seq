@@ -168,6 +168,8 @@ class Project:
     key: int = 0  # 0 = C
     scale: str = "chromatic"
     buses: list = field(default_factory=list)  # effects buses between the tracks and the master
+    click: bool = False  # the metronome: a tick on every beat while playing
+    count_in: int = 0  # bars of clicks before the pattern starts (0-2)
 
     def in_scale(self, note):
         return (note - self.key) % 12 in SCALES[self.scale]
@@ -192,7 +194,9 @@ def dump_project(pr):
          "patterns": [pattern(p) for p in t.patterns]}
         for t in pr.tracks], "controls": [astuple(c) for c in pr.controls],
         "master": dump_strip(pr.master),
-        "buses": [{"number": b.number, "strip": dump_strip(b.strip)} for b in pr.buses]}, separators=(",", ":"))
+        "buses": [{"number": b.number, "strip": dump_strip(b.strip)} for b in pr.buses],
+        **({"click": True} if pr.click else {}), **({"count_in": pr.count_in} if pr.count_in else {})},
+        separators=(",", ":"))
 
 
 def new_project():
@@ -246,7 +250,8 @@ def load_project(path):
             tr.strip.legacy = f"s{n}"
     master = load_strip(d["master"]) if "master" in d else Strip()
     buses = [Bus(b.get("number", n), load_strip(b["strip"])) for n, b in enumerate(d.get("buses", []), 1)]
-    return Project(d["bpm"], tracks, controls, master, d.get("key", 0), d.get("scale", "chromatic"), buses)
+    return Project(d["bpm"], tracks, controls, master, d.get("key", 0), d.get("scale", "chromatic"), buses,
+                   d.get("click", False), d.get("count_in", 0))
 
 
 def save_text(path, text):

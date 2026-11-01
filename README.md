@@ -23,6 +23,9 @@ screen; everything else keeps running.
   the kind, and for external the MIDI output it sends to, for audio the interface input it takes)
 - 16 patterns per track, 1–64 steps (polymetric tracks are fine), 8 **scenes**
 - pattern and scene changes are **quantized to the bar**: the current pattern plays to the end of the bar
+- the transport row has the **metronome** (**CLICK**) and a **COUNT**-in of 0/1/2 bars: the count-in plays its
+  clicks first and the pattern starts on the downbeat after them — and a keyboard's own play/stop works too
+  (MIDI Start/Continue/Stop, or CC 115/116), count-in included
 - **GRID** shows all tracks; **EDIT** opens the selected one:
   - melody: a **polyphonic piano roll** with a velocity/gate lane; notes can be stretched over several steps;
     rows outside the project's scale are dimmed
@@ -97,6 +100,8 @@ Plays the track selected in the sequencer:
 - external MIDI tracks: like melody tracks (chords, keyboard), straight out to their output port
 - **REC** (replace, like tape) or **OVR** (overdub) records what you play into the pattern, quantized to
   1/16, 1/8 or 1/4 — fingers on the pads and notes from a track's MIDI keyboard alike
+- **CLICK** and **COUNT** in the sequencer's transport row: a tick on every beat (higher on the bar's first)
+  while playing, and 0/1/2 bars of them before the pattern starts, so you can come in on time
 - with **XYFX** on the master, a **MASTER** row appears in the sequencer; selecting it turns this module
   into an **XY pad**: beat repeat left–right (straight on the right half, triplets or reverse on the left),
   low-pass down / high-pass up, the centre is "dry"
@@ -176,6 +181,7 @@ device is unplugged its notes are simply not sent, and they come back when it re
 | module rail | **⤢ / ⤡** | module full screen and back |
 | sequencer | tap **BPM** | tempo popup: drag the number, ±1/5/10, TAP tempo |
 | sequencer | tap a track header twice | opens it in EDIT |
+| sequencer | **CLICK** / **COUNT** | the metronome, and 0/1/2 bars of count-in before the pattern |
 | sequencer | drag a **pattern slot** onto another | copies the pattern there and switches to it (at the bar) |
 | sequencer | drag along a row | paints steps on/off |
 | piano roll | tap empty / tap a note | place / remove; drag a note sideways = length, up/down = pitch |
@@ -201,6 +207,9 @@ Keys (with a keyboard attached): **Space** play/stop, **Esc** closes a dialog/po
 | `audio_out` | `default` (follow PipeWire's default output) or a sink node name — easier set in SETTINGS → AUDIO |
 | `patch` | audio links made in PATCHBAY, as `[[out port, in port], …]` — this machine's cables |
 | `buffer` | audio buffer size in samples for the whole graph while the app runs, `0` = the system's own |
+
+The metronome's click is synthesized in the app and played by `pw-cat` (or `pacat` / `aplay`), so it needs no
+audio engine of its own: it is one more small stream in PipeWire, and only exists while **CLICK** is on.
 
 `buffer` is applied with `clock.force-quantum`, so it wins over a `min-quantum = max-quantum` pin in
 `pipewire.conf.d` (such a pin is why a size may look stuck in the settings); the machine's own size is put
