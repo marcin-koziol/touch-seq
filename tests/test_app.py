@@ -801,3 +801,33 @@ assert rkx.dialog and rkx.dialog[0] == "PATCHBAY", rkx.dialog
 rkx.grab().save(str(OUT / "rack_patchbay.png"))
 rkx.close_dialog()
 print("patchbay in the rack OK")
+# --- settings → audio: the audio graph's buffer size (a machine setting, like the output) ---
+asked, kept = [], []
+real_set_quantum = ts.plugins.set_quantum
+ts.plugins.set_quantum = asked.append  # never touch the real graph from the tests
+class FakeHost:
+    host, message, audio_out = object(), "", "default"
+    def __init__(self):
+        self.buffers = []
+    def set_buffer(self, size):
+        self.buffers.append(size)
+    def set_output(self, name):
+        self.audio_out = name
+    def xyfx(self):
+        return None
+    def save_states(self):
+        pass
+fh = FakeHost()
+stt = ts.Settings(ts.Project(), fh)
+stt.tab = "audio"
+vs = View(stt); vs.grab()  # renders: buffer sizes above, the outputs below
+assert len(stt.hits) > 7, "the sizes are buttons"
+stt.set_buffer(512)
+assert fh.buffers == [512], fh.buffers                       # the host owns the setting ...
+assert len(stt.quantum) == 5 and not asked, "... it is the host that talks to PipeWire"
+ht = type("Host", (), {"buffer": 0, "remember": lambda self, k, v: kept.append((k, v))})()
+ts.HostPanel.set_buffer(ht, 256)                              # ... and remembers it for this machine
+assert ht.buffer == 256 and asked == [256] and kept == [("buffer", 256)], (asked, kept)
+assert ts.DEFAULT_CONFIG["buffer"] == 0
+ts.plugins.set_quantum = real_set_quantum
+print("audio buffer OK")

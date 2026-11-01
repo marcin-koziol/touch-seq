@@ -104,6 +104,18 @@ class Settings(Panel):
         self.tab = "project"
         self.outputs = plugins.sinks()
         self.scroll = 0.0
+        self.quantum = plugins.quantum()  # (forced, default, min, max, rate) of the audio graph
+        self.age = 0.0
+
+    def tick(self):
+        super().tick()
+        if self.tab != "audio" or time.monotonic() - self.age < 1.0:
+            return
+        self.age = time.monotonic()
+        quantum = plugins.quantum()  # another program may have changed the size meanwhile
+        if quantum != self.quantum:
+            self.quantum = quantum
+            self.invalidate()
 
     def draw(self, p):
         s, g = self.s, 20 * self.s
@@ -136,13 +148,52 @@ class Settings(Panel):
         self.text(p, QRectF(r.left(), r.bottom() - 36 * s, r.width(), 36 * s), f"{pr.key_name}:   {notes}", DIM, 18,
                   Qt.AlignLeft | Qt.AlignVCenter)
 
+    def draw_buffer(self, p, r):
+        """The audio graph's buffer size: what it runs at now, and the sizes to force it to (0 = system).
+        Returns the y where the rest of the tab starts."""
+        s = self.s
+        force, default, lo, hi, rate = self.quantum
+        now = force or default
+        title = QRectF(r.left(), r.top(), r.width(), 34 * s)
+        self.title(p, title, "Buffer size")
+        if now:
+            self.text(p, title, f"now: {now} samples · {now / (rate or 48000) * 1000:.1f} ms", DIM, 16,
+                      Qt.AlignRight | Qt.AlignVCenter)
+        y = title.bottom() + 6 * s
+        sizes = (0, 64, 128, 256, 512, 1024, 2048)
+        for size, b in zip(sizes, split(QRectF(r.left(), y, r.width(), 56 * s), [0] * len(sizes), 8 * s)):
+            self.button(p, b, "SYSTEM" if size == 0 else str(size), lambda size=size: self.set_buffer(size),
+                        on=size == force or (not force and size == 0))
+        y += 68 * s
+        if force:
+            note = f"forced for the whole audio graph while set (the system's own default is {default})"
+        elif lo and lo == hi:
+            note = (f"the system's default {default}, pinned by min-quantum = max-quantum; picking a size here "
+                    f"overrides it while set")
+        elif lo:
+            note = f"the system's default; it allows {lo} to {hi} samples"
+        else:
+            note = "PipeWire is not answering, so the sizes are set through pw-metadata"
+        self.text(p, QRectF(r.left(), y, r.width(), 24 * s), note, DIM, 14, Qt.AlignLeft | Qt.AlignVCenter, elide=True)
+        return y + 34 * s
+
+    def set_buffer(self, size):
+        """The plugin host saves the choice and applies it to the graph; on its own, straight to PipeWire."""
+        if self.host and hasattr(self.host, "set_buffer"):
+            self.host.set_buffer(size)
+        else:
+            plugins.set_quantum(size)
+        self.quantum = plugins.quantum()
+
     def draw_audio(self, p, r):
         s, host = self.s, self.host
+        y = self.draw_buffer(p, r)
         if not host or not host.host:
-            self.text(p, r, host.message if host else "plugin host unavailable", WARN, 18)
+            self.text(p, QRectF(r.left(), y, r.width(), 34 * s), host.message if host else "plugin host unavailable",
+                      WARN, 18)
             return
-        self.title(p, QRectF(r.left(), r.top(), r.width(), 34 * s), "Plugin output")
-        listing = QRectF(r.left(), r.top() + 44 * s, r.width(), r.height() - 44 * s)
+        self.title(p, QRectF(r.left(), y, r.width(), 34 * s), "Plugin output")
+        listing = QRectF(r.left(), y + 44 * s, r.width(), r.bottom() - y - 44 * s)
         names = dict(self.outputs)
         current = plugins.default_sink()
         rows = [("default", "SYSTEM DEFAULT", f"follows the system  ·  now: {names.get(current, current or '-')}")]

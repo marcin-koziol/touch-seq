@@ -38,7 +38,7 @@ class HostPanel(Panel):
     LETTERS = "#ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
     def __init__(self, project, router, state_dir, cache_path, audio_out="default", remember=None, name="Touch-Seq",
-                 patch=None):
+                 patch=None, buffer=0):
         super().__init__()
         self.project, self.router, self.state_dir, self.audio_out, self.name = project, router, state_dir, audio_out, name
         self.remember = remember  # (key, value) -> None: keep a machine setting (audio output, patchbay links)
@@ -59,6 +59,9 @@ class HostPanel(Panel):
         self.wiring = plugins.Wiring()
         self.patch = [tuple(p) for p in (patch or [])]  # patchbay links: (out, in), kept with the machine
         self.wiring.replace("patchbay", self.patch)  # from the last time; heal keeps them alive
+        self.buffer = buffer  # the audio graph's buffer size in samples this machine was left on (0: system)
+        if self.buffer:
+            plugins.set_quantum(self.buffer)  # before the engine starts, so the plugins see that size
         try:
             self.host = plugins.Host(name)
         except (RuntimeError, OSError, ImportError) as e:
@@ -99,6 +102,14 @@ class HostPanel(Panel):
         self.rewire()
         if self.remember:
             self.remember("audio_out", name)
+
+    # --- audio graph ----------------------------------------------------------
+    def set_buffer(self, size):
+        """The audio graph's buffer size in samples, 0 for the system's default. System-wide while set."""
+        self.buffer = size
+        plugins.set_quantum(size)
+        if self.remember:
+            self.remember("buffer", size)
 
     # --- patchbay -------------------------------------------------------------
     def patch_links(self):
@@ -245,6 +256,8 @@ class HostPanel(Panel):
             self.save_states()
             self.host.close()
             self.host, self.message = None, "plugin host closed"  # UI timers may still tick
+        if self.buffer:
+            plugins.set_quantum(0)  # the machine goes back to its own size; ours comes back on the next start
 
     def tick(self):
         super().tick()

@@ -258,6 +258,47 @@ class Host:
 
 
 # --- wiring ------------------------------------------------------------------
+def settings_metadata():
+    """PipeWire's "settings" metadata as {key: value string}, from one `pw-metadata` ({} when it doesn't
+    answer, e.g. no PipeWire)."""
+    try:
+        out = subprocess.run(["pw-metadata", "-n", "settings", "0"], capture_output=True, text=True,
+                             timeout=5).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return {}
+    values = {}
+    for line in out.splitlines():
+        if "key:'" in line and "value:'" in line:
+            key = line.split("key:'", 1)[1].split("'", 1)[0]
+            values[key] = line.split("value:'", 1)[1].split("'", 1)[0]
+    return values
+
+
+def quantum():
+    """PipeWire's audio buffer size in samples: (forced, system default, min, max, rate), zeros when it does
+    not answer. Nothing forced means the default is what the whole graph runs at."""
+    values = settings_metadata()
+
+    def number(key):
+        try:
+            return int(values.get(key, "0"))
+        except ValueError:
+            return 0
+
+    return (number("clock.force-quantum"), number("clock.quantum"), number("clock.min-quantum"),
+            number("clock.max-quantum"), number("clock.rate"))
+
+
+def set_quantum(size):
+    """Ask PipeWire for a buffer size in samples (0 puts the system's default back). It applies to the whole
+    audio graph while it is set: that is how a machine's latency is chosen, not just this app's."""
+    try:
+        subprocess.run(["pw-metadata", "-n", "settings", "0", "clock.force-quantum", str(int(size))],
+                       capture_output=True, timeout=5)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+
+
 def default_sink():
     """PipeWire's default audio output node name, or None."""
     try:

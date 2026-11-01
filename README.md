@@ -81,9 +81,12 @@ Optional 14-bit (MSB/LSB pairs) and bipolar faders.
 ### Projects and settings
 
 FILE lists projects, newest first (open, NEW, DUPLICATE, hold DELETE); switching restarts the app with the
-other project. SETTINGS sets the project's key and scale (chord pads, piano roll) and where plugins play.
+other project. SETTINGS sets the project's key and scale (chord pads, piano roll), where plugins play, and the
+audio graph's **buffer size** (SYSTEM or 64 … 2048 samples): the whole graph follows — plugins included — and
+the machine's own size comes back when the app closes.
 
 ![Settings](docs/screenshots/settings.png)
+![Audio settings: the output and the buffer size](docs/screenshots/settings-audio.png)
 
 ### PATCHBAY — audio routing
 
@@ -155,6 +158,11 @@ Keys (with a keyboard attached): **Space** play/stop, **Esc** closes a dialog/po
 | `projects` | projects folder (default `~/.local/share/touch-seq/projects`) |
 | `audio_out` | `default` (follow PipeWire's default output) or a sink node name — easier set in SETTINGS → AUDIO |
 | `patch` | audio links made in PATCHBAY, as `[[out port, in port], …]` — this machine's cables |
+| `buffer` | audio buffer size in samples for the whole graph while the app runs, `0` = the system's own |
+
+`buffer` is applied with `clock.force-quantum`, so it wins over a `min-quantum = max-quantum` pin in
+`pipewire.conf.d` (such a pin is why a size may look stuck in the settings); the machine's own size is put
+back when the app closes.
 
 Projects save themselves (every couple of seconds while editing, and on exit); plugin states are saved next
 to each project in `<name>.plugins/`.

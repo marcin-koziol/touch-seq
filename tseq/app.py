@@ -30,6 +30,7 @@ DEFAULT_CONFIG = {
     "projects": str(DATA_HOME / "projects"),  # relative paths are relative to the config file
     "audio_out": "default",  # plugin audio: "default" (follow PipeWire's default) or a sink's node name
     "patch": [],  # patchbay links: [[out port, in port], ...] (this machine's cables, not the project's)
+    "buffer": 0,  # audio buffer size in samples for the whole graph, 0 = the system's default
 }
 
 
@@ -90,7 +91,7 @@ def main(version):
         engine = Engine(project, router)
         host = HostPanel(project, router, path.with_suffix(".plugins"),
                          Path.home() / ".cache" / "touch-seq" / "plugins.json", cfg.get("audio_out", "default"),
-                         remember, patch=cfg.get("patch", []))
+                         remember, patch=cfg.get("patch", []), buffer=cfg.get("buffer", 0))
         racks.append(Rack(project, engine, path, host))
         show(racks[-1])
 
