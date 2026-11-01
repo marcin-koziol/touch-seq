@@ -210,6 +210,13 @@ class Sequencer(Panel):
     def add_track(self, kind, value=""):
         self.sel = self.engine.add_track(kind, value)
         self.scroll = 1e9  # clamped on paint: shows the new row
+        self.reroute()  # a new audio track's input is wired right away, not on the next edit
+
+    def set_mute(self, tr):
+        """Muting an audio track is cutting its input cable; for the others the host applies the level again
+        (a rewire does both, and changes nothing when the routing is already right)."""
+        tr.mute = not tr.mute
+        self.reroute()
 
     def set_pan(self, tr, pan):
         """Where a mono input goes: left, both (center) or right."""
@@ -482,7 +489,7 @@ class Sequencer(Panel):
         self.region(head.intersected(clip), lambda pos, tr=tr: ScrollOrTap(
             pos, lambda: self.scroll, lambda v: setattr(self, "scroll", v), lambda: self.select(tr)))
         mute = QRectF(head.right() - 50 * s, head.top() + 6 * s, 44 * s, head.height() - 12 * s)
-        self.button(p, mute, "M", lambda: setattr(tr, "mute", not tr.mute), on=tr.mute, color=WARN)
+        self.button(p, mute, "M", lambda tr=tr: self.set_mute(tr), on=tr.mute, color=WARN)
         self.hits[-1] = (mute.intersected(clip), self.hits[-1][1])
 
     @staticmethod

@@ -255,8 +255,9 @@ class StubHost(ts.Panel):
         return {}
     def internal_links(self):
         return set()
+    rewired = 0
     def rewire(self):
-        pass
+        type(self).rewired += 1
     def draw(self, p):
         p.fillRect(self.rect(), ts.QColor(ts.BG))
     def save_states(self):
@@ -766,6 +767,24 @@ new = prx.tracks[-1]
 assert new.kind == "external" and rkx.seq.sel is new and len(prx.tracks) == 2, (new.kind, new.port)
 assert (OUT / "ext_rack.json").exists() and f'"port":{ts.json.dumps(new.port)}' in (OUT / "ext_rack.json").read_text()
 rkx.grab().save(str(OUT / "rack_external.png"))  # the external header paints (and no slot is offered for it)
+# a new audio track is wired as soon as it is made, not on the next EDIT round trip
+before = StubHost.rewired
+rkx.press(10, sscr.topLeft() + rkx.seq.hits[-1][0].center())
+rkx.grab()
+dlg2 = rkx.dialog[2]; scr2 = rkx.screens[dlg2]
+rkx.press(11, scr2.topLeft() + dlg2.hits[3][0].center())  # the AUDIO card
+assert dlg2.picking == "audio", dlg2.picking
+rkx.grab()
+first = next(r for r, f in dlg2.hits if r.top() > 60).center()
+rkx.press(12, scr2.topLeft() + first); rkx.release(12, scr2.topLeft() + first)
+audio = prx.tracks[-1]
+assert audio.kind == "audio" and rkx.dialog is None and not audio.mute
+assert audio.source == (dlg2.ports[0][0] if dlg2.ports and dlg2.ports[0] else ""), audio.source
+assert StubHost.rewired > before, "the input is patched right away"
+count = StubHost.rewired
+rkx.seq.set_mute(audio)  # its mute is the input cable, so it has to rewire too
+assert audio.mute and StubHost.rewired == count + 1
+print("audio track added and wired OK")
 print("external track OK")
 # --- patchbay: the audio graph by hand (an interface's input into its own output, say) ---
 patch = [("/app:out", "/sink:1")]

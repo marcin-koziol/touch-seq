@@ -443,6 +443,9 @@ class HostPanel(Panel):
         if mute is not None:
             strip.mute = mute
         self.apply_levels()
+        tr = self.track_of(strip)
+        if mute is not None and tr is not None and tr.audio:
+            self.rewire()  # an audio track's mute is its input cable, not a level
 
     # --- drawing ------------------------------------------------------------
     def draw(self, p):
