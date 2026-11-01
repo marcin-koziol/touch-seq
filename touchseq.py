@@ -27,7 +27,7 @@ from PySide6.QtCore import QPointF, QRectF, Qt, QTimer
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QLinearGradient, QPainter, QPen, QPolygonF, QRadialGradient
 from PySide6.QtWidgets import QApplication, QWidget
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 MAX_STEPS = 64
 PATTERNS = 16
