@@ -135,6 +135,7 @@ class Sequencer(Panel):
         self.scroll = 0.0
         self.master_fx = lambda: False  # the rack: is XYFX on the master (adds a MASTER row)
         self.master_focus = False  # the MASTER row is selected (PLAY-12 shows the XY pad)
+        self.new_track = lambda: None  # the rack: the "+" dialog (drum, melody or external MIDI)
 
     # --- actions --------------------------------------------------------
     def set_step(self, tr, s, on):
@@ -204,8 +205,8 @@ class Sequencer(Panel):
             self.view = "edit"
         self.sel, self.master_focus = tr, False
 
-    def add_track(self, kind):
-        self.sel = self.engine.add_track(kind)
+    def add_track(self, kind, port=""):
+        self.sel = self.engine.add_track(kind, port)
         self.scroll = 1e9  # clamped on paint: shows the new row
 
     def delete_track(self):
@@ -399,10 +400,9 @@ class Sequencer(Panel):
             if tr == "master":
                 self.draw_master_row(p, head, r, QRectF(head.right() + 10 * s, y, r.right() - head.right() - 18 * s, rh - g))
                 continue
-            if tr is None:
-                for rect, kind, label in zip(split(head, [0, 0], g), ("melody", "drum"), ("+ MELODY", "+ DRUM")):
-                    self.button(p, rect, label, lambda kind=kind: self.add_track(kind))
-                    self.hits[-1] = (rect.intersected(r), self.hits[-1][1])
+            if tr is None:  # the one "+" that adds a track: the rack opens the choice of kind (and MIDI port)
+                self.button(p, head, "+", self.new_track, sub="new track")
+                self.hits[-1] = (head.intersected(r), self.hits[-1][1])
                 continue
             lane = QRectF(head.right() + 10 * s, y, r.right() - head.right() - 18 * s, rh - g)
             self.draw_header(p, head, r, tr)
@@ -434,6 +434,9 @@ class Sequencer(Panel):
         self.text(p, info, f"CH{tr.channel}", DIM, 12, Qt.AlignRight | Qt.AlignTop)
         if tr.drum:
             self.text(p, info, DRUM_KIT[tr.voice][0], color, 12, Qt.AlignRight | Qt.AlignBottom, bold=True)
+        elif tr.external:  # where its notes go, instead of the drum voice
+            self.text(p, info, tr.port or "no MIDI out", TEXT if tr.port else WARN, 12,
+                      Qt.AlignRight | Qt.AlignBottom, bold=True, elide=True)
         nxt = e.next_pattern(tr)
         pat = f"P{tr.pattern + 1}" + (f"→{nxt + 1}" if nxt is not None and nxt != tr.pattern else "")
         self.text(p, info, pat, "#facc15" if nxt not in (None, tr.pattern) else DIM, 12, Qt.AlignLeft | Qt.AlignBottom)

@@ -22,20 +22,104 @@ def open_midi(port):
     return out
 
 
+def midi_outputs():
+    """Names of the system's MIDI outputs: what an external track can send to (empty when this machine has no
+    MIDI API up, e.g. no ALSA sequencer)."""
+    try:
+        probe = rtmidi.MidiOut()
+    except (rtmidi.RtMidiError, OSError):
+        return []
+    try:
+        return list(probe.get_ports())
+    finally:
+        del probe
+
+
+def open_output(name):
+    """Opens the output whose name contains `name` (an external track's device), or None when it is not there
+    (unplugged, or not plugged in yet)."""
+    try:
+        out = rtmidi.MidiOut()
+    except (rtmidi.RtMidiError, OSError):
+        return None
+    matches = [i for i, port in enumerate(out.get_ports()) if name.lower() in port.lower()]
+    if not matches:
+        del out
+        return None
+    try:
+        out.open_port(matches[0])
+    except rtmidi.RtMidiError:
+        del out
+        return None
+    return out
+
+
 class MidiRouter:
     """The engine's MIDI output: everything goes to the main port; channel messages also go to the plugin
     host: a track's notes to that track's instrument, messages without a track (CC, pitch bend from the
-    faders) to the instruments of the tracks on that channel."""
+    faders) to the instruments of the tracks on that channel.
 
-    def __init__(self, main):
-        self.main = main
+    An external track is different: its channel messages go out to the hardware on the track's own MIDI
+    output and nowhere else (it has no plugins, so it must not reach the main port's listeners twice)."""
+
+    RETRY = 2.0  # s between looks for an external port that is not there yet
+
+    def __init__(self, main, opener=open_output):
+        self.main, self.opener = main, opener
+        self.lock = threading.RLock()  # the UI opens ports too: one opener at a time per device
         self.taps = {}  # Track -> MIDI out port feeding the track's instrument
+        self.devices = {}  # port name -> MIDI out of an external track, or None while the device is away
+        self.looked = {}  # port name -> when it was last looked for
+        self.externals = []  # tracks that send to a device (refreshed by the UI clock)
+
+    # --- external tracks ------------------------------------------------------
+    def device(self, name):
+        """The MIDI out for an external track's port name, opening it when it appears (throttled: scanning
+        ports is not something to do per note)."""
+        if not name:
+            return None
+        with self.lock:
+            port = self.devices.get(name)
+            if port:
+                return port
+            now = time.monotonic()
+            if now - self.looked.get(name, 0.0) >= self.RETRY:
+                self.looked[name] = now
+                port = self.devices[name] = self.opener(name)
+            return port
+
+    def is_open(self, name):
+        return bool(self.devices.get(name))
+
+    def refresh(self, tracks):
+        """Look for the external tracks' ports again (called on a clock: devices come and go) and let go of
+        ports no track uses any more."""
+        with self.lock:
+            self.externals = [tr for tr in tracks if tr.external and tr.port]
+            used = set()
+            for tr in self.externals:
+                used.add(tr.port)
+                self.device(tr.port)
+            for name in [n for n in self.devices if n not in used]:
+                port = self.devices.pop(name)
+                self.looked.pop(name, None)
+                if port and hasattr(port, "close"):
+                    port.close()
 
     def send_message(self, msg, track=None):
-        self.main.send_message(msg)
-        if msg[0] >= 0xF0:
+        if msg[0] >= 0xF0:  # clock, start/stop: the main port and every external device
+            self.main.send_message(msg)
+            for port in list(self.devices.values()):
+                if port:
+                    port.send_message(msg)
             return
         if track is not None:
+            if track.external:
+                port = self.device(track.port)
+                if port:
+                    port.send_message(msg)
+                return
+            self.main.send_message(msg)
             port = self.taps.get(track)
             if port:
                 port.send_message(msg)
@@ -43,6 +127,10 @@ class MidiRouter:
         channel = (msg[0] & 0x0F) + 1
         for tr, port in list(self.taps.items()):
             if tr.channel == channel:
+                port.send_message(msg)
+        for tr in self.externals:  # hardware on that channel hears faders without a track too
+            port = self.device(tr.port)
+            if port and tr.channel == channel:
                 port.send_message(msg)
 
 
@@ -170,6 +258,12 @@ class Engine:
                 return None
             return self.playhead[tr] + (time.perf_counter() - self.step_time) / self.step_len
 
+    def refresh_ports(self):
+        """Reopen the external tracks' MIDI outputs (devices come and go); called from the UI clock."""
+        refresh = getattr(self.out, "refresh", None)  # a bare MIDI port has nothing to refresh
+        if refresh:
+            refresh(self.project.tracks)
+
     def live(self, tr, note, vel):
         """Note on (vel > 0) / off from a live pad, outside the sequencer's own note bookkeeping."""
         with self.lock:
@@ -212,10 +306,10 @@ class Engine:
             return tr.scenes[self.pending_scene]
         return None
 
-    def add_track(self, kind):
+    def add_track(self, kind, port=""):
         with self.lock:
             number = max((t.number for t in self.project.tracks), default=0) + 1
-            tr = Track(kind, 10 if kind == "drum" else min(len(self.project.tracks) + 1, 16), number)
+            tr = Track(kind, 10 if kind == "drum" else min(len(self.project.tracks) + 1, 16), number, port=port)
             self.project.tracks.append(tr)
             return tr
 

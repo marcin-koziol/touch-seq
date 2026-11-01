@@ -662,3 +662,94 @@ rkp.press(70, scr.topLeft() + QPointF(c3.center().x(), c3.bottom() - 5)); rkp.re
 print("C3 near the bottom edge: velocity", outv.log[0][1][2]); assert outv.log[0][1][2] > 120
 pk.layout = "chords"; pk.engine = ep
 print("key velocity OK")
+# --- external MIDI track: no plugin chain, its notes leave through its own output ---
+class MidiDev:
+    def __init__(self):
+        self.log, self.closed = [], False
+
+    def send_message(self, m):
+        self.log.append(list(m))
+
+    def close(self):
+        self.closed = True
+
+dev = MidiDev()
+asked = []
+def device(name):
+    asked.append(name)
+    return dev if name == "Synth MIDI 1" else None
+
+main_out = FakeOut()
+router = ts.MidiRouter(main_out, opener=device)
+router.RETRY = 0.0  # look for the device on every call, not every 2 s
+pre = ts.Project(tracks=[ts.Track("melody", 1, 1), ts.Track("external", 5, 2, port="Synth MIDI 1")])
+mel, ext = pre.tracks
+ee = ts.Engine(pre, router)
+ee.refresh_ports()
+assert asked == ["Synth MIDI 1"] and router.is_open("Synth MIDI 1")
+ee.live(ext, 60, 100)  # a pad on the external track: out to the device, and nowhere else
+assert dev.log[-1] == [0x94, 60, 100] and not main_out.log, (dev.log, main_out.log)
+ee.live(mel, 62, 100)  # a plugin track: the main port (and its instrument tap), not the device
+assert main_out.log[-1][1] == [0x90, 62, 100] and dev.log[-1] == [0x94, 60, 100]
+ee.send([0xFA]); assert dev.log[-1] == [0xFA] and main_out.log[-1][1] == [0xFA], "transport follows"
+ee.send([0xB4, 74, 99]); assert dev.log[-1] == [0xB4, 74, 99], "track-less messages reach CH5 too"
+ext.port = "Unplugged"  # the device went away: notes are lost, never sent to the main port instead
+ee.refresh_ports(); n = len(main_out.log)
+ee.live(ext, 61, 100)
+assert not router.is_open("Unplugged") and len(main_out.log) == n
+ext.port = "Synth MIDI 1"  # and it comes back
+ee.refresh_ports(); ee.live(ext, 64, 100); assert dev.log[-1] == [0x94, 64, 100]
+ext.port = ""  # a track with no output lets go of the port
+ee.refresh_ports(); assert dev.closed, "an unused port is closed"
+# no chain: the host panel lists plugin tracks and the master only (it reads nothing else, so no Carla here)
+hostlike = type("Host", (), {"project": pre})()
+assert ext.strip not in ts.HostPanel.strips(hostlike) and mel.strip in ts.HostPanel.strips(hostlike)
+# the port is saved with the project (and only there)
+ts.save_text(OUT / "ext.json", ts.dump_project(pre))
+back = ts.load_project(OUT / "ext.json")
+assert back.tracks[1].kind == "external" and back.tracks[1].port == "" and back.tracks[0].port == ""
+ext.port = "Synth MIDI 1"
+ts.save_text(OUT / "ext.json", ts.dump_project(pre))
+assert ts.load_project(OUT / "ext.json").tracks[1].port == "Synth MIDI 1"
+print("external routing OK")
+# the "+" dialog: drum and melody at once, external asks for the output first
+picked = []
+nt = ts.NewTrack(lambda kind, port="": picked.append((kind, port)), list_ports=lambda: ["Synth MIDI 1", "DIN Out"])
+vn = View(nt); vn.grab().save(str(OUT / "new_track.png"))
+nt.press(1, QPointF(100, 100)); assert picked == [("drum", "")], picked  # the DRUM card
+nt.press(1, QPointF(500, 100)); assert picked == [("drum", ""), ("melody", "")], picked  # the MELODY card
+vn.grab(); nt.press(2, QPointF(850, 100))  # EXTERNAL: shows the outputs instead
+assert nt.picking and len(picked) == 2
+vn.grab().save(str(OUT / "new_track_ports.png"))
+row = next(r for r, f in nt.hits if r.top() > 70).center()  # hits: BACK, RESCAN, then a row per output
+nt.press(3, row); nt.release(3, row)
+assert picked[-1] == ("external", "Synth MIDI 1"), picked
+nt.press(4, QPointF(850, 100))  # ... and the last row adds the track without a port
+vn.grab(); row = [r for r, f in nt.hits if r.top() > 70][-1].center()
+nt.press(5, row); nt.release(5, row); assert picked[-1] == ("external", ""), picked
+mp = ts.MidiPorts(lambda name: picked.append(name), current="Synth MIDI 1", list_ports=lambda: ["Synth MIDI 1"])
+vm = View(mp); vm.grab().save(str(OUT / "midi_ports.png"))
+row = next(r for r, f in mp.hits if r.top() > 70).center()
+mp.press(6, row); mp.release(6, row); assert picked[-1] == "Synth MIDI 1", picked
+print("new track dialog OK")
+# the rack: "+" opens it, and the chosen track is created, selected and saved
+prx = ts.Project(tracks=[ts.Track("melody", 1, 1)])
+rkx = ts.Rack(prx, ts.Engine(prx, ts.MidiRouter(FakeOut(), opener=lambda name: None)), OUT / "ext_rack.json", StubHost())
+rkx.resize(1920, 1080); rkx.grab()
+sscr = rkx.screens[rkx.seq]
+rkx.press(1, sscr.topLeft() + rkx.seq.hits[-1][0].center())  # the "+" row is drawn last
+assert rkx.dialog and rkx.dialog[0] == "NEW TRACK", rkx.dialog
+rkx.grab()
+dlg = rkx.dialog[2]; dscr = rkx.screens[dlg]
+rkx.press(2, dscr.topLeft() + dlg.hits[2][0].center())  # the EXTERNAL card
+assert dlg.picking, "external asks for the output"
+rkx.grab()
+dlg_s = dlg.s
+row = next(r for r, f in dlg.hits if r.top() > 60 * dlg_s).center()
+rkx.press(3, dscr.topLeft() + row); rkx.release(3, dscr.topLeft() + row)
+assert rkx.dialog is None, "the dialog closes once the track exists"
+new = prx.tracks[-1]
+assert new.kind == "external" and rkx.seq.sel is new and len(prx.tracks) == 2, (new.kind, new.port)
+assert (OUT / "ext_rack.json").exists() and f'"port":{ts.json.dumps(new.port)}' in (OUT / "ext_rack.json").read_text()
+rkx.grab().save(str(OUT / "rack_external.png"))  # the external header paints (and no slot is offered for it)
+print("external track OK")

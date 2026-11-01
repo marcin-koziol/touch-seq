@@ -17,24 +17,28 @@ The window is a 2×2 rack under a toolbar (**FILE**: projects, **SETTINGS**: key
 
 ### SEQ-64 — step sequencer
 
-- any number of **melody** and **drum** tracks, each on its own MIDI channel
+- any number of **melody**, **drum** and **external MIDI** tracks, each on its own MIDI channel; **+** adds
+  one (the dialog picks the kind, and for external the MIDI output it sends to)
 - 16 patterns per track, 1–64 steps (polymetric tracks are fine), 8 **scenes**
 - pattern and scene changes are **quantized to the bar**: the current pattern plays to the end of the bar
 - **GRID** shows all tracks; **EDIT** opens the selected one:
   - melody: a **polyphonic piano roll** with a velocity/gate lane; notes can be stretched over several steps;
     rows outside the project's scale are dimmed
   - drums: a voice × step matrix, voices in fixed colors (kick red, snare orange, hats yellow, …)
+  - external MIDI: the same piano roll, but the track has **no plugins**: its notes, velocity, gate and the
+    faders go straight out to the chosen hardware output (and nowhere else), and its header shows the port
 
 ![Piano roll](docs/screenshots/piano-roll.png)
 ![Drum editor](docs/screenshots/drums.png)
 
 ### HOST-4 — plugins (Carla)
 
-- every track has a chain: **instrument → 2 effects → level/mute**; all tracks go through the **MASTER**
-  (3 effects, e.g. a global reverb) to the audio output
+- every plugin track has a chain: **instrument → 2 effects → level/mute**; all tracks go through the
+  **MASTER** (3 effects, e.g. a global reverb) to the audio output. **External MIDI** tracks have no chain at
+  all — the panel shows their output port instead, with **MIDI OUT** to change it
 - **TRACK** view: the chain of the track selected in the sequencer and the plugin's parameters as knobs,
   colored by what they are (filter, envelope, LFO, oscillator, level, effect)
-- **MIXER** view: a column per track plus the master
+- **MIXER** view: a column per plugin track plus the master
 - a touch-friendly plugin browser (format filter, A–Z strip, **ADD** buttons so scrolling never adds),
   plugin GUIs open in their own windows (**UI**)
 - the audio output follows PipeWire's default (headphones ↔ speakers) or is pinned in SETTINGS → AUDIO
@@ -49,6 +53,7 @@ Plays the track selected in the sequencer:
   ones), with 7/9/sus2/sus4, strum, octave and **voice leading** (each chord takes the inversion nearest
   the last one), or a **keyboard** (2 octaves in the module, 4 full screen, glissando)
 - drum tracks: 12 pads in the voices' colors
+- external MIDI tracks: like melody tracks (chords, keyboard), straight out to their output port
 - **REC** (replace, like tape) or **OVR** (overdub) records what you play into the pattern, quantized to
   1/16, 1/8 or 1/4
 - with **XYFX** on the master, a **MASTER** row appears in the sequencer; selecting it turns this module
@@ -100,7 +105,9 @@ It contains Python, Qt (PySide6), Carla and XYFX. The machine needs:
   picks up new ones
 
 Touch-Seq also sends everything to a MIDI port (a virtual "Touch-Seq" port by default) with clock and
-start/stop, so it can drive outboard gear or a DAW too.
+start/stop, so it can drive outboard gear or a DAW too. An **external MIDI** track is the other way round: it
+sends to its own output (chosen when the track is created, changeable in HOST-4) and to nothing else — if the
+device is unplugged its notes are simply not sent, and they come back when it reappears.
 
 ## Less obvious things
 

@@ -64,7 +64,7 @@ def load_strip(d):
 
 @dataclass(eq=False)  # identity hash: tracks are dict keys in the engine
 class Track:
-    kind: str = "melody"  # or "drum"
+    kind: str = "melody"  # "melody", "drum", or "external" (MIDI out to hardware, no plugins)
     channel: int = 1
     number: int = 1  # stable name/color, kept when other tracks are deleted
     patterns: list = field(default_factory=list)
@@ -75,6 +75,7 @@ class Track:
     last: Step = field(default_factory=Step)  # velocity/gate a newly enabled step gets
     last_note: int = 60  # melody: pitch the grid view paints, and the latest one placed
     strip: Strip = field(default_factory=Strip)  # its plugins: instrument + effects
+    port: str = ""  # external: the MIDI output it sends to (a name from the system's outputs)
 
     def __post_init__(self):
         if not self.patterns:
@@ -83,6 +84,10 @@ class Track:
     @property
     def drum(self):
         return self.kind == "drum"
+
+    @property
+    def external(self):
+        return self.kind == "external"
 
     @property
     def current(self):
@@ -163,6 +168,7 @@ def dump_project(pr):
     return json.dumps({"bpm": pr.bpm, "key": pr.key, "scale": pr.scale, "tracks": [
         {"kind": t.kind, "channel": t.channel, "number": t.number, "pattern": t.pattern, "scenes": t.scenes, "mute": t.mute,
          "voice": t.voice, "last": astuple(t.last), "last_note": t.last_note, "strip": dump_strip(t.strip),
+         **({"port": t.port} if t.external else {}),
          "patterns": [pattern(p) for p in t.patterns]}
         for t in pr.tracks], "controls": [astuple(c) for c in pr.controls],
         "master": dump_strip(pr.master)}, separators=(",", ":"))
@@ -197,7 +203,7 @@ def load_project(path):
         if len(last) == 4:  # older files: steps carried a note (on, note, vel, gate)
             last, last_note = [last[0], last[2], last[3]], last[1]
         tr = Track(t["kind"], t["channel"], t.get("number", n), pattern=t["pattern"], scenes=t["scenes"], mute=t["mute"],
-                   voice=t["voice"], last=Step(*last), last_note=last_note,
+                   voice=t["voice"], last=Step(*last), last_note=last_note, port=t.get("port", ""),
                    strip=load_strip(t["strip"]) if "strip" in t else Strip())
         for p, pd in zip(tr.patterns, t["patterns"]):
             p.length = pd["length"]

@@ -1,5 +1,5 @@
-"""Dialog panels: the project chooser (start screen and FILE) and the settings (project key/scale, audio
-output)."""
+"""Dialog panels: the project chooser (start screen and FILE), the settings (project key/scale, audio
+output), and the two MIDI ones: a new track (drum, melody or external MIDI) and an external track's output."""
 import json
 import math
 import shutil
@@ -11,6 +11,7 @@ from PySide6.QtGui import QColor
 import plugins
 
 from .constants import BG, BORDER, DIM, NOTE_NAMES, PANEL, TEXT, WARN
+from .engine import midi_outputs
 from .gestures import Hold, ScrollOrTap
 from .model import dump_project, free_project_path, new_project, project_files, save_text
 from .music import SCALES
@@ -162,3 +163,111 @@ class Settings(Panel):
             self.region(row.intersected(listing), lambda pos, name=name: ScrollOrTap(
                 pos, lambda: self.scroll, lambda v: setattr(self, "scroll", v), lambda: host.set_output(name)))
         p.restore()
+
+
+def draw_ports(panel, p, r, ports, get_scroll, set_scroll, pick, empty="no MIDI outputs found"):
+    """A scrollable list of MIDI outputs, a row each: tapping a row calls pick(name). The scroll offset lives
+    in the panel, hence the get/set pair; an empty name renders as "no port yet", for choosing one later."""
+    s = panel.s
+    panel.box(p, r, "#11141b", BORDER, radius=8)
+    if not ports:
+        panel.text(p, r.adjusted(16 * s, 0, -16 * s, 0), empty, DIM, 14)
+        return
+    rh = 52 * s
+    scroll = max(0.0, min(get_scroll(), len(ports) * rh - r.height()))
+    set_scroll(scroll)
+    p.save()
+    p.setClipRect(r)
+    first = int(scroll // rh)
+    for n in range(first, min(len(ports), first + int(r.height() / rh) + 2)):
+        name = ports[n]
+        row = QRectF(r.left() + 6 * s, r.top() + 4 * s + n * rh - scroll, r.width() - 12 * s, rh - 8 * s)
+        panel.box(p, row, PANEL, BORDER, radius=6)
+        panel.text(p, row.adjusted(14 * s, 0, -14 * s, 0),
+                   name or "NO PORT — choose one later", TEXT if name else DIM, 16,
+                   Qt.AlignLeft | Qt.AlignVCenter, bold=bool(name), elide=True)
+        panel.region(row.intersected(r), lambda pos, name=name: ScrollOrTap(
+            pos, get_scroll, set_scroll, lambda: pick(name)))
+    p.restore()
+
+
+class NewTrack(Panel):
+    """The sequencer's "+": a drum track, a melody track, or an external one that sends to a hardware synth.
+    External tracks have no plugins, so that choice asks for the MIDI output first."""
+
+    KINDS = [("drum", "DRUM", "one voice per pad, 12 drum lanes"),
+             ("melody", "MELODY", "piano roll, its own instrument"),
+             ("external", "EXTERNAL", "no plugins, out to a MIDI port")]
+
+    def __init__(self, add, list_ports=midi_outputs):
+        super().__init__()
+        self.add = add  # (kind, port) -> None: the rack creates the track and closes this dialog
+        self.list_ports = list_ports
+        self.picking = False  # the external case: choosing the output
+        self.ports = []
+        self.scroll = 0.0
+
+    def choose(self, kind):
+        if kind != "external":
+            self.add(kind, "")
+            return
+        self.picking, self.scroll = True, 0.0
+        self.rescan()
+
+    def rescan(self):
+        self.ports = self.list_ports() + [""]  # last row: no port yet, pick one from the HOST panel
+
+    def back(self):
+        self.picking = False
+
+    def draw(self, p):
+        s, w, h, g = self.s, self.w, self.h, 14 * self.s
+        p.fillRect(self.rect(), QColor(BG))
+        if self.picking:
+            head = QRectF(g, g, w - 2 * g, 54 * s)
+            back, title, again = split(head, [150 * s, 0, 130 * s], 12 * s)
+            self.button(p, back, "‹ BACK", self.back, sub="track kind")
+            self.text(p, title.adjusted(8 * s, 0, 0, 0), "EXTERNAL MIDI — choose the output", TEXT, 17,
+                      Qt.AlignLeft | Qt.AlignVCenter, bold=True)
+            self.button(p, again, "RESCAN", self.rescan, sub="plugged in?")
+            area = QRectF(g, head.bottom() + 12 * s, w - 2 * g, h - head.bottom() - 12 * s - g)
+            draw_ports(self, p, area, self.ports, lambda: self.scroll, lambda v: setattr(self, "scroll", v),
+                       lambda name: self.add("external", name))
+            return
+        cards = split(QRectF(g, g, w - 2 * g, h - 2 * g - 64 * s), [0, 0, 0], 14 * s)
+        for rect, (kind, label, desc) in zip(cards, self.KINDS):
+            self.box(p, rect, PANEL, BORDER, radius=10)
+            self.text(p, rect.adjusted(0, 0, 0, 18 * s), label, TEXT, 30, Qt.AlignCenter, bold=True)
+            self.text(p, rect.adjusted(14 * s, 0, -14 * s, -26 * s), desc, DIM, 14,
+                      Qt.AlignHCenter | Qt.AlignBottom, elide=True)
+            self.on_press(rect, lambda kind=kind: self.choose(kind))
+        self.text(p, QRectF(g, h - g - 46 * s, w - 2 * g, 46 * s),
+                  "One track is one MIDI channel: melody and drum get plugins in HOST-4, external goes out "
+                  "to hardware.",
+                  DIM, 14, Qt.AlignLeft | Qt.AlignVCenter, elide=True)
+
+
+class MidiPorts(Panel):
+    """The MIDI output of an external track: chosen when it is created, and changeable afterwards (HOST-4)."""
+
+    def __init__(self, choose, current="", list_ports=midi_outputs):
+        super().__init__()
+        self.choose, self.current = choose, current  # choose(name) -> None: the rack saves and closes
+        self.list_ports = list_ports
+        self.scroll = 0.0
+        self.rescan()
+
+    def rescan(self):
+        self.ports = self.list_ports() + [""]  # the empty row: no output (silent)
+
+    def draw(self, p):
+        s, w, h, g = self.s, self.w, self.h, 14 * self.s
+        p.fillRect(self.rect(), QColor(BG))
+        head = QRectF(g, g, w - 2 * g, 54 * s)
+        title, now, again = split(head, [0, 300 * s, 130 * s], 12 * s)
+        self.text(p, title, "MIDI OUTPUT", TEXT, 20, Qt.AlignLeft | Qt.AlignVCenter, bold=True)
+        self.text(p, now, f"now: {self.current or 'none'}", DIM, 13, Qt.AlignRight | Qt.AlignVCenter, elide=True)
+        self.button(p, again, "RESCAN", self.rescan, sub="plugged in?")
+        area = QRectF(g, head.bottom() + 12 * s, w - 2 * g, h - head.bottom() - 12 * s - g)
+        draw_ports(self, p, area, self.ports, lambda: self.scroll,
+                   lambda v: setattr(self, "scroll", v), self.choose)

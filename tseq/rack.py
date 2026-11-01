@@ -7,7 +7,7 @@ from PySide6.QtCore import QTimer
 from PySide6.QtGui import QColor, QFont, Qt
 
 from .controls import Controls
-from .dialogs import Chooser, Settings
+from .dialogs import Chooser, MidiPorts, NewTrack, Settings
 from .model import dump_project, free_project_path, save_text
 from .performer import Performer
 from .sequencer import Sequencer
@@ -26,6 +26,8 @@ class Rack(Window):
         host.selected = lambda: self.seq.sel
         self.seq.master_fx = lambda: host.xyfx() is not None
         host.select_track = lambda tr: setattr(self.seq, "sel", tr)
+        self.seq.new_track = self.open_new_track
+        host.choose_port = self.open_port_choice
         super().__init__([(0, 0, "CTRL-10", "performance controls", self.controls),
                           (0, 1, "SEQ-64", "step sequencer", self.seq),
                           (1, 0, "HOST-4", "plugin host", host),
@@ -114,6 +116,31 @@ class Rack(Window):
         if self.dialog and self.dialog[0] == "SETTINGS":
             return self.close_dialog()
         self.open_dialog("SETTINGS", "project & audio", Settings(self.project, self.host))
+
+    def open_new_track(self):
+        """The sequencer's "+": which kind of track, and for an external one which MIDI output."""
+        if self.dialog:
+            return self.close_dialog()
+        self.open_dialog("NEW TRACK", "drum · melody · external MIDI", NewTrack(self.add_track))
+
+    def add_track(self, kind, port=""):
+        self.seq.add_track(kind, port)
+        self.dirty = True
+        self.autosave()
+        self.close_dialog()
+
+    def open_port_choice(self, tr):
+        if self.dialog:
+            return self.close_dialog()
+        self.open_dialog("MIDI OUT", f"external track T{tr.number}",
+                         MidiPorts(lambda name: self.set_track_port(tr, name), tr.port))
+
+    def set_track_port(self, tr, name):
+        tr.port = name
+        self.engine.refresh_ports()  # let go of the old port, open the new one
+        self.dirty = True
+        self.autosave()
+        self.close_dialog()
 
     def keyPressEvent(self, e):
         if e.key() == Qt.Key_Escape and self.dialog:

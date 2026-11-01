@@ -43,6 +43,7 @@ class HostPanel(Panel):
         self.remember = remember  # called with a newly chosen audio output, to keep it for next time
         self.selected = lambda: project.tracks[0]  # the track whose chain TRACK shows (the rack: the sequencer's)
         self.select_track = lambda tr: None  # the rack: select a track in the sequencer
+        self.choose_port = lambda tr: None  # the rack: choose the MIDI output of an external track
         self.view = "track"  # "track", "mixer" or "master"
         self.loaded = {}  # (Strip, slot) -> plugins.Plugin
         self.failed = set()  # (Strip, slot) whose saved plugin couldn't be loaded
@@ -72,7 +73,9 @@ class HostPanel(Panel):
 
     # --- chains ---------------------------------------------------------------
     def strips(self):
-        return [t.strip for t in self.project.tracks] + [self.project.master]
+        """Chains: every plugin track and the master. An external track has no chain (its notes go out to
+        hardware), so it never shows a slot that could take a plugin."""
+        return [t.strip for t in self.project.tracks if not t.external] + [self.project.master]
 
     def track_of(self, strip):
         return next((t for t in self.project.tracks if t.strip is strip), None)  # None: the master
@@ -231,6 +234,7 @@ class HostPanel(Panel):
 
     def tick(self):
         super().tick()
+        self.router.refresh(self.project.tracks)  # external tracks: look for their MIDI outputs again
         if self.host:
             self.host.idle()
             self.forget_deleted_tracks()
@@ -328,10 +332,44 @@ class HostPanel(Panel):
         if self.view == "mixer":
             self.draw_mixer(p, body)
             return
-        strip = self.project.master if self.view == "master" else self.selected().strip
+        if self.view == "master":
+            strip = self.project.master
+        else:
+            tr = self.selected()
+            if tr.external:  # no chain: the notes go out to hardware instead
+                self.draw_external(p, body, tr)
+                return
+            strip = tr.strip
         left, right = split(body, [body.width() * 0.28, 0], 12 * s)  # narrow chain, room for 5 knob columns
         self.draw_chain(p, left, strip)
         self.draw_params(p, right, strip)
+
+    def draw_external(self, p, r, tr):
+        """An external track in the TRACK view: it has no chain, its notes leave through a MIDI output, so
+        the panel shows that output (and where to change it) instead of slots."""
+        s = self.s
+        color = PALETTE[(tr.number - 1) % len(PALETTE)]
+        title = QRectF(r.left(), r.top(), r.width(), 34 * s)
+        self.box(p, QRectF(title.left(), title.top() + 6 * s, 5 * s, title.height() - 12 * s), color, None, radius=2)
+        self.text(p, title.adjusted(14 * s, 0, 0, 0), f"T{tr.number}  EXTERNAL MIDI  CH{tr.channel}", color, 16,
+                  Qt.AlignLeft | Qt.AlignVCenter, bold=True, elide=True)
+        card = QRectF(r.left(), title.bottom() + 8 * s, r.width(), r.bottom() - title.bottom() - 8 * s)
+        self.box(p, card, "#11141b", BORDER, radius=10)
+        inner = card.adjusted(18 * s, 16 * s, -18 * s, -16 * s)
+        live = self.router.is_open(tr.port)
+        self.text(p, QRectF(inner.left(), inner.top(), inner.width(), 20 * s), "MIDI OUT", DIM, 12,
+                  Qt.AlignLeft | Qt.AlignTop, bold=True)
+        self.text(p, QRectF(inner.left(), inner.top() + 20 * s, inner.width(), 34 * s),
+                  tr.port or "no output chosen", TEXT if tr.port else WARN, 20,
+                  Qt.AlignLeft | Qt.AlignTop, bold=True, elide=True)
+        state = ("connected" if live else "waiting for the device…" if tr.port else "silent until an output is chosen")
+        self.text(p, QRectF(inner.left(), inner.top() + 60 * s, inner.width(), 22 * s), state,
+                  "#4ade80" if live else WARN, 13, Qt.AlignLeft | Qt.AlignTop)
+        self.text(p, QRectF(inner.left(), inner.top() + 88 * s, inner.width(), 40 * s),
+                  "No plugins on this track: its notes and controllers go straight out to the port above.",
+                  DIM, 13, Qt.AlignLeft | Qt.AlignTop, elide=True)
+        btn = QRectF(inner.left(), card.bottom() - 18 * s - 52 * s, 200 * s, 52 * s)
+        self.button(p, btn, "MIDI OUT", lambda: self.choose_port(tr), sub="choose the port")
 
     def show(self, view, sel=None):
         self.view, self.sel, self.page = view, sel, 0
