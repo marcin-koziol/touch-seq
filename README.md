@@ -18,8 +18,8 @@ running.
 
 ### SEQ-64 — step sequencer
 
-- any number of **melody**, **drum** and **external MIDI** tracks, each on its own MIDI channel; **+** adds
-  one (the dialog picks the kind, and for external the MIDI output it sends to)
+- any number of **melody**, **drum**, **external MIDI** and **audio** tracks; **+** adds one (the dialog picks
+  the kind, and for external the MIDI output it sends to, for audio the interface input it takes)
 - 16 patterns per track, 1–64 steps (polymetric tracks are fine), 8 **scenes**
 - pattern and scene changes are **quantized to the bar**: the current pattern plays to the end of the bar
 - **GRID** shows all tracks; **EDIT** opens the selected one:
@@ -28,6 +28,10 @@ running.
   - drums: a voice × step matrix, voices in fixed colors (kick red, snare orange, hats yellow, …)
   - external MIDI: the same piano roll, but the track has **no plugins**: its notes, velocity, gate and the
     faders go straight out to the chosen hardware output (and nowhere else), and its header shows the port
+  - audio: an **interface input** (a mono capture port, e.g. the UMC404HD's FL) with **L / C / R** panning —
+    the one track kind with no MIDI at all. It is patched by the rack, so it survives chain changes: its input
+    goes through the track's effects (HOST-4) and on into its bus or the master, and that is how a synth
+    plugged into an input is heard through the master's reverb
 - in EDIT, **▼ trans / ▲ trans** moves the whole pattern one scale degree down or up: the step comes from the
   project's key and scale, so the pattern stays in key (a chromatic note keeps its alteration, octaves wrap);
   drum tracks have fixed voices and don't offer it
@@ -41,6 +45,9 @@ running.
 - every plugin track has a chain: **instrument → 2 effects → level/mute**; all tracks go through the
   **MASTER** (3 effects, e.g. a global reverb) to the audio output. **External MIDI** tracks have no chain at
   all — the panel shows their output port instead, with **MIDI OUT** to change it
+- **audio tracks** have a chain too (slot 0 is an effect, not an instrument): the input is patched into it, so
+  effects and the fader work as soon as there is one; without effects the input goes straight where the track
+  is routed, and its level is the bus'/master's
 - **effects buses**: a track's chain can go into a bus instead of straight into the master — **→ MASTER** under
   the chain cycles through the buses, **+ BUS** makes a new one. A bus has its own 3 slots and its own level,
   so one reverb can process just the two of five tracks you route into it; buses are their own columns in the
@@ -103,9 +110,9 @@ the other side to patch them, the same pair again to cut it — one source stays
 patched with a tap per channel. That is how a synth plugged into an interface's input is heard through that
 interface's output, sent through a bus' reverb, or how a plugin's output is sent to another device. Cables are
 drawn for the ports on screen; the links you make here are kept with this machine (config.json, not the
-project) and re-made when a device comes back. The rack's own cables — a chain into its bus and the master,
-everything into the output — are thin and solid, cables another program made are dashed, and neither is yours
-to cut here.
+project) and re-made when a device comes back. The rack's own cables — an interface input into its audio
+track, a chain into its bus and the master, everything into the output — are thin and solid, cables another
+program made are dashed, and neither is yours to cut here.
 
 ![Patchbay: devices as boxes, links as cables](docs/screenshots/patchbay.png)
 

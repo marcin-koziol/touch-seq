@@ -274,6 +274,37 @@ def settings_metadata():
     return values
 
 
+def audio_inputs():
+    """The mono inputs an audio track can take its sound from: the capture ports of the machine's audio
+    devices (Audio/Source nodes) - not a sink's monitor ports, and not the outputs of plugins, which are
+    sources on the graph too but not an input you'd record."""
+    try:
+        dump = json.loads(subprocess.run(["pw-dump"], capture_output=True, text=True, timeout=5).stdout)
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        return []
+    devices = {}
+    for obj in dump:
+        props = (obj.get("info") or {}).get("props") or {}
+        if props.get("media.class") == "Audio/Source" and props.get("node.name"):
+            devices[obj["id"]] = (props["node.name"], props.get("node.description") or props.get("node.nick")
+                                  or props["node.name"])
+    inputs = []
+    for obj in dump:
+        info = obj.get("info") or {}
+        props = info.get("props") or {}
+        if (obj.get("type") != "PipeWire:Interface:Port" or props.get("port.direction") != "out"
+                or "audio" not in (props.get("format.dsp") or "") or props.get("node.id") not in devices):
+            continue
+        node = devices[props["node.id"]]
+        inputs.append((f"{node[0]}:{props.get('port.name')}", node[1], props.get("port.name", "")))
+    return sorted(inputs, key=lambda i: (i[1].lower(), port_order(i[2])))
+
+
+def audio_input_choices():
+    """The inputs of audio_inputs() as (port, "device · channel"), the shape the picker dialogs take."""
+    return [(port, f"{label} · {name}") for port, label, name in audio_inputs()]
+
+
 def quantum():
     """PipeWire's audio buffer size in samples: (forced, system default, min, max, rate), zeros when it does
     not answer. Nothing forced means the default is what the whole graph runs at."""

@@ -64,7 +64,7 @@ def load_strip(d):
 
 @dataclass(eq=False)  # identity hash: tracks are dict keys in the engine
 class Track:
-    kind: str = "melody"  # "melody", "drum", or "external" (MIDI out to hardware, no plugins)
+    kind: str = "melody"  # "melody", "drum", "external" (MIDI to hardware) or "audio" (an input port)
     channel: int = 1
     number: int = 1  # stable name/color, kept when other tracks are deleted
     patterns: list = field(default_factory=list)
@@ -77,6 +77,8 @@ class Track:
     strip: Strip = field(default_factory=Strip)  # its plugins: instrument + effects
     port: str = ""  # external: the MIDI output it sends to (a name from the system's outputs)
     bus: int = 0  # 0: straight into the master, else the number of the bus it goes through
+    source: str = ""  # audio: the input port it takes its sound from (a mono capture port)
+    pan: str = "center"  # audio: "left", "center" or "right" - a mono input into one or both sides
 
     def __post_init__(self):
         if not self.patterns:
@@ -89,6 +91,10 @@ class Track:
     @property
     def external(self):
         return self.kind == "external"
+
+    @property
+    def audio(self):
+        return self.kind == "audio"
 
     @property
     def current(self):
@@ -179,6 +185,7 @@ def dump_project(pr):
         {"kind": t.kind, "channel": t.channel, "number": t.number, "pattern": t.pattern, "scenes": t.scenes, "mute": t.mute,
          "voice": t.voice, "last": astuple(t.last), "last_note": t.last_note, "strip": dump_strip(t.strip),
          **({"port": t.port} if t.external else {}), **({"bus": t.bus} if t.bus else {}),
+         **({"source": t.source, "pan": t.pan} if t.audio else {}),
          "patterns": [pattern(p) for p in t.patterns]}
         for t in pr.tracks], "controls": [astuple(c) for c in pr.controls],
         "master": dump_strip(pr.master),
@@ -215,7 +222,7 @@ def load_project(path):
             last, last_note = [last[0], last[2], last[3]], last[1]
         tr = Track(t["kind"], t["channel"], t.get("number", n), pattern=t["pattern"], scenes=t["scenes"], mute=t["mute"],
                    voice=t["voice"], last=Step(*last), last_note=last_note, port=t.get("port", ""),
-                   bus=t.get("bus", 0),
+                   bus=t.get("bus", 0), source=t.get("source", ""), pan=t.get("pan", "center"),
                    strip=load_strip(t["strip"]) if "strip" in t else Strip())
         for p, pd in zip(tr.patterns, t["patterns"]):
             p.length = pd["length"]

@@ -98,8 +98,10 @@ class HostPanel(Panel):
         return f"T{tr.number}" if tr else f"BUS {bus.number}" if bus else "MASTER"
 
     def instrument_slot(self, strip, k):
-        """Slot 0 holds the instrument of a track's chain; a bus and the master only take effects."""
-        return k == 0 and self.track_of(strip) is not None
+        """Slot 0 holds the instrument of a track's chain; a bus, the master and an audio track (which takes an
+        input port, not MIDI) only take effects."""
+        tr = self.track_of(strip)
+        return k == 0 and tr is not None and not tr.audio
 
     def chain(self, strip):
         return [self.loaded[(strip, k)] for k in range(SLOTS) if (strip, k) in self.loaded]
@@ -248,10 +250,20 @@ class HostPanel(Panel):
             chain = self.chain(bus.strip) if bus else []
             return ins(chain[0]) if chain else into_master
 
+        def audio_track(tr, chain):
+            """An audio track's input port, through its effects when it has any, and on into where it goes.
+            Panning a mono input is picking one side or both."""
+            if tr.mute:
+                return []
+            into = ins(chain[0]) if chain else (bus_into(tr.bus) if tr.bus else into_master)
+            return self.input_links(tr.source, into, tr.pan)
+
         for strip in self.strips():
             chain, tr, bus = self.chain(strip), self.track_of(strip), self.bus_of(strip)
             links = []
-            if tr and chain and chain[0].ref.midi_ins:
+            if tr and tr.audio:
+                links += audio_track(tr, chain)
+            elif tr and chain and chain[0].ref.midi_ins:
                 links.append((f"{self.name} T{tr.number}:midi", f"{chain[0].client}:events-in"))
             for a, b in zip(chain, chain[1:]):
                 links += self.pair(outs(a), ins(b))
@@ -286,6 +298,17 @@ class HostPanel(Panel):
                 if bus is not None or not (tr and tr.bus):  # it reaches the output itself
                     level *= master_level
             self.host.set_volume(chain[-1], level)
+
+    @staticmethod
+    def input_links(source, ins, pan="center"):
+        """One input port into one or both sides of a stereo destination: a mono channel panned."""
+        if not source or not ins:
+            return []
+        if pan == "right":
+            return [(source, ins[min(1, len(ins) - 1)])]
+        if pan == "left":
+            return [(source, ins[0])]
+        return [(source, port) for port in ins[:2]]
 
     @staticmethod
     def pair(outs, ins):
@@ -586,8 +609,9 @@ class HostPanel(Panel):
             head = QRectF(col.left(), col.top(), col.width(), 58 * s)
             self.text(p, head.adjusted(0, 4 * s, 0, -head.height() * 0.45), f"T{tr.number}", color, 18, bold=True)
             inst = tr.strip.slots[0]
-            self.text(p, head.adjusted(6 * s, head.height() * 0.5, -6 * s, 0), inst.name if inst else "no instrument",
-                      TEXT if inst else "#5b6577", 12, elide=True)
+            below = (tr.source.split(":")[-1] or "no input") if tr.audio else (inst.name if inst else "no instrument")
+            self.text(p, head.adjusted(6 * s, head.height() * 0.5, -6 * s, 0), below,
+                      TEXT if (inst or tr.audio) else "#5b6577", 12, elide=True)
             if tr.bus:
                 self.text(p, QRectF(head.right() - 40 * s, head.top() + 3 * s, 36 * s, 18 * s), f"→ B{tr.bus}",
                           "#38d6ff", 11, Qt.AlignRight | Qt.AlignTop, bold=True)

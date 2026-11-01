@@ -135,7 +135,9 @@ class Sequencer(Panel):
         self.scroll = 0.0
         self.master_fx = lambda: False  # the rack: is XYFX on the master (adds a MASTER row)
         self.master_focus = False  # the MASTER row is selected (PLAY-12 shows the XY pad)
-        self.new_track = lambda: None  # the rack: the "+" dialog (drum, melody or external MIDI)
+        self.new_track = lambda: None  # the rack: the "+" dialog (drum, melody, external MIDI, audio)
+        self.choose_source = lambda tr: None  # the rack: pick the input of an audio track
+        self.reroute = lambda: None  # the rack: rebuild the audio wiring after an input or pan change
 
     # --- actions --------------------------------------------------------
     def set_step(self, tr, s, on):
@@ -205,9 +207,20 @@ class Sequencer(Panel):
             self.view = "edit"
         self.sel, self.master_focus = tr, False
 
-    def add_track(self, kind, port=""):
-        self.sel = self.engine.add_track(kind, port)
+    def add_track(self, kind, value=""):
+        self.sel = self.engine.add_track(kind, value)
         self.scroll = 1e9  # clamped on paint: shows the new row
+
+    def set_pan(self, tr, pan):
+        """Where a mono input goes: left, both (center) or right."""
+        tr.pan = pan
+        self.reroute()
+
+    def cycle_destination(self, tr):
+        """A track's chain or input goes into the master or the next bus."""
+        options = [0] + [b.number for b in self.project.buses]
+        tr.bus = options[(options.index(tr.bus) + 1) % len(options)] if tr.bus in options else 0
+        self.reroute()
 
     def transpose(self, tr, steps):
         """The track's current pattern up (down for a negative `steps`) by scale degrees, in the project's key:
@@ -336,6 +349,10 @@ class Sequencer(Panel):
 
     def draw_bottom(self, p, r):
         s, tr, e = self.s, self.sel, self.engine
+        if tr.audio:  # an input has no patterns to switch or copy
+            self.text(p, r, "an audio track has no patterns: EDIT picks its input, HOST-4 its effects", DIM, 14,
+                      Qt.AlignLeft | Qt.AlignVCenter, elide=True)
+            return
         widths = [52 * s] * 4 + [4 * s] + [0] * PATTERNS + [4 * s, 72 * s, 72 * s]
         rects = split(r, widths, 5 * s)
         pages, slots, (copy_r, clear_r) = rects[:4], rects[5:5 + PATTERNS], rects[-2:]
@@ -420,6 +437,9 @@ class Sequencer(Panel):
                 continue
             lane = QRectF(head.right() + 10 * s, y, r.right() - head.right() - 18 * s, rh - g)
             self.draw_header(p, head, r, tr)
+            if tr.audio:  # no steps: the row shows the input it takes and where it goes
+                self.draw_audio_row(p, lane, tr)
+                continue
             self.draw_lane(p, lane, tr)
             k = tr.voice if tr.drum else None
             self.region(lane.intersected(r), lambda pos, tr=tr, k=k, lane=lane: Paint(self, lane, *self.painter(tr, k), pos))
@@ -445,20 +465,42 @@ class Sequencer(Panel):
         p.drawRoundedRect(QRectF(head.left() + 5 * s, head.top() + 8 * s, 5 * s, head.height() - 16 * s), 2, 2)
         info = head.adjusted(18 * s, 6 * s, -56 * s, -6 * s)
         self.text(p, info, f"T{tr.number}", TEXT, 19, Qt.AlignLeft | Qt.AlignTop, bold=True)
-        self.text(p, info, f"CH{tr.channel}", DIM, 12, Qt.AlignRight | Qt.AlignTop)
+        self.text(p, info, "MONO" if tr.audio else f"CH{tr.channel}", DIM, 12, Qt.AlignRight | Qt.AlignTop)
         if tr.drum:
             self.text(p, info, DRUM_KIT[tr.voice][0], color, 12, Qt.AlignRight | Qt.AlignBottom, bold=True)
+        elif tr.audio:  # the input it takes and how it is panned, instead of a drum voice and a pattern
+            self.text(p, info, f"{self.source_name(tr) or 'no input'} · {tr.pan.upper()}",
+                      TEXT if tr.source else WARN, 12, Qt.AlignRight | Qt.AlignBottom, bold=True, elide=True)
         elif tr.external:  # where its notes go, instead of the drum voice
             self.text(p, info, tr.port or "no MIDI out", TEXT if tr.port else WARN, 12,
                       Qt.AlignRight | Qt.AlignBottom, bold=True, elide=True)
-        nxt = e.next_pattern(tr)
-        pat = f"P{tr.pattern + 1}" + (f"→{nxt + 1}" if nxt is not None and nxt != tr.pattern else "")
-        self.text(p, info, pat, "#facc15" if nxt not in (None, tr.pattern) else DIM, 12, Qt.AlignLeft | Qt.AlignBottom)
+        if not tr.audio:  # an input has no patterns
+            nxt = e.next_pattern(tr)
+            pat = f"P{tr.pattern + 1}" + (f"→{nxt + 1}" if nxt is not None and nxt != tr.pattern else "")
+            self.text(p, info, pat, "#facc15" if nxt not in (None, tr.pattern) else DIM, 12,
+                      Qt.AlignLeft | Qt.AlignBottom)
         self.region(head.intersected(clip), lambda pos, tr=tr: ScrollOrTap(
             pos, lambda: self.scroll, lambda v: setattr(self, "scroll", v), lambda: self.select(tr)))
         mute = QRectF(head.right() - 50 * s, head.top() + 6 * s, 44 * s, head.height() - 12 * s)
         self.button(p, mute, "M", lambda: setattr(tr, "mute", not tr.mute), on=tr.mute, color=WARN)
         self.hits[-1] = (mute.intersected(clip), self.hits[-1][1])
+
+    @staticmethod
+    def source_name(tr):
+        """'FL' from an input port like '...source:capture_FL'."""
+        return tr.source.split(":")[-1].replace("capture_", "").replace("playback_", "") if tr.source else ""
+
+    def draw_audio_row(self, p, lane, tr):
+        """An audio track's row: the input it takes, panned into where its chain goes."""
+        s, color = self.s, self.color(tr)
+        to = "MASTER" if not tr.bus else f"BUS {tr.bus}"
+        self.box(p, lane, "#11141b", "#2a3040", 1.5, radius=6)
+        name = self.source_name(tr) or "no input — tap the track"
+        self.text(p, lane.adjusted(12 * s, 0, -110 * s, 0), f"IN {name}", TEXT if tr.source else WARN, 14,
+                  Qt.AlignLeft | Qt.AlignVCenter, bold=True, elide=True)
+        self.text(p, lane.adjusted(12 * s, 0, -12 * s, 0), f"{tr.pan.upper()}   →  {to}", color, 13,
+                  Qt.AlignRight | Qt.AlignVCenter, bold=True)
+        self.on_press(lane, lambda tr=tr: self.select(tr))
 
     def draw_lane(self, p, lane, tr):
         s, color, pat = self.s, self.color(tr), tr.current
@@ -490,9 +532,9 @@ class Sequencer(Panel):
         pat, color = tr.current, self.color(tr)
         g = 8 * s
         ctrl = QRectF(r.left() + g, r.top() + g, r.width() - 2 * g, 58 * s)
-        params = ("step", "vel") if tr.drum else ("vel", "gate")
-        octaves = [] if tr.drum else [68 * s, 68 * s]
-        shifts = [] if tr.drum else [64 * s, 64 * s]  # transpose the pattern; drums have fixed voices
+        params = () if tr.audio else ("step", "vel") if tr.drum else ("vel", "gate")
+        octaves = [] if tr.drum or tr.audio else [68 * s, 68 * s]
+        shifts = [] if tr.drum or tr.audio else [64 * s, 64 * s]  # transpose; drums and inputs have no pitch
         name, ch, length, mute, _, *param_r, _, delete = split(
             ctrl, [104 * s, 84 * s, 84 * s, 76 * s, 0] + [84 * s] * len(params) + octaves + shifts + [0, 104 * s],
             6 * s)
@@ -504,17 +546,24 @@ class Sequencer(Panel):
             self.button(p, shift_up, "▲", lambda: self.transpose(tr, 1), sub="trans")
 
         self.box(p, name, color, None)
-        self.text(p, name.adjusted(0, 0, 0, -name.height() * 0.3), f"T{tr.number}  P{tr.pattern + 1}",
-                  BG, 18, bold=True)
+        self.text(p, name.adjusted(0, 0, 0, -name.height() * 0.3),
+                  f"T{tr.number}" if tr.audio else f"T{tr.number}  P{tr.pattern + 1}", BG, 18, bold=True)
         self.text(p, name.adjusted(0, name.height() * 0.45, 0, 0), tr.kind.upper(), BG, 11)
-        self.value_box(p, ch, "CHANNEL", str(tr.channel), lambda: tr.channel,
-                       lambda v: setattr(tr, "channel", int(v)), 1, 16, 14)
+        if tr.audio:
+            self.box(p, ch, PANEL)
+            self.text(p, ch, "MONO", DIM, 13, bold=True)
+        else:
+            self.value_box(p, ch, "CHANNEL", str(tr.channel), lambda: tr.channel,
+                           lambda v: setattr(tr, "channel", int(v)), 1, 16, 14)
 
         def cycle_length():
             pat.length = 16 if pat.length >= 64 else (pat.length // 16 + 1) * 16
 
-        self.value_box(p, length, "LENGTH", str(pat.length), lambda: pat.length,
-                       lambda v: setattr(pat, "length", int(v)), 1, MAX_STEPS, 8, on_tap=cycle_length)
+        if tr.audio:  # an input has no steps to sequence
+            self.button(p, length, "AUDIO IN", lambda: self.choose_source(tr), sub="pick the input")
+        else:
+            self.value_box(p, length, "LENGTH", str(pat.length), lambda: pat.length,
+                           lambda v: setattr(pat, "length", int(v)), 1, MAX_STEPS, 8, on_tap=cycle_length)
         self.button(p, mute, "MUTE", lambda: setattr(tr, "mute", not tr.mute), on=tr.mute, color=WARN)
         attr = "drum_param" if tr.drum else "param"
         for key, rect in zip(params, param_r):
@@ -534,7 +583,33 @@ class Sequencer(Panel):
             self.region(delete, lambda pos: Hold(self.delete_track))
 
         area = QRectF(r.left() + g, ctrl.bottom() + 10 * s, r.width() - 2 * g, r.bottom() - ctrl.bottom() - 18 * s)
-        (self.draw_drum_matrix if tr.drum else self.draw_roll)(p, area, tr, color)
+        if tr.audio:
+            self.draw_audio_edit(p, area, tr, color)
+        else:
+            (self.draw_drum_matrix if tr.drum else self.draw_roll)(p, area, tr, color)
+
+    def draw_audio_edit(self, p, area, tr, color):
+        """An audio track's edit view: which input, how it is panned, and where it goes. Its effects live in
+        the HOST-4 chain like any other track's."""
+        s = self.s
+        row = QRectF(area.left(), area.top(), area.width(), 70 * s)
+        source, pan, to = split(row, [0, 330 * s, 200 * s], 10 * s)
+        self.button(p, source, self.source_name(tr) or "NO INPUT", lambda: self.choose_source(tr),
+                    sub="tap to pick the input", enabled=True)
+        self.text(p, pan.adjusted(0, 0, 0, pan.height() * 0.35), "PAN", DIM, 12, Qt.AlignHCenter | Qt.AlignTop)
+        for n, (name, rect) in enumerate(zip(("left", "center", "right"), split(pan.adjusted(0, 18 * s, 0, 0),
+                                                                              [0, 0, 0], 6 * s))):
+            self.button(p, rect, name[0].upper(), lambda name=name: self.set_pan(tr, name), on=tr.pan == name,
+                        color=color)
+        buses = self.project.buses
+        label = "MASTER" if not tr.bus else f"BUS {tr.bus}"
+        self.button(p, to, f"→ {label}", lambda: self.cycle_destination(tr), enabled=bool(buses),
+                    sub="tap: next" if buses else "no bus yet")
+        hint = QRectF(area.left(), row.bottom() + 12 * s, area.width(), 40 * s)
+        self.text(p, hint, "Effects for this input are its chain in HOST-4; the level is the bus'/master's.",
+                  DIM, 14, Qt.AlignLeft | Qt.AlignVCenter, elide=True)
+        self.on_press(QRectF(area.left(), area.top(), area.width(), area.height()),
+                      lambda: self.select(tr))
 
     def roll_base(self, tr):
         """Lowest visible note of the track's piano roll; starts at the C below its lowest note."""

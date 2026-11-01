@@ -255,6 +255,8 @@ class StubHost(ts.Panel):
         return {}
     def internal_links(self):
         return set()
+    def rewire(self):
+        pass
     def draw(self, p):
         p.fillRect(self.rect(), ts.QColor(ts.BG))
     def save_states(self):
@@ -727,15 +729,18 @@ nt = ts.NewTrack(lambda kind, port="": picked.append((kind, port)), list_ports=l
 vn = View(nt); vn.grab().save(str(OUT / "new_track.png"))
 nt.press(1, QPointF(100, 100)); assert picked == [("drum", "")], picked  # the DRUM card
 nt.press(1, QPointF(500, 100)); assert picked == [("drum", ""), ("melody", "")], picked  # the MELODY card
-vn.grab(); nt.press(2, QPointF(850, 100))  # EXTERNAL: shows the outputs instead
-assert nt.picking and len(picked) == 2
+vn.grab(); nt.press(2, nt.hits[2][0].center())  # the EXTERNAL card: shows the outputs instead
+assert nt.picking == "external" and len(picked) == 2, nt.picking
 vn.grab().save(str(OUT / "new_track_ports.png"))
 row = next(r for r, f in nt.hits if r.top() > 70).center()  # hits: BACK, RESCAN, then a row per output
 nt.press(3, row); nt.release(3, row)
 assert picked[-1] == ("external", "Synth MIDI 1"), picked
-nt.press(4, QPointF(850, 100))  # ... and the last row adds the track without a port
+nt.back(); vn.grab()  # back to the four kinds
+nt.press(4, nt.hits[3][0].center())  # the AUDIO card: asks for an input
+assert nt.picking == "audio", nt.picking
 vn.grab(); row = [r for r, f in nt.hits if r.top() > 70][-1].center()
-nt.press(5, row); nt.release(5, row); assert picked[-1] == ("external", ""), picked
+nt.press(5, row); nt.release(5, row)
+assert picked[-1] == ("audio", ""), picked  # the last row: an input picked later
 mp = ts.MidiPorts(lambda name: picked.append(name), current="Synth MIDI 1", list_ports=lambda: ["Synth MIDI 1"])
 vm = View(mp); vm.grab().save(str(OUT / "midi_ports.png"))
 row = next(r for r, f in mp.hits if r.top() > 70).center()
@@ -926,3 +931,39 @@ pb2 = ts.Patchbay(lambda: [], lambda links: cuts.append(links), ports=lambda: ([
 pb2.tap("out", "/cap:1"); pb2.tap("in", "/bus:1")
 assert cuts == [], "an internal cable is not toggled from the patchbay"
 print("buses OK")
+# --- audio tracks: an input port patched through the rack (source, pan, bus, effects) ---
+pra = ts.Project(tracks=[ts.Track("audio", 1, 1, source="/in:capture_FL", pan="center")])
+atr = pra.tracks[0]
+ah = FakeHostPanel(pra)
+ah.rewire()
+assert sorted(ah.wiring.links[atr.strip]) == [("/in:capture_FL", "sink:playback_FL"),
+                                              ("/in:capture_FL", "sink:playback_FR")], "center: both sides"
+assert not ah.instrument_slot(atr.strip, 0), "an audio track takes effects, not an instrument"
+atr.pan = "left"; ah.rewire()
+assert ah.wiring.links[atr.strip] == [("/in:capture_FL", "sink:playback_FL")]
+atr.pan = "right"; ah.rewire()
+assert ah.wiring.links[atr.strip] == [("/in:capture_FL", "sink:playback_FR")]
+atr.mute = True; ah.rewire()
+assert ah.wiring.links[atr.strip] == [], "a muted input sends nothing"
+atr.mute = False
+assert ts.HostPanel.input_links("/in:1", ["/dst:in_1"], "right") == [("/in:1", "/dst:in_1")], "a mono target"
+ah.loaded[(atr.strip, 0)] = FakePlugin("T1.1 EQ", "EQ")  # an effect on the track: the input goes through it
+atr.pan = "center"; ah.rewire()
+links = ah.wiring.links[atr.strip]
+assert ("/in:capture_FL", "T1.1 EQ:input_1") in links and ("T1.1 EQ:output_1", "sink:playback_FL") in links, links
+pra.buses.append(ts.Bus(1))  # and a bus: the track's chain goes there
+ah.loaded[(pra.buses[0].strip, 0)] = FakePlugin("B1.1 Rev")
+atr.bus = 1
+ah.rewire()
+assert ("T1.1 EQ:output_1", "B1.1 Rev:input_1") in ah.wiring.links[atr.strip], ah.wiring.links[atr.strip]
+ah.loaded.pop((atr.strip, 0))  # no effects: the input goes straight into the bus
+ah.rewire()
+assert sorted(ah.wiring.links[atr.strip]) == [("/in:capture_FL", "B1.1 Rev:input_1"),
+                                              ("/in:capture_FL", "B1.1 Rev:input_2")], ah.wiring.links[atr.strip]
+# saved with the project, and the inputs the dialog lists stay a plain list without PipeWire
+prs = ts.Project(tracks=[ts.Track("audio", 1, 1, source="/in:FL", pan="right")])
+ts.save_text(OUT / "audio.json", ts.dump_project(prs))
+backaudio = ts.load_project(OUT / "audio.json").tracks[0]
+assert backaudio.audio and backaudio.source == "/in:FL" and backaudio.pan == "right", backaudio
+assert isinstance(ts.plugins.audio_inputs(), list)
+print("audio tracks OK")

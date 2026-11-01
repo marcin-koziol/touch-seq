@@ -7,7 +7,7 @@ from PySide6.QtCore import QTimer
 from PySide6.QtGui import QColor, QFont, Qt
 
 from .controls import Controls
-from .dialogs import Chooser, MidiPorts, NewTrack, Settings
+from .dialogs import AudioSources, Chooser, MidiPorts, NewTrack, Settings
 from .model import dump_project, free_project_path, save_text
 from .patchbay import Patchbay
 from .performer import Performer
@@ -28,6 +28,8 @@ class Rack(Window):
         self.seq.master_fx = lambda: host.xyfx() is not None
         host.select_track = lambda tr: setattr(self.seq, "sel", tr)
         self.seq.new_track = self.open_new_track
+        self.seq.choose_source = self.open_source_choice
+        self.seq.reroute = host.rewire
         host.choose_port = self.open_port_choice
         super().__init__([(0, 0, "CTRL-10", "performance controls", self.controls),
                           (0, 1, "SEQ-64", "step sequencer", self.seq),
@@ -134,8 +136,21 @@ class Rack(Window):
             return self.close_dialog()
         self.open_dialog("NEW TRACK", "drum · melody · external MIDI", NewTrack(self.add_track))
 
-    def add_track(self, kind, port=""):
-        self.seq.add_track(kind, port)
+    def add_track(self, kind, value=""):
+        self.seq.add_track(kind, value)
+        self.dirty = True
+        self.autosave()
+        self.close_dialog()
+
+    def open_source_choice(self, tr):
+        if self.dialog:
+            return self.close_dialog()
+        self.open_dialog("AUDIO IN", f"track T{tr.number}",
+                         AudioSources(lambda port: self.set_track_source(tr, port), tr.source))
+
+    def set_track_source(self, tr, port):
+        tr.source = port
+        self.host.rewire()  # the input is wired by the rack: it survives chain changes
         self.dirty = True
         self.autosave()
         self.close_dialog()

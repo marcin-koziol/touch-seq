@@ -255,6 +255,9 @@ class Performer(Panel):
         for rect, (label, q) in zip(quants, self.QUANTS):
             self.button(p, rect, label, lambda q=q: setattr(self, "quant", q), on=self.quant == q)
         body = QRectF(g, header.bottom() + 10 * s, self.w - 2 * g, self.h - header.bottom() - 10 * s - g)
+        if tr.audio:  # an input has nothing to play here
+            self.text(p, body, "an audio track: its input is patched in the sequencer (EDIT)", DIM, 16)
+            return
         draw = self.draw_drum_pads if tr.drum else self.draw_keys if self.layout == "keys" else self.draw_chord_pads
         draw(p, body, tr)
 

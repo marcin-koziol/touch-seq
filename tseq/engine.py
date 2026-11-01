@@ -306,10 +306,12 @@ class Engine:
             return tr.scenes[self.pending_scene]
         return None
 
-    def add_track(self, kind, port=""):
+    def add_track(self, kind, value=""):
+        """A new track; `value` is the MIDI output of an external one or the input of an audio one."""
         with self.lock:
             number = max((t.number for t in self.project.tracks), default=0) + 1
-            tr = Track(kind, 10 if kind == "drum" else min(len(self.project.tracks) + 1, 16), number, port=port)
+            tr = Track(kind, 10 if kind == "drum" else min(len(self.project.tracks) + 1, 16), number,
+                       port=value if kind == "external" else "", source=value if kind == "audio" else "")
             self.project.tracks.append(tr)
             return tr
 
