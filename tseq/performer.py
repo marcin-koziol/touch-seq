@@ -257,7 +257,7 @@ class Performer(Panel):
         """Write notes at the quantized position; returns what record_end needs, or None (not recording)."""
         e = self.engine
         pos = e.position(tr) if self.mode and tr in e.rec else None
-        if pos is None:
+        if pos is None or not lanes:  # not armed, not playing, or nothing to write (a note the drum kit has not)
             return None
         pat = tr.current
         at = round(pos / self.quant) * self.quant
