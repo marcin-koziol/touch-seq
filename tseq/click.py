@@ -25,16 +25,17 @@ PLAYERS = (
 
 
 def graph_latency(rate=RATE):
-    """The audio graph's own buffer, in samples. The click's stream asks for that and no more: a stream that
-    buffers 20 ms is heard 20 ms after the notes it should sit with."""
+    """The buffer the click's stream asks for, in samples: a few of the graph's own, so that the writer's
+    jitter (this is Python, not a real-time thread) cannot starve it - and, because the engine queues every
+    beat that much early, the click is still heard with the notes rather than a buffer behind them."""
     try:
         import plugins
         forced, default, _lo, _hi, graph_rate = plugins.quantum()
         rate = graph_rate or rate
-        size = forced or default or 256
+        quantum = forced or default or 256
     except Exception:  # no PipeWire to ask: a sane buffer
-        size = 256
-    return max(64, min(2048, int(size))), (rate or RATE)
+        quantum = 256
+    return max(64, min(4096, max(quantum * 3, int(rate * 0.012)))), (rate or RATE)
 
 
 def player(size=256):

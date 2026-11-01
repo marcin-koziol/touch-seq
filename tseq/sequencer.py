@@ -185,7 +185,9 @@ class Sequencer(Panel):
             if self.mode == "copy":
                 tr.patterns[i] = copy.deepcopy(tr.current)
             elif self.mode == "clear":
+                length = tr.patterns[i].length  # clearing takes the notes out, not the length you set
                 tr.patterns[i] = tr.new_pattern()
+                tr.patterns[i].length = length
             else:
                 self.engine.queue_pattern(tr, i)
         self.mode = None

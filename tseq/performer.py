@@ -335,10 +335,9 @@ class Performer(Panel):
                     lane[i].on = False
         if pos is not None and start is not None:
             at = round(start / self.quant) * self.quant  # where the pattern puts the note
-            if pos - at >= gate:  # its turn in this pass is over: hear it now, up to the pattern's next one
-                after = (pos - at) % pat.length
-                until = pat.length - after if after else pat.length
-                self.engine.take_now(tr, pat, i, lanes, min(gate, until) * self.engine.step_len)
+            left = gate - (pos - at)  # what is left of the note's own length: no more, or it hangs over
+            if left > 0.02:
+                self.engine.take_now(tr, pat, i, lanes, left * self.engine.step_len)
 
     # --- chords --------------------------------------------------------------
     def scale(self):

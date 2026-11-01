@@ -1609,10 +1609,13 @@ take = pw2.record_start(prw.tracks[0], [60], 100)
 pw2.on(prw.tracks[0], 60, 100)
 time.sleep(0.5)  # over the bar line: the pattern leaves the step to the fingers holding it
 assert sum(1 for _, m in outw.log if m[0] & 0xF0 == 0x90 and m[1] == 60) == 1, "the pattern blipped the take"
-pw2.off(prw.tracks[0], 60)  # the key is up: what was recorded has to be heard now, not a bar later
+pw2.off(prw.tracks[0], 60)  # the take lasted the whole bar: it ends here, it must not hang over
 pw2.record_end(prw.tracks[0], take)
 notes = [m for _, m in outw.log if m[0] & 0xF0 in (0x80, 0x90) and m[1] == 60]
-assert notes[-2:] == [[0x80, 60, 0], [0x90, 60, 100]], notes[-3:]
+assert notes[-1] == [0x80, 60, 0], notes[-3:]
+assert notes.count([0x90, 60, 100]) == 1, "no extra note-on for a take whose own length is over"
+time.sleep(16 * ew2.step_len * 1.1)  # the loop comes round: the pattern plays what was recorded
+assert [m for _, m in outw.log].count([0x90, 60, 100]) >= 2, "the pattern plays the take on its turn"
 ew2.stop(); pw2.mode = None; pw2.tick(); ew2.close()
 print("take handed over OK")
 
@@ -1658,3 +1661,17 @@ el5.stop()
 assert el5.clicker.events == [], "a stop drops the beats not written yet"
 el5.close()
 print("click lookahead OK")
+
+# --- clearing a slot takes the notes out, not the length you set ---------------------------
+prq = ts.Project(bpm=120, tracks=[ts.Track("melody", 1, 1)])
+trq = prq.tracks[0]
+trq.patterns[1].length = 64
+trq.patterns[1].lane(60)[0].on = True
+eq2 = ts.Engine(prq, FakeOut()); sq2 = ts.Sequencer(prq, eq2)
+sq2.sel = trq
+sq2.toggle_mode("clear")
+sq2.press_pattern(1)
+assert trq.patterns[1].length == 64, f"clearing reset the length to {trq.patterns[1].length}"
+assert trq.patterns[1].empty(), "the notes are gone"
+eq2.close()
+print("clear keeps the length OK")
