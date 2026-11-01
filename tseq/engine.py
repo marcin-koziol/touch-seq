@@ -1,0 +1,230 @@
+"""The MIDI side: the output port and the clock/playback thread that turns patterns into MIDI. Everything
+that touches playback state or sends MIDI holds `Engine.lock`."""
+import threading
+import time
+
+import rtmidi
+
+from .constants import PPQN, STEPS_PER_BAR, TICKS_PER_STEP
+from .model import Track
+
+
+def open_midi(port):
+    """Opens an existing output port whose name contains `port`, else creates a virtual one."""
+    out = rtmidi.MidiOut()
+    matches = [i for i, name in enumerate(out.get_ports()) if port.lower() in name.lower()]
+    if matches:
+        out.open_port(matches[0])
+        print(f"MIDI: connected to {out.get_ports()[matches[0]]}")
+    else:
+        out.open_virtual_port(port)
+        print(f"MIDI: virtual port '{port}'")
+    return out
+
+
+class MidiRouter:
+    """The engine's MIDI output: everything goes to the main port; channel messages also go to the plugin
+    host: a track's notes to that track's instrument, messages without a track (CC, pitch bend from the
+    faders) to the instruments of the tracks on that channel."""
+
+    def __init__(self, main):
+        self.main = main
+        self.taps = {}  # Track -> MIDI out port feeding the track's instrument
+
+    def send_message(self, msg, track=None):
+        self.main.send_message(msg)
+        if msg[0] >= 0xF0:
+            return
+        if track is not None:
+            port = self.taps.get(track)
+            if port:
+                port.send_message(msg)
+            return
+        channel = (msg[0] & 0x0F) + 1
+        for tr, port in list(self.taps.items()):
+            if tr.channel == channel:
+                port.send_message(msg)
+
+
+class Engine:
+    """Clock + playback thread. Everything that touches playback state or sends MIDI holds `lock`."""
+
+    def __init__(self, project, out):
+        self.project, self.out = project, out
+        self.lock = threading.RLock()
+        self.playing = False
+        self.ticks = 0
+        self.next_tick = 0.0
+        self.step_index = -1  # global step last played
+        self.pos = {}  # Track -> next step
+        self.playhead = {}  # Track -> step last played
+        self.pending = {}  # Track -> pattern queued for the next bar
+        self.pending_scene = None
+        self.scene = None  # last launched scene
+        self.sounding = {}  # (channel, note) -> (note-off time, track)
+        self.step_time, self.step_len = 0.0, 0.125  # when the last step played, and a step's length (s)
+        self.rec = None  # (track, replace) while recording live playing into a track
+        self.rec_fresh = set()  # (lane, step) just played in ahead of the playhead: not replayed, not erased
+        self.rec_taken = set()  # (lane, step) recorded since recording started: REC doesn't erase them
+        threading.Thread(target=self.run, daemon=True).start()
+
+    # --- thread ---------------------------------------------------------
+    def run(self):
+        while True:
+            with self.lock:
+                now = time.perf_counter()
+                for key, (off, _) in list(self.sounding.items()):
+                    if off <= now:
+                        self.note_off(key)
+                if self.playing and now >= self.next_tick:
+                    self.tick(now)
+                wake = min([self.next_tick if self.playing else now + 0.005, *(o for o, _ in self.sounding.values())])
+            time.sleep(max(0.0, min(wake - time.perf_counter(), 0.005)))
+
+    def tick(self, now):
+        if now - self.next_tick > 0.05:  # fell far behind (e.g. system stall): don't burst-catch-up
+            self.next_tick = now
+        self.out.send_message([0xF8])
+        if self.ticks % TICKS_PER_STEP == 0:
+            self.step(self.next_tick)
+        self.ticks += 1
+        self.next_tick += 60 / (self.project.bpm * PPQN)
+
+    def step(self, t):
+        self.step_index = self.ticks // TICKS_PER_STEP
+        if self.step_index % STEPS_PER_BAR == 0:
+            self.apply_pending()
+        step_len = TICKS_PER_STEP * 60 / (self.project.bpm * PPQN)
+        self.step_time, self.step_len = t, step_len
+        for tr in self.project.tracks:
+            pat = tr.current
+            i = self.pos.get(tr, self.step_index) % pat.length  # a track added mid-play joins in step
+            self.playhead[tr] = i
+            self.pos[tr] = (i + 1) % pat.length
+            recording = self.rec is not None and self.rec[0] is tr
+            lanes = list(pat.lanes.items())  # a copy: the UI thread may add a lane meanwhile
+            if recording and self.rec[1]:  # REC replaces what was there before this recording
+                for k, lane in lanes:
+                    if (k, i) not in self.rec_taken:
+                        lane[i].on = False
+            if tr.mute:
+                continue
+            for k, lane in lanes:
+                s = lane[i]
+                if s.on:
+                    if recording and (k, i) in self.rec_fresh:  # already heard live
+                        self.rec_fresh.discard((k, i))
+                        continue
+                    self.note_on(tr, tr.note(k), s.vel, t + max(0.005, s.gate * step_len))
+
+    def note_on(self, tr, note, vel, off):
+        key = (tr.channel, note)
+        if key in self.sounding:  # retrigger: close the previous note first
+            self.note_off(key)
+        self.out.send_message([0x90 | (tr.channel - 1), note, vel], tr)
+        self.sounding[key] = (off, tr)
+
+    def note_off(self, key):
+        channel, note = key
+        self.out.send_message([0x80 | (channel - 1), note, 0], self.sounding.pop(key)[1])
+
+    def apply_pending(self):
+        if self.pending_scene is not None:
+            for tr in self.project.tracks:
+                if tr.scenes[self.pending_scene] is not None:
+                    self.set_pattern(tr, tr.scenes[self.pending_scene])
+            self.scene, self.pending_scene = self.pending_scene, None
+        for tr, p in self.pending.items():
+            self.set_pattern(tr, p)
+        self.pending.clear()
+
+    def set_pattern(self, tr, p):
+        tr.pattern = p
+        self.pos[tr] = 0
+
+    # --- control (UI thread) --------------------------------------------
+    def start(self):
+        with self.lock:
+            self.playing, self.ticks, self.step_index = True, 0, -1
+            self.pos.clear()
+            self.playhead.clear()
+            self.next_tick = time.perf_counter() + 0.005
+            self.out.send_message([0xFA])
+
+    def stop(self):
+        with self.lock:
+            self.playing = False
+            self.out.send_message([0xFC])
+            for key in list(self.sounding):
+                self.note_off(key)
+            self.playhead.clear()
+            self.rec_fresh.clear()
+            self.rec_taken.clear()
+            self.step_index = -1
+            self.apply_pending()
+
+    def position(self, tr):
+        """Where in its pattern the track is right now, in (fractional) steps; None when stopped."""
+        with self.lock:
+            if not self.playing or tr not in self.playhead:
+                return None
+            return self.playhead[tr] + (time.perf_counter() - self.step_time) / self.step_len
+
+    def live(self, tr, note, vel):
+        """Note on (vel > 0) / off from a live pad, outside the sequencer's own note bookkeeping."""
+        with self.lock:
+            self.out.send_message([(0x90 if vel else 0x80) | (tr.channel - 1), note, vel], tr)
+
+    def send(self, msg, track=None):
+        with self.lock:
+            self.out.send_message(msg, track)
+
+    def preview(self, tr, note):
+        with self.lock:
+            self.note_on(tr, note, 100, time.perf_counter() + 0.15)
+
+    def queue_pattern(self, tr, p):
+        with self.lock:
+            self.pending[tr] = p
+            if not self.playing:
+                self.apply_pending()
+
+    def queue_scene(self, sc):
+        with self.lock:
+            self.pending_scene = sc
+            for tr in self.project.tracks:  # the scene overrides earlier per-track requests
+                if tr.scenes[sc] is not None:
+                    self.pending.pop(tr, None)
+            if not self.playing:
+                self.apply_pending()
+
+    def store_scene(self, sc):
+        with self.lock:
+            for tr in self.project.tracks:
+                nxt = self.next_pattern(tr)
+                tr.scenes[sc] = tr.pattern if nxt is None else nxt
+            self.scene = sc
+
+    def next_pattern(self, tr):
+        if tr in self.pending:
+            return self.pending[tr]
+        if self.pending_scene is not None:
+            return tr.scenes[self.pending_scene]
+        return None
+
+    def add_track(self, kind):
+        with self.lock:
+            number = max((t.number for t in self.project.tracks), default=0) + 1
+            tr = Track(kind, 10 if kind == "drum" else min(len(self.project.tracks) + 1, 16), number)
+            self.project.tracks.append(tr)
+            return tr
+
+    def remove_track(self, tr):
+        with self.lock:
+            self.project.tracks.remove(tr)
+            for d in (self.pos, self.playhead, self.pending):
+                d.pop(tr, None)
+
+    def close(self):
+        if self.playing:
+            self.stop()

@@ -185,6 +185,13 @@ packaging/build-appimage.sh                           # dist/Touch-Seq-<version>
 CI runs the app tests and the XYFX build and DSP test on every push; a `v*` tag builds AppImages for x86_64
 and aarch64 and publishes a release.
 
+The app is `touchseq.py` (the entry point: it flattens the package back into one namespace, so `import
+touchseq as ts` in the tests sees everything) plus the `tseq/` package, one module per concern:
+`model` (the project and its files), `engine` (MIDI out and the playback thread), `ui` (the drawing toolkit,
+`Panel` and the module window), one module per rack panel (`sequencer`, `controls`, `host`, `performer`),
+then `rack`, `dialogs` and `app` (startup). `tseq/__init__.py` lists them in dependency order; nothing in
+the package imports anything above it.
+
 ## License
 
 Touch-Seq is GPL-3.0-or-later ([LICENSE](LICENSE)). XYFX is ISC ([xyfx/LICENSE](xyfx/LICENSE)). The AppImage

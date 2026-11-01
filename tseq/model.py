@@ -1,0 +1,225 @@
+"""The persisted project: steps, patterns, tracks, controls, plugin strips, and reading/writing the
+project files. No Qt, no MIDI: the engine and the panels read this."""
+import itertools
+import json
+import os
+import re
+from dataclasses import asdict, astuple, dataclass, field
+
+from plugins import PluginRef
+
+from .constants import DRUM_KIT, MAX_STEPS, NOTE_NAMES, PATTERNS, SCENES, SLOTS
+from .music import SCALES
+
+
+@dataclass
+class Step:
+    on: bool = False
+    vel: int = 100
+    gate: float = 0.5  # in steps; may span several
+
+
+DEFAULT_STEP = Step()
+
+
+def new_lane():
+    return [Step() for _ in range(MAX_STEPS)]
+
+
+@dataclass
+class Pattern:
+    """Steps per lane. Drum lanes are the kit voices (0..11); melody lanes are MIDI notes, created on
+    first use, so any number of notes can sound on one step."""
+    length: int = 16
+    lanes: dict = field(default_factory=dict)
+
+    def lane(self, k):
+        if k not in self.lanes:
+            self.lanes[k] = new_lane()
+        return self.lanes[k]
+
+    def notes_at(self, i):
+        return [(k, lane[i]) for k, lane in self.lanes.items() if lane[i].on]
+
+    def empty(self):
+        return not any(s.on for lane in self.lanes.values() for s in lane)
+
+
+@dataclass(eq=False)  # identity hash: chains are keys in the plugin host
+class Strip:
+    """Plugin chain: plugins.PluginRef per slot (or None), then volume / mute at its end."""
+    slots: list = field(default_factory=lambda: [None] * SLOTS)
+    volume: float = 1.0
+    mute: bool = False
+    legacy: str = field(default="", repr=False)  # state-file prefix from before chains belonged to tracks
+
+
+def dump_strip(s):
+    return {"slots": [asdict(r) if r else None for r in s.slots], "volume": s.volume, "mute": s.mute}
+
+
+def load_strip(d):
+    return Strip([PluginRef(**r) if r else None for r in d["slots"]], d["volume"], d["mute"])
+
+
+@dataclass(eq=False)  # identity hash: tracks are dict keys in the engine
+class Track:
+    kind: str = "melody"  # or "drum"
+    channel: int = 1
+    number: int = 1  # stable name/color, kept when other tracks are deleted
+    patterns: list = field(default_factory=list)
+    pattern: int = 0
+    scenes: list = field(default_factory=lambda: [None] * SCENES)  # pattern index per scene
+    mute: bool = False
+    voice: int = 0  # drum voice the grid view edits
+    last: Step = field(default_factory=Step)  # velocity/gate a newly enabled step gets
+    last_note: int = 60  # melody: pitch the grid view paints, and the latest one placed
+    strip: Strip = field(default_factory=Strip)  # its plugins: instrument + effects
+
+    def __post_init__(self):
+        if not self.patterns:
+            self.patterns = [self.new_pattern() for _ in range(PATTERNS)]
+
+    @property
+    def drum(self):
+        return self.kind == "drum"
+
+    @property
+    def current(self):
+        return self.patterns[self.pattern]
+
+    def new_pattern(self):
+        return Pattern(lanes={k: new_lane() for k in range(len(DRUM_KIT))} if self.drum else {})
+
+    def note(self, lane):
+        return DRUM_KIT[lane][1] if self.drum else lane
+
+    @property
+    def edit_lane(self):
+        """Lane the grid view paints: the selected drum voice, or the melody's latest pitch."""
+        return self.voice if self.drum else self.last_note
+
+
+@dataclass
+class Control:
+    kind: str  # "pb" (pitch bend), "mod" (mod wheel = CC1) or "cc"
+    channel: int = 1
+    cc: int = 1
+    fine: bool = False  # 14-bit: CC n carries the MSB, CC n+32 the LSB (only for CC 0-31)
+    bipolar: bool = False  # rests at and fills from the center
+    # where it goes: "channel" (MIDI on `channel`, e.g. outboard gear), "track" (that track's instrument, on the
+    # track's channel) or "param" (a plugin parameter directly, no MIDI; CC faders only)
+    target: str = "channel"
+    track: int = 0  # target "track": a track number; 0 = whichever track the sequencer has selected
+    param: list = None  # target "param": [track number (0 = master), slot, parameter index, parameter name]
+
+    @property
+    def wide(self):
+        """Sends a 14-bit value (pitch bend always does)."""
+        return self.kind == "pb" or self.fine
+
+    @property
+    def centered(self):
+        return self.kind == "pb" or self.bipolar
+
+    @property
+    def max(self):
+        return 16383 if self.wide else 127
+
+
+def default_controls():
+    # after PB and mod wheel: CCs the MIDI spec leaves undefined, so they don't collide with what synths
+    # map by default (volume, pan, cutoff, sustain, ...); 102+ because 0-63 are 14-bit MSB/LSB pairs
+    # (e.g. Surge XT learns CC20 as the MSB of a 20/52 pair)
+    controls = [Control("pb"), Control("mod", cc=1)] + [Control("cc", cc=102 + i) for i in range(8)]
+    for c in controls:  # play whatever track is selected
+        c.target = "track"
+    return controls
+
+
+@dataclass
+class Project:
+    bpm: int = 120
+    tracks: list = field(default_factory=list)
+    controls: list = field(default_factory=default_controls)
+    master: Strip = field(default_factory=Strip)  # effects every track goes through to the output
+    key: int = 0  # 0 = C
+    scale: str = "chromatic"
+
+    def in_scale(self, note):
+        return (note - self.key) % 12 in SCALES[self.scale]
+
+    @property
+    def key_name(self):
+        return NOTE_NAMES[self.key] + ("" if self.scale == "chromatic" else f" {self.scale}")
+
+
+def dump_project(pr):
+    """Compact JSON: a pattern stores only the steps that differ from the default."""
+    def pattern(p):
+        return {"length": p.length, "steps": [[k, i, *astuple(s)] for k, lane in p.lanes.items()
+                                              for i, s in enumerate(lane) if s != DEFAULT_STEP]}
+
+    return json.dumps({"bpm": pr.bpm, "key": pr.key, "scale": pr.scale, "tracks": [
+        {"kind": t.kind, "channel": t.channel, "number": t.number, "pattern": t.pattern, "scenes": t.scenes, "mute": t.mute,
+         "voice": t.voice, "last": astuple(t.last), "last_note": t.last_note, "strip": dump_strip(t.strip),
+         "patterns": [pattern(p) for p in t.patterns]}
+        for t in pr.tracks], "controls": [astuple(c) for c in pr.controls],
+        "master": dump_strip(pr.master)}, separators=(",", ":"))
+
+
+def new_project():
+    return Project(tracks=[Track("drum", 10, 1), Track("melody", 1, 2)])
+
+
+def project_files(folder):
+    """Projects in `folder`, most recently changed first (autosave keeps that current)."""
+    return sorted(folder.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+
+
+def free_project_path(folder, stem):
+    """First free '<stem> N.json' (N = 1, 2, ...), its plugin-state folder free too; a trailing number on
+    `stem` is replaced, so a copy of 'Project 3' becomes the next free 'Project N'."""
+    stem = re.sub(r" \d+$", "", stem)
+    for n in itertools.count(1):
+        path = folder / f"{stem} {n}.json"
+        if not path.exists() and not path.with_suffix(".plugins").exists():
+            return path
+
+
+def load_project(path):
+    if not path.exists():
+        return new_project()
+    d = json.loads(path.read_text())
+    tracks = []
+    for n, t in enumerate(d["tracks"], 1):
+        last, last_note = t["last"], t.get("last_note", 60)
+        if len(last) == 4:  # older files: steps carried a note (on, note, vel, gate)
+            last, last_note = [last[0], last[2], last[3]], last[1]
+        tr = Track(t["kind"], t["channel"], t.get("number", n), pattern=t["pattern"], scenes=t["scenes"], mute=t["mute"],
+                   voice=t["voice"], last=Step(*last), last_note=last_note,
+                   strip=load_strip(t["strip"]) if "strip" in t else Strip())
+        for p, pd in zip(tr.patterns, t["patterns"]):
+            p.length = pd["length"]
+            for row in pd["steps"]:
+                if len(row) == 6:  # older files: [lane, step, on, note, vel, gate]; a melody's lane is its note
+                    k, i, on, note, vel, gate = row
+                    row = [k if tr.drum else note, i, on, vel, gate]
+                k, i, *values = row
+                p.lane(k)[i] = Step(*values)
+        tracks.append(tr)
+    controls = [Control(*c) for c in d["controls"]] if "controls" in d else default_controls()  # c may lack newer fields
+    # older files: 4 strips on MIDI channels; each goes to the first track on its channel with no plugins
+    for n, s in enumerate(d.get("strips", []), 1):
+        tr = next((t for t in tracks if t.channel == s["channel"] and not any(t.strip.slots)), None)
+        if tr and any(s["slots"]):
+            tr.strip = load_strip(s)
+            tr.strip.legacy = f"s{n}"
+    master = load_strip(d["master"]) if "master" in d else Strip()
+    return Project(d["bpm"], tracks, controls, master, d.get("key", 0), d.get("scale", "chromatic"))
+
+
+def save_text(path, text):
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(text)
+    os.replace(tmp, path)

@@ -44,6 +44,8 @@ tar -C xyfx-build/bin -czf "$DIST/touchseq-xyfx-$VERSION-$ARCH.tar.gz" touchseq-
 echo "== app"
 install -Dm644 "$ROOT/touchseq.py" AppDir/usr/share/touch-seq/touchseq.py
 install -Dm644 "$ROOT/plugins.py" AppDir/usr/share/touch-seq/plugins.py
+install -d AppDir/usr/share/touch-seq/tseq
+install -m644 "$ROOT"/tseq/*.py AppDir/usr/share/touch-seq/tseq/
 install -Dm644 "$ROOT/LICENSE" AppDir/usr/share/touch-seq/LICENSE
 install -Dm755 "$ROOT/packaging/AppRun" AppDir/AppRun
 install -Dm644 "$ROOT/packaging/touch-seq.desktop" AppDir/touch-seq.desktop
