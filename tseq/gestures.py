@@ -82,3 +82,14 @@ class ScrollOrTap(Gesture):
     def release(self, pos):
         if not self.moved:
             self.on_tap()
+
+
+class Slide(Gesture):
+    """Vertical slider: the finger's height inside `track` is the value (0..1)."""
+
+    def __init__(self, track, set_, pos):
+        self.track, self.set = track, set_
+        self.move(pos)
+
+    def move(self, pos):
+        self.set(max(0.0, min(1.0, (self.track.bottom() - pos.y()) / self.track.height())))

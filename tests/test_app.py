@@ -1097,3 +1097,35 @@ placed.clear()
 mh_mon.ensure_monitors()
 assert not placed, placed
 print("monitor node OK")
+
+# --- our EQ: the curve maths the editor draws, the graph's mapping, the bands under the finger ---
+assert abs(ts.band_db((1000.0, 12.0, 1.4, 0), 1000.0) - 12.0) < 0.05, "a bell's centre is its gain"
+assert abs(ts.band_db((1000.0, 12.0, 1.4, 0), 40.0)) < 0.6, "and it leaves the bass alone"
+assert ts.band_db((200.0, 0.0, 0.7, 3), 30.0) < -20.0 and abs(ts.band_db((200.0, 0.0, 0.7, 3), 5000.0)) < 0.1
+assert ts.band_db((4000.0, 0.0, 0.7, 4), 15000.0) < -20.0 and abs(ts.band_db((4000.0, 0.0, 0.7, 4), 200.0)) < 0.1
+assert ts.band_db((300.0, 9.0, 0.7, 1), 30.0) > 7.0 and ts.band_db((3000.0, -9.0, 0.7, 2), 15000.0) < -7.0
+graph = ts.QRectF(0, 0, 600, 300)
+assert abs(ts.EqEditor.freq_at(graph, ts.EqEditor.x_of(graph, 1000.0)) - 1000.0) < 1.0
+assert abs(ts.EqEditor.db_at(graph, ts.EqEditor.y_of(graph, 12.0)) - 12.0) < 0.5
+eqh = FakeHostPanel(ts.Project(tracks=[ts.Track("melody", 1, 1)]))
+eqh.s = 1.0
+eqh.host = ParamCarla()
+eqh.host.values = {4 * i + n: v for i in range(8) for n, v in ((0, 1000.0), (1, 0.0), (2, 1.4), (3, 0))}
+touched = []
+eqh.set_param = lambda plugin, index, value: touched.append((index, round(value, 3)))
+ed = ts.EqEditor(eqh)
+ed.plugin = FakePlugin("M.1 EQ")
+ed.graph = graph
+ed.place(QPointF(6, 150))  # 1 % from the left: a low cut where the bass is
+assert [k for k, v in touched] == [0, 1, 3] and touched[-1] == (3, 3), touched
+assert touched[0][1] < 25.0, touched  # the frequency came from the x it was dropped at
+touched.clear()
+ed.place(QPointF(300, 150))  # the middle: a bell
+assert touched[-1] == (3, 0), touched
+touched.clear()
+ed.place(QPointF(594, 150))  # the far top: a high cut
+assert touched[-1] == (3, 4), touched
+touched.clear()
+ts.BandPoint(ed, 0).move(QPointF(600, 0))  # dragging a band: right and up is high and loud
+assert touched[0][0] == 0 and touched[0][1] > 19000 and touched[1][1] > 20, touched
+print("eq editor OK")

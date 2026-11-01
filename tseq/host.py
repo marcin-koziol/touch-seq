@@ -14,20 +14,13 @@ from PySide6.QtGui import QColor, QLinearGradient, QPen
 import plugins
 
 from .model import Bus
-from .constants import BG, BORDER, DIM, MONITOR_LABELS, PALETTE, PANEL, SLOTS, TEXT, WARN, XYFX_LABELS
-from .gestures import Drag, Gesture, Hold, ScrollOrTap
+from .constants import (BG, BORDER, DIM, EQ_LABELS, MONITOR_LABELS, PALETTE, PANEL, SLOTS, TEXT, WARN,
+                        XYFX_LABELS)
+from .eq import EqEditor
+from .gestures import Drag, Hold, ScrollOrTap, Slide
 from .ui import Panel, param_color, split
 
 
-class Slide(Gesture):
-    """Vertical slider: the finger's height inside `track` is the value (0..1)."""
-
-    def __init__(self, track, set_, pos):
-        self.track, self.set = track, set_
-        self.move(pos)
-
-    def move(self, pos):
-        self.set(max(0.0, min(1.0, (self.track.bottom() - pos.y()) / self.track.height())))
 
 
 class HostPanel(Panel):
@@ -66,6 +59,7 @@ class HostPanel(Panel):
         self.states_dirty = False  # a parameter changed since the plugins' states were last saved
         self.meters = {}  # Strip -> {"l", "r", "peak", "at"}: what its chain's output is doing
         self.monitor = None  # the monitor plugin's ref, looked up once (False: not installed)
+        self.eq = EqEditor(self)  # the EQ's own editor, drawn in the parameter area
         if self.buffer:
             plugins.set_quantum(self.buffer)  # before the engine starts, so the plugins see that size
         try:
@@ -369,6 +363,7 @@ class HostPanel(Panel):
         if self.host:
             self.host.idle()
             self.sample_meters()
+            self.eq.tick()  # the EQ's analyser, when one is open
             self.forget_deleted_tracks()
             if self.xyfx() and self.xy_values().get("bpm") != self.project.bpm:  # repeats follow the tempo
                 self.xy(bpm=self.project.bpm)
@@ -830,6 +825,11 @@ class HostPanel(Panel):
             self.box(p, remove, QColor(255, 93, 93, 140), None)
             p.restore()
         self.region(remove, lambda pos: Hold(lambda: self.set_slot(*sel, None)))
+
+        if plugin.ref.label in EQ_LABELS:  # our EQ: the curve, not a grid of knobs
+            self.eq.draw(p, QRectF(inner.left(), title.bottom() + 8 * s, inner.width(),
+                                   inner.bottom() - title.bottom() - 8 * s), plugin)
+            return
 
         per_page = self.KNOB_COLS * self.KNOB_ROWS
         pages = max(1, math.ceil(len(plugin.params) / per_page))

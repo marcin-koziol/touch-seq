@@ -79,3 +79,5 @@ PARAM_FAMILIES = [
 XYFX_LABELS = {"touchseq.xyfx", "urn:touch-seq:xyfx"}  # CLAP id, LV2 URI (xyfx/ in this repo)
 # a transparent gain/pan node the app puts in an audio track with no effects (monitor/ in this repo)
 MONITOR_LABELS = {"touchseq.monitor", "urn:touch-seq:monitor"}
+# our eight band EQ, whose editor the host panel draws (eq/ in this repo)
+EQ_LABELS = {"touchseq.eq", "urn:touch-seq:eq"}

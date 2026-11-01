@@ -9,6 +9,7 @@ touch.log
 __pycache__/
 xyfx/build/
 monitor/build/
+eq/build/
 build/
 dist/
 *.AppImage

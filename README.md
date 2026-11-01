@@ -41,6 +41,16 @@ screen; everything else keeps running.
 ![Drum editor](docs/screenshots/drums.png)
 ![Adding a track: drum, melody or external MIDI](docs/screenshots/new-track.png)
 
+### EQ — eight bands, drawn in the app
+
+Touch-Seq EQ is our own CLAP/LV2 plugin (`eq/`) with **no window of its own**: pick it in a chain and HOST-4's
+parameter area becomes its editor. Eight bands on a log frequency axis with the summed curve and the plugin's
+**spectrum** behind it: drag a dot for frequency (sideways) and boost/cut (up and down), tap an empty spot to
+put the chosen band there — near the bass end it becomes a **low cut**, near the top a **high cut**, in the
+middle a bell — and the menu underneath sets its **mode** (bell, low/high shelf, low/high cut) and **width**.
+The spectrum is measured in the plugin and read back through output parameters, because Touch-Seq has no audio
+buffers of its own; the curve is drawn from the same biquad maths the plugin runs.
+
 ### HOST-4 — plugins (Carla)
 
 - every plugin track has a chain: **instrument → 2 effects → level/mute**; all tracks go through the
@@ -231,6 +241,7 @@ QT_QPA_PLATFORM=offscreen python tests/test_app.py   # sequencer, UI, projects, 
 QT_QPA_PLATFORM=offscreen python tests/test_host.py  # plugin host with real Carla + PipeWire (local only)
 QT_QPA_PLATFORM=offscreen python tests/test_xyfx.py  # XYFX + XY pad with real Carla (local only)
 packaging/build-appimage.sh                           # dist/Touch-Seq-<version>-<arch>.AppImage
+xyfx/install.sh monitor/install.sh eq/install.sh      # our CLAP/LV2 plugins into ~/.clap and ~/.lv2
 ```
 
 CI runs the app tests and the XYFX build and DSP test on every push; a `v*` tag builds AppImages for x86_64

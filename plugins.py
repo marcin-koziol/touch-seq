@@ -170,6 +170,7 @@ class Plugin:
     def __init__(self, host, ref, client):
         self.host, self.ref, self.client = host, ref, client
         self.params = []
+        self.output = None  # indices of its output parameters, looked up once (our EQ's analyser)
 
     @property
     def pid(self):
@@ -230,6 +231,14 @@ class Host:
 
     def set_value(self, plugin, index, value):
         self.h.set_parameter_value(plugin.pid, index, value)
+
+    def output_params(self, plugin):
+        """Indices of a plugin's output parameters: our EQ writes its analyser's spectrum there (a host can
+        only read numbers, and Touch-Seq has no audio buffers of its own to measure)."""
+        if plugin.output is None:
+            plugin.output = [i for i in range(self.h.get_parameter_count(plugin.pid))
+                             if self.h.get_parameter_data(plugin.pid, i)["type"] != self.cb.PARAMETER_INPUT]
+        return plugin.output
 
     def peaks(self, plugin, into=False):
         """A plugin's output peaks as (left, right), linear (0.0 = silence): Carla's own meter data. `into`

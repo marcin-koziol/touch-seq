@@ -50,3 +50,14 @@ jobs:
       - run: cmake -B monitor/build -S monitor -DCMAKE_BUILD_TYPE=Release && cmake --build monitor/build -j"$(nproc)"
       - name: DSP test
         run: monitor/build/monitor-test
+
+  eq:
+    name: EQ plugin (CLAP + LV2)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - run: cmake -B eq/build -S eq -DCMAKE_BUILD_TYPE=Release && cmake --build eq/build -j"$(nproc)"
+      - name: DSP test
+        run: eq/build/eq-test
