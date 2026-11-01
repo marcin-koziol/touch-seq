@@ -311,13 +311,11 @@ class Performer(Panel):
         pat = tr.current
         at = round(pos / self.quant) * self.quant
         i = int(at) % pat.length
-        ahead = at > int(pos)  # the playhead hasn't played that step yet in this pass
         for k in lanes:
             st = pat.lane(k)[i]
             st.on, st.vel, st.gate = True, vel, GATE_RES
             e.rec_taken.add((k, i))
-            if ahead:
-                e.rec_fresh.add((k, i))
+            e.rec_fresh.add((k, i))  # sounding live while held: the pattern must not play it too
         return pat, i, e.beats(), lanes
 
     def record_end(self, tr, take):
@@ -330,6 +328,13 @@ class Performer(Panel):
             lane[i].gate = gate
             if not tr.drum:
                 self.seq.fit(lane, i)
+            self.engine.rec_fresh.discard((k, i))  # the key is up: the pattern plays it from now on
+        if pos is not None and start is not None:
+            at = round(start / self.quant) * self.quant  # where the pattern puts the note
+            if pos - at >= gate:  # its turn in this pass is over: hear it now, up to the pattern's next one
+                after = (pos - at) % pat.length
+                until = pat.length - after if after else pat.length
+                self.engine.take_now(tr, pat, i, lanes, min(gate, until) * self.engine.step_len)
 
     # --- chords --------------------------------------------------------------
     def scale(self):

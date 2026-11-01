@@ -1583,3 +1583,31 @@ assert plugins.free_engine_name("Touch-Seq", ["Touch-Seq", "Touch-Seq/T1.1 Surge
 assert plugins.free_engine_name("Touch-Seq", ["Touch-Seq", "Touch-Seq 2/T1.1 x"]) == "Touch-Seq 3"
 assert plugins.free_engine_name("Touch-Seq", ["Touch-Seq T1", "Touch-Seq T2"]) == "Touch-Seq", "MIDI ports are no engine"
 print("engine name OK")
+
+# --- lifting a key must not cut a note the sequencer has just picked up --------------------
+prv = ts.Project(tracks=[ts.Track("melody", 1, 1)])
+outv = FakeOut(); evv = ts.Engine(prv, outv)
+trv = prv.tracks[0]
+evv.sounding[(trv.channel, 60)] = (time.perf_counter() + 1.0, trv)  # the pattern is playing it now
+evv.live(trv, 60, 0)
+assert not outv.log, "a live release leaves the pattern's note alone"
+evv.live(trv, 62, 0)
+assert [m for _, m in outv.log] == [[0x80, 62, 0]], "but a note the pattern is not playing stops"
+evv.stop(); evv.close()
+
+# and with real timing: a whole-bar chord, released just after the pattern picks it up
+prw = ts.Project(bpm=600, tracks=[ts.Track("melody", 1, 1)])  # 600 bpm: a bar is 0.4 s
+outw = FakeOut(); ew2 = ts.Engine(prw, outw); sw2 = ts.Sequencer(prw, ew2); pw2 = ts.Performer(prw, ew2, sw2)
+sw2.sel = prw.tracks[0]; pw2.mode = "rec"
+ew2.start(); pw2.tick()
+time.sleep(0.05)
+take = pw2.record_start(prw.tracks[0], [60], 100)
+pw2.on(prw.tracks[0], 60, 100)
+time.sleep(0.5)  # over the bar line: the pattern leaves the step to the fingers holding it
+assert sum(1 for _, m in outw.log if m[0] & 0xF0 == 0x90 and m[1] == 60) == 1, "the pattern blipped the take"
+pw2.off(prw.tracks[0], 60)  # the key is up: what was recorded has to be heard now, not a bar later
+pw2.record_end(prw.tracks[0], take)
+notes = [m for _, m in outw.log if m[0] & 0xF0 in (0x80, 0x90) and m[1] == 60]
+assert notes[-2:] == [[0x80, 60, 0], [0x90, 60, 100]], notes[-3:]
+ew2.stop(); pw2.mode = None; pw2.tick(); ew2.close()
+print("take handed over OK")

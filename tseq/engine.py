@@ -153,7 +153,7 @@ class Engine:
         self.sounding = {}  # (channel, note) -> (note-off time, track)
         self.step_time, self.step_len = 0.0, 0.125  # when the last step played, and a step's length (s)
         self.rec = {}  # Track -> replace (bool): the tracks recording live playing into them
-        self.rec_fresh = set()  # (lane, step) just played in ahead of the playhead: not replayed, not erased
+        self.rec_fresh = set()  # (lane, step) a held take is sounding: the pattern leaves it to the fingers
         self.rec_taken = set()  # (lane, step) recorded since recording started: REC doesn't erase them
         self.clicker = Clicker()  # the metronome's tick (silent until it is switched on)
         self.counting = False  # the count-in before the first bar
@@ -212,10 +212,18 @@ class Engine:
             for k, lane in lanes:
                 s = lane[i]
                 if s.on:
-                    if recording and (k, i) in self.rec_fresh:  # already heard live
-                        self.rec_fresh.discard((k, i))
+                    if (k, i) in self.rec_fresh:  # a take is sounding it live: it ends with the key
                         continue
                     self.note_on(tr, tr.note(k), s.vel, t + max(0.005, s.gate * step_len))
+
+    def take_now(self, tr, pat, i, lanes, seconds):
+        """Start what a finished take recorded, right now instead of on the next pass: its step is behind the
+        playhead, so the pattern would only reach it a bar later and the take would seem to have been lost."""
+        with self.lock:
+            if not self.playing or seconds <= 0.02:
+                return
+            for k in lanes:
+                self.note_on(tr, tr.note(k), pat.lane(k)[i].vel, time.perf_counter() + seconds)
 
     def note_on(self, tr, note, vel, off):
         key = (tr.channel, note)
@@ -322,8 +330,14 @@ class Engine:
             refresh(self.project.tracks)
 
     def live(self, tr, note, vel):
-        """Note on (vel > 0) / off from a live pad, outside the sequencer's own note bookkeeping."""
+        """Note on (vel > 0) / off from a live pad, outside the sequencer's own note bookkeeping.
+
+        A release never cuts a note the sequencer is playing at that moment: a take recorded a moment before
+        the pattern's step comes round again is picked up by the pattern while the key is still held, and
+        lifting the finger then used to silence it until the next pass."""
         with self.lock:
+            if not vel and (tr.channel, note) in self.sounding:
+                return
             self.out.send_message([(0x90 if vel else 0x80) | (tr.channel - 1), note, vel], tr)
 
     def send(self, msg, track=None):

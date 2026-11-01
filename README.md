@@ -108,7 +108,9 @@ Plays the track selected in the sequencer:
 - drum tracks: 12 pads in the voices' colors
 - external MIDI tracks: like melody tracks (chords, keyboard), straight out to their output port
 - **REC** (replace, like tape) or **OVR** (overdub) records what you play into the pattern, quantized to
-  1/16, 1/8 or 1/4 — fingers on the pads and notes from a track's MIDI keyboard alike
+  1/16, 1/8 or 1/4 — fingers on the pads and notes from a track's MIDI keyboard alike. What you record is
+  **heard at once**: while you hold it, the pattern leaves that step to your fingers, and when you lift them
+  it plays from there — a bar-long chord keeps ringing into the loop instead of waiting for the next pass
 - **CLICK** and **COUNT** in the top bar: a tick on every beat (higher on the bar's first) while playing, and
   0/1/2 bars of them before the pattern starts, so you can come in on time
 - with **XYFX** on the master, a **MASTER** row appears in the sequencer; selecting it turns this module
