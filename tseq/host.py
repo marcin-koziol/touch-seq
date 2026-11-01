@@ -1,5 +1,6 @@
 """The plugin host module (Carla): per-track chains and the master bus, the parameter knobs, the mixer and
 the plugin browser, plus the `Slide` gesture they use."""
+import json
 import math
 import threading
 import time
@@ -194,6 +195,7 @@ class HostPanel(Panel):
         if restore and state.exists():
             self.host.load_state(plugin, state)
             self.host.refresh_params(plugin)
+            self.restore_params(plugin, state)
 
     def ensure_port(self, tr):
         """The JACK MIDI port feeding this track's instrument (one JACK client per track)."""
@@ -228,8 +230,9 @@ class HostPanel(Panel):
             self.unload(strip, k)
         for tr in [tr for tr in self.router.taps if tr not in self.project.tracks]:
             self.router.taps.pop(tr).close_port()
-            for f in self.state_dir.glob(f"t{tr.number}-*.carxs"):
-                f.unlink()
+            for pattern in (f"t{tr.number}-*.carxs", f"t{tr.number}-*.params.json"):
+                for f in self.state_dir.glob(pattern):
+                    f.unlink()
         if gone:
             for strip in gone:
                 self.wiring.replace(strip, [])
@@ -323,7 +326,23 @@ class HostPanel(Panel):
             return
         self.state_dir.mkdir(parents=True, exist_ok=True)
         for (strip, k), plugin in self.loaded.items():
-            self.host.save_state(plugin, self.state_file(strip, k, plugin.ref))
+            state = self.state_file(strip, k, plugin.ref)
+            self.host.save_state(plugin, state)
+            # some plugins keep their parameters outside their state blob (our own XYFX does), so the knob
+            # positions would come back at their defaults: keep them beside the state
+            params = {str(prm.index): self.host.value(plugin, prm.index) for prm in plugin.params}
+            state.with_suffix(".params.json").write_text(json.dumps(params))
+
+    def restore_params(self, plugin, state):
+        """The parameter values saved next to a plugin's state, for what the state itself doesn't carry."""
+        try:
+            values = json.loads(state.with_suffix(".params.json").read_text())
+        except (OSError, ValueError):
+            return
+        for prm in plugin.params:
+            value = values.get(str(prm.index))
+            if isinstance(value, (int, float)):
+                self.host.set_value(plugin, prm.index, value)
 
     def close(self):
         if self.host:
@@ -421,8 +440,9 @@ class HostPanel(Panel):
                 tr.bus = 0
         for k in range(SLOTS):
             self.unload(bus.strip, k)
-        for f in self.state_dir.glob(f"b{bus.number}-*.carxs"):
-            f.unlink(missing_ok=True)
+        for pattern in (f"b{bus.number}-*.carxs", f"b{bus.number}-*.params.json"):
+            for f in self.state_dir.glob(pattern):
+                f.unlink()
         self.wiring.replace(bus.strip, [])
         self.project.buses.remove(bus)
         self.rewire()

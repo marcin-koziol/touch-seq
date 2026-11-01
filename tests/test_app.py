@@ -890,7 +890,10 @@ print("transpose OK")
 # --- effects buses: a track routed through one, and the bus into the master ---
 class FakePlugin:
     def __init__(self, client, name="Reverb"):
-        self.client, self.ref = client, type("Ref", (), {"name": name, "midi_ins": 1})()
+        self.client = client
+        self.ref = type("Ref", (), {"name": name, "midi_ins": 1, "fmt": "clap", "path": "/x.clap",
+                                    "label": f"x.{name}"})()
+        self.params = []
 class FakeCarla:
     def __init__(self):
         self.volumes = []
@@ -986,3 +989,30 @@ backaudio = ts.load_project(OUT / "audio.json").tracks[0]
 assert backaudio.audio and backaudio.source == "/in:FL" and backaudio.pan == "right", backaudio
 assert isinstance(ts.plugins.audio_inputs(), list)
 print("audio tracks OK")
+
+# --- plugin parameters are saved beside the state (some plugins keep them out of it) ---
+class ParamCarla(FakeCarla):
+    def __init__(self):
+        super().__init__()
+        self.values = {7: 0.25, 8: 0.75}
+    def value(self, plugin, index):
+        return self.values.get(index, 0.0)
+    def set_value(self, plugin, index, value):
+        self.values[index] = value
+    def save_state(self, plugin, path):
+        Path(path).write_text("state")
+pp = FakePlugin("M.1 Reverb")
+pp.params = [type("Pr", (), {"index": i})() for i in (7, 8)]
+pph = FakeHostPanel(ts.Project())
+pph.state_dir = OUT / "params.plugins"
+pph.host = ParamCarla()
+pph.loaded = {(pph.project.master, 0): pp}
+pph.save_states()
+state = pph.state_file(pph.project.master, 0, pp.ref)
+assert state.exists() and state.with_suffix(".params.json").exists(), list(pph.state_dir.glob("*"))
+pph.host.values = {7: 0.0, 8: 0.0}  # a fresh load: the plugin reports its defaults
+pph.restore_params(pp, state)
+assert pph.host.values == {7: 0.25, 8: 0.75}, pph.host.values
+state.with_suffix(".params.json").unlink()  # no parameter file: nothing breaks
+pph.restore_params(pp, state)
+print("plugin params OK")
