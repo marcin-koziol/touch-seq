@@ -107,8 +107,10 @@ Plays the track selected in the sequencer:
   the last one), or a **keyboard** (2 octaves in the module, 4 full screen, glissando)
 - drum tracks: 12 pads in the voices' colors
 - external MIDI tracks: like melody tracks (chords, keyboard), straight out to their output port
-- **REC** (replace, like tape) or **OVR** (overdub) records what you play into the pattern, quantized to
-  1/16, 1/8 or 1/4 — fingers on the pads and notes from a track's MIDI keyboard alike. What you record is
+- **REC** (replaces the steps you play over) or **OVR** (overdub: leaves them and adds) records what you play
+  into the pattern, quantized to 1/16, 1/8 or 1/4 — fingers on the pads and notes from a track's MIDI
+  keyboard alike. REC only touches the steps you play: a pass with nothing played leaves the pattern as it
+  was. What you record is
   **heard at once**: while you hold it, the pattern leaves that step to your fingers, and when you lift them
   it plays from there — a bar-long chord keeps ringing into the loop instead of waiting for the next pass
 - **CLICK** and **COUNT** in the top bar: a tick on every beat (higher on the bar's first) while playing, and
@@ -218,9 +220,12 @@ Keys (with a keyboard attached): **Space** play/stop, **Esc** closes a dialog/po
 | `audio_out` | `default` (follow PipeWire's default output) or a sink node name — easier set in SETTINGS → AUDIO |
 | `patch` | audio links made in PATCHBAY, as `[[out port, in port], …]` — this machine's cables |
 | `buffer` | audio buffer size in samples for the whole graph while the app runs, `0` = the system's own |
+| `click_lead` | the metronome's own delay in ms, when the machine needs it nudged (left out = the graph's buffer) |
 
 The metronome's click is synthesized in the app and played by `pw-cat` (or `pacat` / `aplay`), so it needs no
-audio engine of its own: it is one more small stream in PipeWire, and only exists while **CLICK** is on.
+audio engine of its own: it is one more small stream in PipeWire, and only exists while **CLICK** is on. Its
+own buffer is set to the graph's (one quantum), and each beat is queued that much before its time, so the
+click sits with the notes instead of a buffer behind them.
 
 `buffer` is applied with `clock.force-quantum`, so it wins over a `min-quantum = max-quantum` pin in
 `pipewire.conf.d` (such a pin is why a size may look stuck in the settings); the machine's own size is put

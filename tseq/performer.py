@@ -329,6 +329,10 @@ class Performer(Panel):
             if not tr.drum:
                 self.seq.fit(lane, i)
             self.engine.rec_fresh.discard((k, i))  # the key is up: the pattern plays it from now on
+        if self.engine.rec.get(tr) and not tr.drum:  # REC replaces the step played - only that step
+            for k, lane in list(pat.lanes.items()):
+                if k not in lanes and (k, i) not in self.engine.rec_taken:
+                    lane[i].on = False
         if pos is not None and start is not None:
             at = round(start / self.quant) * self.quant  # where the pattern puts the note
             if pos - at >= gate:  # its turn in this pass is over: hear it now, up to the pattern's next one

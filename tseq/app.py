@@ -89,6 +89,8 @@ def main(version):
         project = load_project(path)
         router = MidiRouter(open_midi(cfg["midi_port"]))
         engine = Engine(project, router)
+        if cfg.get("click_lead") is not None:  # ms: a machine's own click offset, if the graph's is not it
+            engine.clicker.lead = float(cfg["click_lead"]) / 1000
         host = HostPanel(project, router, path.with_suffix(".plugins"),
                          Path.home() / ".cache" / "touch-seq" / "plugins.json", cfg.get("audio_out", "default"),
                          remember, patch=cfg.get("patch", []), buffer=cfg.get("buffer", 0))

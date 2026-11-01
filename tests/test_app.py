@@ -475,7 +475,7 @@ assert perf.held[0] == 1 and [m for _, m in outp.log][-2:] == [[0x92, 60, 118], 
 gp.release(None); assert perf.held[0] == 0 and [m for _, m in outp.log][-2:] == [[0x82, 60, 0], [0x82, 64, 0]]
 # REC (replace): played chord lands quantized, length from the hold, old notes get erased as the playhead passes
 mel = prp.tracks[0]; pat = mel.current
-pat.lane(72)[6].on = True  # will be erased by REC
+pat.lane(72)[6].on = True  # not played over: REC leaves it alone (it only replaces what is played)
 perf.mode, perf.quant = "rec", 2
 perf.tick(); ep.start()
 time.sleep(step_len * 3.3)                     # playhead at step 3
@@ -485,7 +485,8 @@ g1.release(None)
 time.sleep(step_len * 5)
 on = sorted((k, i, round(st.gate, 3)) for k, lane in pat.lanes.items() for i, st in enumerate(lane) if st.on)
 print("recorded (REC, 1/8):", on)
-assert [(k, i) for k, i, _ in on] == [(60, 4), (67, 4)] and all(1.5 <= gt <= 2.5 for _, _, gt in on), on
+assert [(k, i) for k, i, _ in on] == [(60, 4), (67, 4), (72, 6)], on
+assert all(1.5 <= gt <= 2.5 for k, i, gt in on if i == 4), on
 offs_before = sum(1 for _, m in outp.log if m[:2] == [0x92, 60])
 time.sleep(step_len * 16)
 assert sum(1 for _, m in outp.log if m[:2] == [0x92, 60]) == offs_before + 1, "replayed next pass (once)"
@@ -1442,7 +1443,7 @@ print("input saved OK")
 # --- metronome and count-in: the clicks come before the pattern, then on every beat ---
 class FakeClicker:
     def __init__(self):
-        self.events, self.prepared, self.closed = [], 0, 0
+        self.events, self.prepared, self.closed, self.lead = [], 0, 0, 0.0
 
     def prepare(self):
         self.prepared += 1
@@ -1450,6 +1451,9 @@ class FakeClicker:
 
     def at(self, when, accent=False):
         self.events.append((when, accent))
+
+    def flush(self):
+        self.events.clear()
 
     def close(self):
         self.closed += 1
@@ -1611,3 +1615,46 @@ notes = [m for _, m in outw.log if m[0] & 0xF0 in (0x80, 0x90) and m[1] == 60]
 assert notes[-2:] == [[0x80, 60, 0], [0x90, 60, 100]], notes[-3:]
 ew2.stop(); pw2.mode = None; pw2.tick(); ew2.close()
 print("take handed over OK")
+
+# --- REC replaces the steps played over, and nothing else ---------------------------------
+prr = ts.Project(bpm=600, tracks=[ts.Track("melody", 1, 1), ts.Track("drum", 10, 2)])
+melr, drumr = prr.tracks
+patr = melr.current
+patr.lane(60)[0].on = True
+patr.lane(64)[0].on = True   # a chord at step 0
+patr.lane(67)[4].on = True   # a note elsewhere
+drumr.current.lane(0)[0].on = True  # a kick at step 0
+outr = FakeOut(); er3 = ts.Engine(prr, outr); sr3 = ts.Sequencer(prr, er3); pwr = ts.Performer(prr, er3, sr3)
+sr3.sel = melr
+pwr.mode, pwr.quant = "rec", 1
+er3.start(); pwr.tick()
+time.sleep(1.4 * 16 * er3.step_len)  # a whole pass with nothing played
+still = sorted((k, i) for k, lane in patr.lanes.items() for i, s in enumerate(lane) if s.on)
+assert still == [(60, 0), (64, 0), (67, 4)], f"REC erased what was not played: {still}"
+g3 = pwr.press_pad(1, melr, [(70, 70)], r, QPointF(50, 50)); time.sleep(2 * er3.step_len); g3.release(None)
+time.sleep(2 * er3.step_len)
+after = sorted((k, i) for k, lane in patr.lanes.items() for i, s in enumerate(lane) if s.on)
+assert after == [(67, 4), (70, 0)], f"the played step replaces only itself: {after}"
+# drums keep the other voices of a step
+drumr.current.lane(1)[0].on = True
+sr3.sel = drumr; pwr.tick()
+gd3 = pwr.press_pad(("drum", 0), drumr, [(0, 36)], r, QPointF(50, 90)); gd3.release(None)
+assert drumr.current.lane(1)[0].on, "a kick does not erase the snare on the same step"
+er3.stop(); pwr.mode = None; pwr.tick(); er3.close()
+print("REC punch-in OK")
+
+# --- the metronome's beats are queued a beat early (its stream runs a buffer behind) ------
+prl = ts.Project(bpm=600, tracks=[ts.Track("melody", 1, 1)], click=True)
+el5 = ts.Engine(prl, FakeOut()); el5.clicker = FakeClicker(); el5.clicker.lead = 0.005
+el5.start()
+time.sleep(0.05)
+assert el5.clicker.events, "a beat is queued"
+now5 = time.perf_counter()
+ahead = max((w for w, a in el5.clicker.events), default=0.0) - now5
+print("next beat queued %.3f s ahead (a step is %.3f s)" % (ahead, el5.step_len))
+assert ahead > 0.01, "queued early enough to be written before its time"
+assert el5.clicker.events[0][1] is True, "the downbeat is the accented one"
+el5.stop()
+assert el5.clicker.events == [], "a stop drops the beats not written yet"
+el5.close()
+print("click lookahead OK")

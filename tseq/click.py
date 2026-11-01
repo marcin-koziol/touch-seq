@@ -17,26 +17,42 @@ LENGTH = int(RATE * 0.05)  # a tick's tail, in samples
 DECAY = 0.006  # s: the tick dies away fast, so beats don't smear into each other
 PLAYERS = (
     ("pw-cat", ["--playback", "--raw", "--format=s16", "--rate=%d" % RATE, "--channels=1",
-                "--latency=20ms", "-P", "node.name=touch-seq-click", "-"]),
+                "--latency={latency}", "-P", "node.name=touch-seq-click", "-"]),
     ("pacat", ["--playback", "--raw", "--format=s16le", "--rate=%d" % RATE, "--channels=1",
-               "--latency-msec=20", "--client-name=touch-seq-click"]),
+               "--latency-msec={msec}", "--client-name=touch-seq-click"]),
     ("aplay", ["-q", "-t", "raw", "-f", "S16_LE", "-r", str(RATE), "-c", "1"]),
 )
 
 
-def player():
+def graph_latency(rate=RATE):
+    """The audio graph's own buffer, in samples. The click's stream asks for that and no more: a stream that
+    buffers 20 ms is heard 20 ms after the notes it should sit with."""
+    try:
+        import plugins
+        forced, default, _lo, _hi, graph_rate = plugins.quantum()
+        rate = graph_rate or rate
+        size = forced or default or 256
+    except Exception:  # no PipeWire to ask: a sane buffer
+        size = 256
+    return max(64, min(2048, int(size))), (rate or RATE)
+
+
+def player(size=256):
     """The command that plays raw mono samples to the machine's output, or None when there is none."""
     for name, args in PLAYERS:
         if shutil.which(name):
-            return [name] + args
+            return [name] + [a.replace("{latency}", str(size)).replace("{msec}", str(max(1, round(size / 48))))
+                             for a in args]
     return None
 
 
 class Clicker:
     """A stream of silence with a tick where the beat is."""
 
-    def __init__(self, rate=RATE, opener=player):
+    def __init__(self, rate=RATE, opener=player, lead=None):
         self.rate, self.opener = rate, opener
+        self.size = 0  # the buffer asked for, in samples
+        self.lead = lead  # s: how much earlier a click is written; None = the stream's own buffer
         self.lock = threading.Lock()
         self.events = []  # (when, accent) not written yet
         self.proc = None
@@ -50,7 +66,10 @@ class Clicker:
         with self.lock:
             if self.running:
                 return True
-            cmd = self.opener()
+            self.size, self.rate = graph_latency(self.rate)
+            if self.lead is None:
+                self.lead = self.size / self.rate
+            cmd = self.opener(self.size)
             if cmd is None:
                 self.error = "no audio player (pw-cat, pacat or aplay)"
                 return False
@@ -63,6 +82,11 @@ class Clicker:
             self.thread = threading.Thread(target=self.run, daemon=True)
             self.thread.start()
             return True
+
+    def flush(self):
+        """Forget the clicks not written yet (the transport stopped: a queued beat must not sound)."""
+        with self.lock:
+            self.events = []
 
     def at(self, when, accent=False):
         """Queue a tick at a perf_counter time (in the past is fine: it is dropped when it is too late)."""
@@ -101,7 +125,7 @@ class Clicker:
                 due = [e for e in self.events if (e[0] - t0) * rate < done + block]
                 self.events = [e for e in self.events if (e[0] - t0) * rate >= done + block]
             for when, accent in due:
-                first = int((when - t0) * rate)
+                first = int((when - self.lead - t0) * rate)  # heard at `when`: the stream lags by its buffer
                 if first < done - rate * 0.02:  # more than 20 ms late: better to skip than to stumble
                     continue
                 voices.append((max(done, first), 1660.0 if accent else 1180.0, 0.55 if accent else 0.30))

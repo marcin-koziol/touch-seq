@@ -194,19 +194,15 @@ class Engine:
         step_len = TICKS_PER_STEP * 60 / (self.project.bpm * PPQN)
         self.step_time, self.step_len = t, step_len
         if self.project.click and self.step_index % 4 == 0:  # a beat: higher on the first of the bar
-            self.clicker.at(t, accent=self.step_index % STEPS_PER_BAR == 0)
+            # the click stream runs a buffer behind, so the next beat is queued a whole beat early
+            nxt = self.step_index + 4
+            self.clicker.at(t + 4 * step_len, accent=nxt % STEPS_PER_BAR == 0)
         for tr in self.project.tracks:
             pat = tr.current
             i = self.pos.get(tr, self.step_index) % pat.length  # a track added mid-play joins in step
             self.playhead[tr] = i
             self.pos[tr] = (i + 1) % pat.length
-            replace = self.rec.get(tr)  # False: overdub, True: REC (replace what was there)
-            recording = tr in self.rec
             lanes = list(pat.lanes.items())  # a copy: the UI thread may add a lane meanwhile
-            if recording and replace:  # REC replaces what was there before this recording
-                for k, lane in lanes:
-                    if (k, i) not in self.rec_taken:
-                        lane[i].on = False
             if tr.mute:
                 continue
             for k, lane in lanes:
@@ -258,32 +254,35 @@ class Engine:
                 return
             bars = self.project.count_in if count else 0
             if not bars:
-                self.begin()
+                self.begin(first=self.project.click)
                 return
             self.counting, self.count_left = True, bars * 4
             self.count_beat = time.perf_counter() + 0.03  # a moment for the click stream to get going
             self.clicker.prepare()
 
-    def begin(self):
-        """The pattern itself: called by the count-in when its last beat is done."""
+    def begin(self, first=False):
+        """The pattern itself: called by the count-in when its last beat is done (its last click is the
+        downbeat), or straight from `start`."""
         self.playing, self.ticks, self.step_index = True, 0, -1
         self.pos.clear()
         self.playhead.clear()
         self.next_tick = time.perf_counter() + 0.005
         if self.project.click:
             self.clicker.prepare()
+            if first:  # no count-in to give the downbeat: queue this one now (as soon as the stream allows)
+                self.clicker.at(self.next_tick, accent=True)
         self.out.send_message([0xFA])
 
     def count(self, now):
         """The count-in: a tick per beat, the first of each bar higher, and the pattern starts on the next."""
         beat = 60.0 / self.project.bpm
-        while self.count_left > 0 and now >= self.count_beat:
+        while self.count_left > 0 and now >= self.count_beat - self.clicker.lead:  # written before it is due
             self.clicker.at(self.count_beat, accent=int(self.count_left) % 4 == 0)
             self.count_left -= 1
             self.count_beat += beat
         if self.count_left <= 0 and now >= self.count_beat:
             self.counting = False
-            self.begin()
+            self.begin(first=False)
 
     def set_click(self, on):
         """The metronome: on keeps the click stream ready (a silent node between beats), off lets it go."""
@@ -297,8 +296,10 @@ class Engine:
         with self.lock:
             if self.counting:  # still counting in: just give up before anything started
                 self.counting, self.count_left = False, 0
+                self.clicker.flush()
                 return
             self.playing = False
+            self.clicker.flush()  # a beat queued for a moment from now must not sound after a stop
             self.out.send_message([0xFC])
             for key in list(self.sounding):
                 self.note_off(key)
