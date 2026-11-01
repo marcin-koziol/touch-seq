@@ -25,15 +25,18 @@ class Patchbay(Panel):
     GAP = 130  # between the columns: room for the cables
     AGE = 1.0  # s between looks at the audio graph: a device plugged in shows up by itself
 
-    def __init__(self, links, set_links, ports=plugins.audio_ports, existing=plugins.existing_links):
+    def __init__(self, links, set_links, ports=plugins.audio_ports, existing=plugins.existing_links, labels=None,
+                 internal=None):
         super().__init__()
         self.get_links = links  # () -> [(out, in)]: the links this patchbay made and keeps
         self.set_links = set_links  # ([(out, in)]) -> None: the host saves them and wires them
         self.list_ports = ports  # () -> (sources, destinations)
         self.list_existing = existing  # () -> {(out, in)}: every link on the graph, ours too
+        self.list_labels = labels  # () -> {node name: friendlier name}: our chains read as a track / BUS / MASTER
+        self.list_internal = internal  # () -> {(out, in)}: the cables the rack makes itself, shown but not ours
         self.sources, self.dests = [], []
         self.colors = {}  # device label -> its color (the same in both columns and on its cables)
-        self.patch, self.live = set(), set()
+        self.patch, self.live, self.internal = set(), set(), set()
         self.src = self.dst = None  # the port chosen on each side
         self.scroll = [0.0, 0.0]
         self.seen = {"out": {}, "in": {}}  # port -> (y, color, edge x) of the rows drawn last frame
@@ -50,11 +53,24 @@ class Patchbay(Panel):
         """Re-read the graph: ports, our links and every other link on it."""
         self.age = time.monotonic()
         sources, dests = self.list_ports()
+        names = self.list_labels() if self.list_labels else {}  # T2 · Surge, MASTER · Reverb, ...
+
+        def friendly(node):
+            if node in names:
+                return names[node]
+            return next((label for client, label in names.items() if node.endswith("/" + client)),
+                        None)  # Carla namespaces a second engine's clients ("Touch-Seq.42/M.1 Reverb")
+
+        def named(ports):
+            return [(port, friendly(port.split(":", 1)[0]) or label, name) for port, label, name in ports]
+
+        sources, dests = named(sources), named(dests)
         patch = set(map(tuple, self.get_links()))
         live = set(map(tuple, self.list_existing()))
-        if (sources, dests, patch, live) == (self.sources, self.dests, self.patch, self.live):
+        internal = set(map(tuple, self.list_internal())) if self.list_internal else set()
+        if (sources, dests, patch, live, internal) == (self.sources, self.dests, self.patch, self.live, self.internal):
             return
-        self.sources, self.dests, self.patch, self.live = sources, dests, patch, live
+        self.sources, self.dests, self.patch, self.live, self.internal = sources, dests, patch, live, internal
         labels = sorted({label for _, label, _ in sources} | {label for _, label, _ in dests})
         self.colors = {label: PALETTE[i % len(PALETTE)] for i, label in enumerate(labels)}
         if self.src not in [p for p, _, _ in sources]:
@@ -80,6 +96,8 @@ class Patchbay(Panel):
             self.src = None if self.src == port else port
 
     def toggle(self, out, into):
+        if (out, into) in self.internal:
+            return  # the rack wires its own chains (track → bus → master); here they are only shown
         self.patch = set(self.patch) ^ {(out, into)}
         self.set_links(sorted(self.patch))
         self.invalidate()
@@ -110,27 +128,34 @@ class Patchbay(Panel):
         self.cables(p)
 
     def legend(self, p, r):
-        s = self.s
-        thick = QRectF(r.left(), r.center().y() - 1.5 * s, 34 * s, 3 * s)
+        s, y = self.s, r.center().y()
         p.setPen(Qt.NoPen)
         p.setBrush(QColor(PLAY))
-        p.drawRect(thick)
-        self.text(p, QRectF(r.left() + 42 * s, r.top(), 150 * s, r.height()), "a cable from here", DIM, 12,
+        p.drawRect(QRectF(r.left(), y - 1.5 * s, 30 * s, 3 * s))
+        self.text(p, QRectF(r.left() + 36 * s, r.top(), 110 * s, r.height()), "your patch", DIM, 12,
                   Qt.AlignLeft | Qt.AlignVCenter)
-        p.setPen(QPen(QColor("#3f4654"), 1.5 * s, Qt.DashLine))
-        p.drawLine(QPointF(r.left() + 200 * s, r.center().y()), QPointF(r.left() + 234 * s, r.center().y()))
-        self.text(p, QRectF(r.left() + 242 * s, r.top(), r.width() - 242 * s, r.height()),
-                  "wired by the app or another program", DIM, 12, Qt.AlignLeft | Qt.AlignVCenter, elide=True)
+        p.setPen(QPen(QColor("#7d8594"), 1.6 * s))
+        p.drawLine(QPointF(r.left() + 156 * s, y), QPointF(r.left() + 186 * s, y))
+        self.text(p, QRectF(r.left() + 192 * s, r.top(), 140 * s, r.height()), "the rack's own", DIM, 12,
+                  Qt.AlignLeft | Qt.AlignVCenter)
+        p.setPen(QPen(QColor("#3f4654"), 1.6 * s, Qt.DashLine))
+        p.drawLine(QPointF(r.left() + 300 * s, y), QPointF(r.left() + 330 * s, y))
+        self.text(p, QRectF(r.left() + 336 * s, r.top(), r.width() - 336 * s, r.height()),
+                  "another program", DIM, 12, Qt.AlignLeft | Qt.AlignVCenter, elide=True)
 
     @staticmethod
     def groups(items):
-        """[(device label, [(port, port name)])]: audio_ports() lists a device's ports together."""
-        out = []
+        """[(device label, [(port, port name)])], one entry per device (its ports together, in the order they
+        come). Two devices can share a label - the two halves of an interface, two plugins of the same name -
+        and still stay two boxes, so their ports never blend into one."""
+        order, boxes = [], {}
         for port, label, name in items:
-            if not out or out[-1][0] != label:
-                out.append((label, []))
-            out[-1][1].append((port, name))
-        return out
+            node = port.split(":", 1)[0]
+            if node not in boxes:
+                order.append(node)
+                boxes[node] = (label, [])
+            boxes[node][1].append((port, name))
+        return [boxes[node] for node in order]
 
     def column(self, p, r, which, title, items, side):
         s = self.s
@@ -182,28 +207,31 @@ class Patchbay(Panel):
             self.text(p, listing, "nothing here — plug the device in and tap REFRESH", DIM, 14)
 
     def cables(self, p):
-        """A curve per link between the two rows it joins (only the ones on screen), then its jack sockets."""
+        """A curve per link between the two rows it joins (only the ones on screen), then its jack sockets.
+        Ours are thick and in the device's color, the rack's own thin grey, another program's thin dashed."""
         s = self.s
-        for mine in (True, False):
-            links = self.patch if mine else self.live - self.patch
+        rack = self.internal - self.patch
+        others = self.live - self.patch - rack
+        for links, mine, fixed in ((rack, False, "#7d8594"), (others, False, None), (self.patch, True, None)):
             for a, b in links:
                 src, dst = self.seen["out"].get(a), self.seen["in"].get(b)
                 if not src or not dst:
                     continue
                 x1, y1, x2, y2 = src[2], src[0], dst[2], dst[0]
-                color = QColor(src[1] if mine else "#3f4654")
+                color = QColor(fixed or (src[1] if mine else "#3f4654"))
                 if mine:
                     color.setAlpha(225)
-                pen = QPen(color, (3.0 if mine else 1.4) * s, Qt.SolidLine if mine else Qt.DashLine, Qt.RoundCap)
+                style = Qt.SolidLine if (mine or fixed) else Qt.DashLine
+                pen = QPen(color, (3.0 if mine else 1.6) * s, style, Qt.RoundCap)
                 p.setPen(pen)
                 p.setBrush(Qt.NoBrush)
                 bend = max(30 * s, (x2 - x1) * 0.55)
                 path = QPainterPath(QPointF(x1, y1))
                 path.cubicTo(QPointF(x1 + bend, y1), QPointF(x2 - bend, y2), QPointF(x2, y2))
                 p.drawPath(path)
-        for mine in (True, False):
-            color = QColor(PLAY if mine else "#3f4654")
-            for a, b in (self.patch if mine else self.live - self.patch):
+        for links, mine, fixed in ((rack, False, "#7d8594"), (others, False, "#3f4654"), (self.patch, True, None)):
+            color = QColor(fixed or (PLAY if mine else "#3f4654"))
+            for a, b in links:
                 for side, port in (("out", a), ("in", b)):
                     row = self.seen[side].get(port)
                     if row:  # the socket the cable plugs into

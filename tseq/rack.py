@@ -125,7 +125,8 @@ class Rack(Window):
         """The audio graph by hand: e.g. an interface's input into its own output, to hear a synth."""
         if self.dialog:
             return self.close_dialog()
-        self.open_dialog("PATCHBAY", "audio routing", Patchbay(self.host.patch_links, self.host.set_patch))
+        self.open_dialog("PATCHBAY", "audio routing", Patchbay(self.host.patch_links, self.host.set_patch, labels=self.host.chain_labels,
+                         internal=self.host.internal_links))
 
     def open_new_track(self):
         """The sequencer's "+": which kind of track, and for an external one which MIDI output."""

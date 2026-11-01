@@ -251,6 +251,10 @@ class StubHost(ts.Panel):
         return list(self.patch)
     def set_patch(self, links):
         self.patch = list(links)
+    def chain_labels(self):
+        return {}
+    def internal_links(self):
+        return set()
     def draw(self, p):
         p.fillRect(self.rect(), ts.QColor(ts.BG))
     def save_states(self):
@@ -859,3 +863,66 @@ hi.tracks[0].current.lane(127)[0].on = True
 ts.Sequencer(hi, ts.Engine(hi, FakeOut())).transpose(hi.tracks[0], 1)
 assert list(hi.tracks[0].current.lanes) == [127], list(hi.tracks[0].current.lanes)
 print("transpose OK")
+# --- effects buses: a track routed through one, and the bus into the master ---
+class FakePlugin:
+    def __init__(self, client, name="Reverb"):
+        self.client, self.ref = client, type("Ref", (), {"name": name, "midi_ins": 1})()
+class FakeCarla:
+    def __init__(self):
+        self.volumes = []
+    def ports(self, plugin):
+        return 2, 2
+    def set_volume(self, plugin, volume):
+        self.volumes.append((plugin.client, round(volume, 2)))
+class FakeWiring:
+    def __init__(self):
+        self.links = {}
+    def replace(self, owner, links):
+        self.links[owner] = sorted(links)
+class FakeHostPanel(ts.HostPanel):
+    """HostPanel's routing logic without Carla: the chains, the links it wants and the levels it sets."""
+    def __init__(self, project):
+        self.project, self.sink, self.name = project, "sink", "TS"
+        self.loaded, self.wiring, self.host = {}, FakeWiring(), FakeCarla()
+
+prb = ts.Project(tracks=[ts.Track("melody", 1, 1), ts.Track("melody", 2, 2)])
+prb.buses.append(ts.Bus(1))
+prb.buses[0].strip.volume = 0.5
+prb.master.volume = 0.8
+t1, t2, bus = prb.tracks[0], prb.tracks[1], prb.buses[0]
+bh = FakeHostPanel(prb)
+bh.loaded = {(t1.strip, 1): FakePlugin("T1.2 Rev"), (t2.strip, 1): FakePlugin("T2.2 Rev"),
+             (bus.strip, 0): FakePlugin("B1.1 Rev", "Reverb")}
+assert bh.strips() == [t1.strip, t2.strip, bus.strip, prb.master]
+assert bh.owner_name(t1.strip) == "T1" and bh.owner_name(bus.strip) == "BUS 1"
+assert bh.owner_name(prb.master) == "MASTER" and bh.bus_of(bus.strip) is bus
+assert bh.instrument_slot(t1.strip, 0) and not bh.instrument_slot(bus.strip, 0), "a bus takes effects only"
+bh.set_bus(t1, 1)  # t1 through the bus, t2 straight into the master (no master effects: into the output)
+bh.rewire()
+links = {strip: links for strip, links in bh.wiring.links.items()}
+assert ("T1.2 Rev:output_1", "B1.1 Rev:input_1") in links[t1.strip], links[t1.strip]
+assert not any("playback" in b for _, b in links[t1.strip]), "a bus track doesn't also go to the output"
+assert ("T2.2 Rev:output_1", "sink:playback_FL") in links[t2.strip], links[t2.strip]
+assert ("B1.1 Rev:output_1", "sink:playback_FL") in links[bus.strip], links[bus.strip]
+# levels: the bus carries its own level times the master's (it is what reaches the output here) ...
+assert ("B1.1 Rev", 0.4) in bh.host.volumes, bh.host.volumes
+# ... while a track inside it keeps its own only (the bus has already folded the master in)
+assert ("T1.2 Rev", 1.0) in bh.host.volumes, bh.host.volumes
+bh.set_bus(t1, 0)  # back to the master: now it reaches the output and takes the master level
+bh.host.volumes.clear()
+bh.rewire()
+assert ("T1.2 Rev", 1.0) in bh.host.volumes and ("T2.2 Rev", 0.8) in bh.host.volumes, bh.host.volumes
+# two plugins of the same name in one chain still read apart in the patchbay
+bh.loaded[(bus.strip, 1)] = FakePlugin("B1.2 Rev", "Reverb")
+labels = bh.chain_labels()
+assert labels["B1.1 Rev"] == "BUS 1 · 1 Reverb" and labels["B1.2 Rev"] == "BUS 1 · 2 Reverb", labels
+boxes = ts.Patchbay.groups([("/a:out_1", "Dev", "out_1"), ("/b:out_1", "Dev", "out_1")])
+assert len(boxes) == 2 and [label for label, _ in boxes] == ["Dev", "Dev"], "same name, two devices: two boxes"
+# the rack's own cables are shown in the patchbay, but not ours to cut
+mine = ("/cap:1", "/bus:1")
+cuts = []
+pb2 = ts.Patchbay(lambda: [], lambda links: cuts.append(links), ports=lambda: ([("/cap:1", "In", "1")],
+                 [("/bus:1", "BUS 1", "1")]), existing=lambda: {mine}, internal=lambda: {mine})
+pb2.tap("out", "/cap:1"); pb2.tap("in", "/bus:1")
+assert cuts == [], "an internal cable is not toggled from the patchbay"
+print("buses OK")

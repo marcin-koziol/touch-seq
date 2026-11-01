@@ -76,6 +76,7 @@ class Track:
     last_note: int = 60  # melody: pitch the grid view paints, and the latest one placed
     strip: Strip = field(default_factory=Strip)  # its plugins: instrument + effects
     port: str = ""  # external: the MIDI output it sends to (a name from the system's outputs)
+    bus: int = 0  # 0: straight into the master, else the number of the bus it goes through
 
     def __post_init__(self):
         if not self.patterns:
@@ -103,6 +104,14 @@ class Track:
     def edit_lane(self):
         """Lane the grid view paints: the selected drum voice, or the melody's latest pitch."""
         return self.voice if self.drum else self.last_note
+
+
+@dataclass(eq=False)  # identity hash: strips are dict keys in the plugin host
+class Bus:
+    """An effects bus: the tracks routed into it are summed, its chain processes them, and the result goes
+    into the master like a track. It is how one reverb serves only the tracks you choose."""
+    number: int = 1  # stable name ("BUS 2"), kept when other buses are deleted
+    strip: Strip = field(default_factory=Strip)
 
 
 @dataclass
@@ -150,6 +159,7 @@ class Project:
     master: Strip = field(default_factory=Strip)  # effects every track goes through to the output
     key: int = 0  # 0 = C
     scale: str = "chromatic"
+    buses: list = field(default_factory=list)  # effects buses between the tracks and the master
 
     def in_scale(self, note):
         return (note - self.key) % 12 in SCALES[self.scale]
@@ -168,10 +178,11 @@ def dump_project(pr):
     return json.dumps({"bpm": pr.bpm, "key": pr.key, "scale": pr.scale, "tracks": [
         {"kind": t.kind, "channel": t.channel, "number": t.number, "pattern": t.pattern, "scenes": t.scenes, "mute": t.mute,
          "voice": t.voice, "last": astuple(t.last), "last_note": t.last_note, "strip": dump_strip(t.strip),
-         **({"port": t.port} if t.external else {}),
+         **({"port": t.port} if t.external else {}), **({"bus": t.bus} if t.bus else {}),
          "patterns": [pattern(p) for p in t.patterns]}
         for t in pr.tracks], "controls": [astuple(c) for c in pr.controls],
-        "master": dump_strip(pr.master)}, separators=(",", ":"))
+        "master": dump_strip(pr.master),
+        "buses": [{"number": b.number, "strip": dump_strip(b.strip)} for b in pr.buses]}, separators=(",", ":"))
 
 
 def new_project():
@@ -204,6 +215,7 @@ def load_project(path):
             last, last_note = [last[0], last[2], last[3]], last[1]
         tr = Track(t["kind"], t["channel"], t.get("number", n), pattern=t["pattern"], scenes=t["scenes"], mute=t["mute"],
                    voice=t["voice"], last=Step(*last), last_note=last_note, port=t.get("port", ""),
+                   bus=t.get("bus", 0),
                    strip=load_strip(t["strip"]) if "strip" in t else Strip())
         for p, pd in zip(tr.patterns, t["patterns"]):
             p.length = pd["length"]
@@ -222,7 +234,8 @@ def load_project(path):
             tr.strip = load_strip(s)
             tr.strip.legacy = f"s{n}"
     master = load_strip(d["master"]) if "master" in d else Strip()
-    return Project(d["bpm"], tracks, controls, master, d.get("key", 0), d.get("scale", "chromatic"))
+    buses = [Bus(b.get("number", n), load_strip(b["strip"])) for n, b in enumerate(d.get("buses", []), 1)]
+    return Project(d["bpm"], tracks, controls, master, d.get("key", 0), d.get("scale", "chromatic"), buses)
 
 
 def save_text(path, text):

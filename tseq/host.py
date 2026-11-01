@@ -12,6 +12,7 @@ from PySide6.QtGui import QColor, QPen
 
 import plugins
 
+from .model import Bus
 from .constants import BG, BORDER, DIM, PALETTE, PANEL, SLOTS, TEXT, WARN, XYFX_LABELS
 from .gestures import Drag, Gesture, Hold, ScrollOrTap
 from .ui import Panel, param_color, split
@@ -46,6 +47,7 @@ class HostPanel(Panel):
         self.select_track = lambda tr: None  # the rack: select a track in the sequencer
         self.choose_port = lambda tr: None  # the rack: choose the MIDI output of an external track
         self.view = "track"  # "track", "mixer" or "master"
+        self.focus = None  # a bus whose chain the TRACK view shows instead of the selected track's
         self.loaded = {}  # (Strip, slot) -> plugins.Plugin
         self.failed = set()  # (Strip, slot) whose saved plugin couldn't be loaded
         self.sel = None  # (Strip, slot) whose parameters are shown
@@ -79,15 +81,25 @@ class HostPanel(Panel):
 
     # --- chains ---------------------------------------------------------------
     def strips(self):
-        """Chains: every plugin track and the master. An external track has no chain (its notes go out to
-        hardware), so it never shows a slot that could take a plugin."""
-        return [t.strip for t in self.project.tracks if not t.external] + [self.project.master]
+        """Chains: every plugin track, every bus and the master. An external track has no chain (its notes go
+        out to hardware), so it never shows a slot that could take a plugin."""
+        return ([t.strip for t in self.project.tracks if not t.external]
+                + [b.strip for b in self.project.buses] + [self.project.master])
 
     def track_of(self, strip):
-        return next((t for t in self.project.tracks if t.strip is strip), None)  # None: the master
+        return next((t for t in self.project.tracks if t.strip is strip), None)  # None: a bus or the master
+
+    def bus_of(self, strip):
+        return next((b for b in self.project.buses if b.strip is strip), None)  # None: a track or the master
+
+    def owner_name(self, strip):
+        """How the patchbay, the state files and the clients name a chain: T3, BUS 2 or MASTER."""
+        tr, bus = self.track_of(strip), self.bus_of(strip)
+        return f"T{tr.number}" if tr else f"BUS {bus.number}" if bus else "MASTER"
 
     def instrument_slot(self, strip, k):
-        return k == 0 and strip is not self.project.master
+        """Slot 0 holds the instrument of a track's chain; a bus and the master only take effects."""
+        return k == 0 and self.track_of(strip) is not None
 
     def chain(self, strip):
         return [self.loaded[(strip, k)] for k in range(SLOTS) if (strip, k) in self.loaded]
@@ -104,6 +116,26 @@ class HostPanel(Panel):
             self.remember("audio_out", name)
 
     # --- audio graph ----------------------------------------------------------
+    def chain_labels(self):
+        """The patchbay names our plugins by what they are in the rack: a track's chain and the master, so an
+        interface's input can be patched into MASTER (through its effects) as if it were a device."""
+        labels = {}
+        for strip in self.strips():
+            owner = self.owner_name(strip)
+            chain = [(k, self.loaded[(strip, k)]) for k in range(SLOTS) if (strip, k) in self.loaded]
+            for k, plugin in chain:
+                name = plugin.ref.name
+                if sum(1 for _, other in chain if other.ref.name == name) > 1:  # two of the same in one chain
+                    name = f"{k + 1} {name}"
+                labels[plugin.client] = f"{owner} · {name}"
+        return labels
+
+    def internal_links(self):
+        """The cables the rack makes itself (tracks into their bus or the master, chains into the output). The
+        patchbay shows them as the rack's own and doesn't touch them."""
+        with self.wiring.lock:
+            return {link for owner, links in self.wiring.links.items() if owner != "patchbay" for link in links}
+
     def set_buffer(self, size):
         """The audio graph's buffer size in samples, 0 for the system's default. System-wide while set."""
         self.buffer = size
@@ -135,14 +167,15 @@ class HostPanel(Panel):
 
     def state_file(self, strip, k, ref, prefix=None):
         """Per chain, slot and plugin, so a state never gets loaded into a different plugin."""
-        tr = self.track_of(strip)
+        tr, bus = self.track_of(strip), self.bus_of(strip)
         tag = zlib.crc32(f"{ref.fmt}|{ref.path}|{ref.label}".encode())
-        prefix = prefix or (f"t{tr.number}" if tr else "master")
+        prefix = prefix or (f"t{tr.number}" if tr else f"b{bus.number}" if bus else "master")
         return self.state_dir / f"{prefix}-{k + 1}-{tag:08x}.carxs"
 
     def load(self, strip, k, ref, restore=False):
-        tr = self.track_of(strip)
-        client = f"{f'T{tr.number}' if tr else 'M'}.{k + 1} {ref.name}".replace(":", " ")[:48]
+        tr, bus = self.track_of(strip), self.bus_of(strip)
+        side = f"T{tr.number}" if tr else f"B{bus.number}" if bus else "M"
+        client = f"{side}.{k + 1} {ref.name}".replace(":", " ")[:48]
         try:
             if tr and k == 0:
                 self.ensure_port(tr)
@@ -201,28 +234,40 @@ class HostPanel(Panel):
             self.rewire()
 
     def rewire(self):
-        """Link every chain: a track's MIDI port to its instrument, plugin to plugin, the end of each track
-        chain into the master's effects (or the output if it has none), the master to the output; and set
-        the levels."""
+        """Link every chain: a track's MIDI port to its instrument, plugin to plugin, a track into its bus (or
+        the master), a bus and the master into what comes next, the master to the output; then set the levels."""
         outs = lambda pl: [f"{pl.client}:output_{n}" for n in range(1, self.host.ports(pl)[1] + 1)]
         ins = lambda pl: [f"{pl.client}:input_{n}" for n in range(1, self.host.ports(pl)[0] + 1)]
         sink = [f"{self.sink}:playback_FL", f"{self.sink}:playback_FR"] if self.sink else []
         master = self.chain(self.project.master)
         into_master = ins(master[0]) if master else sink
+
+        def bus_into(number):
+            """Where a track routed to bus `number` goes; an empty bus is transparent."""
+            bus = next((b for b in self.project.buses if b.number == number), None)
+            chain = self.chain(bus.strip) if bus else []
+            return ins(chain[0]) if chain else into_master
+
         for strip in self.strips():
-            chain, tr = self.chain(strip), self.track_of(strip)
+            chain, tr, bus = self.chain(strip), self.track_of(strip), self.bus_of(strip)
             links = []
             if tr and chain and chain[0].ref.midi_ins:
                 links.append((f"{self.name} T{tr.number}:midi", f"{chain[0].client}:events-in"))
             for a, b in zip(chain, chain[1:]):
                 links += self.pair(outs(a), ins(b))
             if chain:
-                links += self.pair(outs(chain[-1]), sink if strip is self.project.master else into_master)
+                if strip is self.project.master:
+                    links += self.pair(outs(chain[-1]), sink)
+                elif bus:
+                    links += self.pair(outs(chain[-1]), into_master)
+                else:
+                    links += self.pair(outs(chain[-1]), bus_into(tr.bus) if tr and tr.bus else into_master)
             self.wiring.replace(strip, links)
         self.apply_levels()
 
     def apply_levels(self):
-        """A chain's level sits on its last plugin; without master effects the master level joins each track's."""
+        """A chain's level sits on its last plugin. Without master effects the master's level joins whatever
+        reaches the output instead: the buses, and the tracks that don't go through one."""
         m = self.project.master
         master_chain = self.chain(m)
         master_level = 0.0 if m.mute else m.volume
@@ -230,11 +275,17 @@ class HostPanel(Panel):
             chain = self.chain(strip)
             for pl in chain:
                 self.host.set_volume(pl, 1.0)
-            if chain:
-                level = 0.0 if strip.mute else strip.volume
-                if strip is not m and not master_chain:
+            if not chain:
+                continue
+            if strip is m:
+                self.host.set_volume(chain[-1], master_level)
+                continue
+            level = 0.0 if strip.mute else strip.volume
+            if not master_chain:
+                tr, bus = self.track_of(strip), self.bus_of(strip)
+                if bus is not None or not (tr and tr.bus):  # it reaches the output itself
                     level *= master_level
-                self.host.set_volume(chain[-1], level if strip is not m else master_level)
+            self.host.set_volume(chain[-1], level)
 
     @staticmethod
     def pair(outs, ins):
@@ -304,10 +355,12 @@ class HostPanel(Panel):
     def link_to_fader(self, i):
         """Make CC fader i drive the parameter whose knob was held (self.assigning)."""
         strip, slot, prm = self.assigning
-        tr = self.track_of(strip)
-        c = self.project.controls[i]
-        c.target, c.param = "param", [tr.number if tr else 0, slot, prm.index, prm.name]
         self.assigning = None
+        if self.bus_of(strip):
+            return  # a fader link can point at a track or the master, not at a bus
+        tr = self.track_of(strip)
+        self.project.controls[i].target, self.project.controls[i].param = "param", [
+            tr.number if tr else 0, slot, prm.index, prm.name]
 
     def xyfx(self):
         """Touch-Seq XYFX on the master chain (its UI is the XY pad in PLAY-12), or None."""
@@ -326,6 +379,40 @@ class HostPanel(Panel):
     def xy_values(self):
         plugin = self.xyfx()
         return {prm.name.lower(): self.host.value(plugin, prm.index) for prm in plugin.params} if plugin else {}
+
+    # --- buses ----------------------------------------------------------------
+    def add_bus(self, route=None):
+        """A new effects bus: tracks routed into it are summed, its chain processes them, then it goes into the
+        master. `route` is a track to send through it right away."""
+        bus = Bus(max((b.number for b in self.project.buses), default=0) + 1)
+        self.project.buses.append(bus)
+        if route is not None:
+            route.bus = bus.number
+        self.rewire()
+        return bus
+
+    def remove_bus(self, bus):
+        """Its tracks go back to the master, its plugins and saved states go with it."""
+        for tr in self.project.tracks:
+            if tr.bus == bus.number:
+                tr.bus = 0
+        for k in range(SLOTS):
+            self.unload(bus.strip, k)
+        for f in self.state_dir.glob(f"b{bus.number}-*.carxs"):
+            f.unlink(missing_ok=True)
+        self.wiring.replace(bus.strip, [])
+        self.project.buses.remove(bus)
+        self.rewire()
+
+    def set_bus(self, tr, number):
+        """Route a track through a bus; 0 sends it straight into the master."""
+        tr.bus = number
+        self.rewire()
+
+    def cycle_bus(self, tr):
+        """The next destination of a track: master, then each bus."""
+        options = [0] + [b.number for b in self.project.buses]
+        self.set_bus(tr, options[(options.index(tr.bus) + 1) % len(options)] if tr.bus in options else 0)
 
     def set_mix(self, strip, volume=None, mute=None):
         if volume is not None:
@@ -361,6 +448,8 @@ class HostPanel(Panel):
             return
         if self.view == "master":
             strip = self.project.master
+        elif self.focus is not None:
+            strip = self.focus
         else:
             tr = self.selected()
             if tr.external:  # no chain: the notes go out to hardware instead
@@ -399,23 +488,37 @@ class HostPanel(Panel):
         self.button(p, btn, "MIDI OUT", lambda: self.choose_port(tr), sub="choose the port")
 
     def show(self, view, sel=None):
-        self.view, self.sel, self.page = view, sel, 0
+        self.view, self.sel, self.page, self.focus = view, sel, 0, None
 
     def draw_chain(self, p, r, strip):
-        """Title, the slots top to bottom, and the chain's level fader + mute beside them."""
-        s, tr = self.s, self.track_of(strip)
-        color = PALETTE[(tr.number - 1) % len(PALETTE)] if tr else "#facc15"
+        """Title, where the chain goes, the slots top to bottom, and its level fader + mute beside them."""
+        s, tr, bus = self.s, self.track_of(strip), self.bus_of(strip)
+        color = PALETTE[(tr.number - 1) % len(PALETTE)] if tr else "#38d6ff" if bus else "#facc15"
         title = QRectF(r.left(), r.top(), r.width(), 34 * s)
         self.box(p, QRectF(title.left(), title.top() + 6 * s, 5 * s, title.height() - 12 * s), color, None, radius=2)
-        name = f"T{tr.number}  {tr.kind}  CH{tr.channel}" if tr else "MASTER  ·  all tracks → output"
+        name = (f"T{tr.number}  {tr.kind}  CH{tr.channel}" if tr else
+                f"BUS {bus.number}  ·  into the master" if bus else "MASTER  ·  all tracks → output")
         self.text(p, title.adjusted(14 * s, 0, 0, 0), name, color, 16, Qt.AlignLeft | Qt.AlignVCenter, bold=True,
                   elide=True)
-        slots, fader = split(QRectF(r.left(), title.bottom() + 8 * s, r.width(), r.bottom() - title.bottom() - 8 * s),
-                             [0, 56 * s], 10 * s)
+        top = title.bottom() + 8 * s
+        if tr:  # a track picks where its chain goes: the master or a bus
+            top = self.draw_destination(p, QRectF(r.left(), top, r.width(), 38 * s), tr)
+        slots, fader = split(QRectF(r.left(), top, r.width(), r.bottom() - top), [0, 56 * s], 10 * s)
         sh = (slots.height() - 2 * 8 * s) / SLOTS
         for k in range(SLOTS):
             self.draw_slot(p, QRectF(slots.left(), slots.top() + k * (sh + 8 * s), slots.width(), sh), strip, k)
         self.draw_fader(p, fader, strip)
+
+    def draw_destination(self, p, r, tr):
+        """A track's chain goes into the master, or through a bus (whose effects then process just the tracks
+        routed into it). Returns where the rest of the column starts."""
+        s, buses = self.s, self.project.buses
+        to, plus = split(r, [0, 96 * s], 8 * s)
+        label = "MASTER" if not tr.bus else f"BUS {tr.bus}"
+        self.button(p, to, f"→ {label}", lambda: self.cycle_bus(tr), enabled=bool(buses),
+                    sub="tap: next bus" if buses else "no bus yet")
+        self.button(p, plus, "+ BUS", lambda: self.add_bus(tr), sub="effects")
+        return r.bottom() + 8 * s
 
     def draw_fader(self, p, r, strip, label=True):
         s = self.s
@@ -456,9 +559,11 @@ class HostPanel(Panel):
             self.sel, self.page = (strip, k), 0
 
     def draw_mixer(self, p, r):
-        """A column per track (header: tap = edit its chain), the master column on the right."""
-        s, tracks = self.s, self.project.tracks
-        cols, master = split(r, [0, 150 * s], 16 * s)
+        """A column per track (header: tap = edit its chain), a column per bus, the master on the right."""
+        s, tracks, buses = self.s, self.project.tracks, self.project.buses
+        bus_shown = buses[:3]
+        bus_w = (len(bus_shown) * (128 * s + 10 * s) + 118 * s) if buses else 0
+        cols, bus_area, master = split(r, [0, bus_w, 150 * s], 12 * s)
         cw = 96 * s
         per_page = max(1, int((cols.width() + 8 * s) // (cw + 8 * s)))
         pages = max(1, math.ceil(len(tracks) / per_page))
@@ -483,9 +588,22 @@ class HostPanel(Panel):
             inst = tr.strip.slots[0]
             self.text(p, head.adjusted(6 * s, head.height() * 0.5, -6 * s, 0), inst.name if inst else "no instrument",
                       TEXT if inst else "#5b6577", 12, elide=True)
+            if tr.bus:
+                self.text(p, QRectF(head.right() - 40 * s, head.top() + 3 * s, 36 * s, 18 * s), f"→ B{tr.bus}",
+                          "#38d6ff", 11, Qt.AlignRight | Qt.AlignTop, bold=True)
             self.on_press(head, lambda tr=tr: self.open_track(tr))
             self.draw_fader(p, QRectF(col.left() + 8 * s, head.bottom() + 6 * s, col.width() - 16 * s,
                                       col.bottom() - head.bottom() - 14 * s), tr.strip)
+        for n, bus in enumerate(bus_shown):
+            col = QRectF(bus_area.left() + n * (128 * s + 10 * s), bus_area.top(), 128 * s,
+                         bus_area.height() - 44 * s)
+            self.draw_bus_column(p, col, bus)
+        if buses:
+            plus = QRectF(bus_area.left(), bus_area.bottom() - 38 * s, 118 * s, 38 * s)
+            self.button(p, plus, "+ BUS", self.add_bus, sub="another effects bus")
+            if len(buses) > len(bus_shown):
+                self.text(p, QRectF(plus.right() + 6 * s, plus.top(), 40 * s, plus.height()),
+                          f"+{len(buses) - len(bus_shown)}", DIM, 13)
         m = self.project.master
         self.box(p, master, "#1a1810", "#facc15", 2, radius=8)
         self.text(p, QRectF(master.left(), master.top(), master.width(), 34 * s), "MASTER", "#facc15", 17, bold=True)
@@ -500,6 +618,37 @@ class HostPanel(Panel):
             y = slot.bottom() + 6 * s
         self.draw_fader(p, QRectF(master.left() + 8 * s, y + 6 * s, master.width() - 16 * s, master.bottom() - y - 14 * s),
                         m)
+
+    def draw_bus_column(self, p, col, bus):
+        """A bus in the mixer: its chain (tap a slot to fill or edit it) and its level."""
+        s, strip = self.s, bus.strip
+        chain = self.chain(strip)
+        focused = self.focus is strip
+        self.box(p, col, PANEL, "#38d6ff" if focused else BORDER, 2 if focused else 1.5, radius=8)
+        head = QRectF(col.left(), col.top(), col.width(), 58 * s)
+        self.text(p, head.adjusted(0, 4 * s, 0, -head.height() * 0.45), f"BUS {bus.number}", "#38d6ff", 17, bold=True)
+        self.text(p, head.adjusted(6 * s, head.height() * 0.5, -6 * s, 0),
+                  chain[0].ref.name if chain else "no effects", TEXT if chain else "#5b6577", 12, elide=True)
+        self.on_press(head, lambda strip=strip: self.focus_on(strip))
+        y = head.bottom() + 4 * s
+        for k in range(SLOTS):
+            slot = QRectF(col.left() + 6 * s, y, col.width() - 12 * s, 40 * s)
+            self.draw_slot(p, slot, strip, k)
+            self.hits[-1] = (slot, lambda pos, strip=strip, k=k: self.bus_slot(strip, k))
+            y = slot.bottom() + 4 * s
+        self.draw_fader(p, QRectF(col.left() + 8 * s, y + 4 * s, col.width() - 16 * s, col.bottom() - y - 14 * s),
+                        strip)
+
+    def focus_on(self, strip):
+        """Show a bus' chain in the TRACK view (any tab tap goes back to the selected track)."""
+        self.view, self.focus, self.page = "track", strip, 0
+
+    def bus_slot(self, strip, k):
+        self.focus_on(strip)
+        if strip.slots[k]:
+            self.select(strip, k)
+        else:
+            self.open_browser(strip, k)
 
     def open_track(self, tr):
         self.select_track(tr)
