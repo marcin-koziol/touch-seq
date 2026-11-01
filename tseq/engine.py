@@ -300,6 +300,14 @@ class Engine:
             self.step_index = -1
             self.apply_pending()
 
+    def beats(self):
+        """The sequencer's own position in fractional steps since it started: unlike a track's position it
+        never wraps, so a note held over the end of the pattern still knows how long it was held."""
+        with self.lock:
+            if not self.playing or self.step_index < 0:
+                return None
+            return self.step_index + (time.perf_counter() - self.step_time) / self.step_len
+
     def position(self, tr):
         """Where in its pattern the track is right now, in (fractional) steps; None when stopped."""
         with self.lock:

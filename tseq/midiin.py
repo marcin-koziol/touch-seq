@@ -51,7 +51,7 @@ def open_input(name):
             del port
             return None
         port.open_port(matches[0])
-        port.ignore_types(sysex=True, timing=True, active_sense=True)  # clock and sysex are the engine's
+        port.ignore_types(sysex=True, timing=False, active_sense=True)  # the clock tells us the tempo
     except (rtmidi.RtMidiError, ValueError):
         del port
         return None
@@ -93,7 +93,9 @@ class Inputs:
                 if port is None:  # opened a moment ago by another app, say: look again later
                     continue
                 try:
-                    port.set_callback(lambda msg, data=None, name=name: self.queue.put((name, msg[0])))
+                    # stamped on rtmidi's thread: a clock's own tempo needs it to the millisecond
+                    port.set_callback(lambda msg, data=None, name=name:
+                                      self.queue.put((name, msg[0], time.perf_counter())))
                 except (rtmidi.RtMidiError, RuntimeError):  # went away between the scan and the callback
                     port.close_port()
                     continue
@@ -125,13 +127,13 @@ class Inputs:
             return [name for name, port in self.ports.items() if port]
 
     def poll(self):
-        """[(port name, message)] received since the last look, oldest first (an empty message list is
-        dropped: rtmidi sends one for a port that just went away)."""
+        """[(port name, message, when it arrived)] since the last look, oldest first (an empty message list
+        is dropped: rtmidi sends one for a port that just went away)."""
         out = []
         while True:
             try:
-                name, msg = self.queue.get_nowait()
+                name, msg, when = self.queue.get_nowait()
             except queue.Empty:
                 return out
             if msg:
-                out.append((name, msg))
+                out.append((name, msg, when))

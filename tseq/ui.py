@@ -354,11 +354,11 @@ class Window(QWidget):
     def draw_toolbar(self, p, r):
         pass
 
-    def rail_button(self, p, r, label, action, size=24, on=False, frame=True):
+    def rail_button(self, p, r, label, action, size=24, on=False, frame=True, sub=None, color="#38d6ff"):
         """Button on metal; without a frame only thin bars at the sides mark it (for the module rails)."""
         k = self.k
         if frame:
-            p.setPen(QPen(QColor("#38d6ff" if on else "#5a606b"), 1.5 if on else 1))
+            p.setPen(QPen(QColor(color if on else "#5a606b"), 1.5 if on else 1))
             p.setBrush(QColor("#1d2128" if on else "#2a2e35"))
             p.drawRoundedRect(r, 4 * k, 4 * k)
         else:
@@ -371,7 +371,15 @@ class Window(QWidget):
         f.setLetterSpacing(QFont.AbsoluteSpacing, 1.5 * k)
         p.setFont(f)
         p.setPen(QColor("#e6e9ee"))
-        p.drawText(r, Qt.AlignCenter, label)
+        if sub:
+            p.drawText(r.adjusted(0, 0, 0, -r.height() * 0.32), Qt.AlignCenter, label)
+            f.setPixelSize(round(max(9, size - 6) * k))
+            f.setBold(False)
+            p.setFont(f)
+            p.setPen(QColor(color if on else "#8a929e"))
+            p.drawText(r.adjusted(0, r.height() * 0.34, 0, 0), Qt.AlignCenter, sub)
+        else:
+            p.drawText(r, Qt.AlignCenter, label)
         self.rail_buttons.append((r.adjusted(-6 * k, -5 * k, 6 * k, 5 * k), action))
 
     def toggle_zoom(self, panel):

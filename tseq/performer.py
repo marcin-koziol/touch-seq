@@ -1,11 +1,13 @@
 """The live-play module: chord pads, the keyboard and the XY pad, with the chord/XY gestures that belong to
 them."""
 import math
+import time
 
 from PySide6.QtCore import QPointF, QRectF, Qt, QTimer
 from PySide6.QtGui import QColor, QLinearGradient, QPen
 
-from .constants import BG, BORDER, DIM, DRUM_COLORS, DRUM_KIT, GATE_RES, MAX_GATE, PANEL, TEXT, WARN
+from .constants import (BG, BORDER, BPM_MAX, BPM_MIN, DIM, DRUM_COLORS, DRUM_KIT, GATE_RES, MAX_GATE, PANEL,
+                        TEXT, WARN)
 from .gestures import Gesture
 from .midiin import Inputs
 from .music import (BORROWED, CHORD_SCALE, SCALES, XYFX_MODES, chord_name, note_name, roman, stack, xyfx_filter,
@@ -173,6 +175,9 @@ class Performer(Panel):
         self.midi_in = {}  # Track -> {note: count} the MIDI keyboards are holding (for lighting)
         self.midi_keys = {}  # (port, channel, note) -> [InNote]: what is sounding, to release on note-off
         self.arm_key = None  # (selected track, mode) the current recording was armed with
+        self.pulse_at = None  # when the last external clock pulse came in
+        self.pulse_len = None  # its smoothed length (s)
+        self.pulses = 0  # pulses since the last tempo decision
 
     # --- sound + recording -----------------------------------------------------
     def on(self, tr, note, vel):
@@ -193,8 +198,8 @@ class Performer(Panel):
     def tick(self):
         super().tick()
         self.inputs.use(tr.in_port for tr in self.project.tracks if not tr.audio)
-        for port, msg in self.inputs.poll():
-            self.external(port, msg)
+        for port, msg, when in self.inputs.poll():
+            self.external(port, msg, when)
         self.arm()
 
     def arm(self):
@@ -248,11 +253,34 @@ class Performer(Panel):
         elif self.engine.playing or self.engine.counting:
             self.engine.stop()
 
-    def external(self, port, msg):
+    CLOCK = 24  # MIDI clock pulses per beat
+
+    def clock(self, when):
+        """Follow an external clock, so a keyboard's own tempo plays the sequencer. The pulse length is
+        smoothed and the tempo only moves once a beat, so a few late pulses don't make it wobble."""
+        last, self.pulse_at = self.pulse_at, when
+        if last is None:
+            return
+        gap = when - last
+        if not 0.002 < gap < 0.25:  # the clock stopped (or was replugged): start measuring again
+            self.pulse_len = None
+            return
+        self.pulse_len = gap if self.pulse_len is None else self.pulse_len * 0.85 + gap * 0.15
+        self.pulses += 1
+        if self.pulses % self.CLOCK:  # decide once a beat, not on every pulse
+            return
+        bpm = round(60.0 / (self.pulse_len * self.CLOCK))
+        if bpm != self.project.bpm and BPM_MIN <= bpm <= BPM_MAX:
+            self.project.bpm = bpm
+
+    def external(self, port, msg, when=None):
         """A message from a MIDI input: every track listening to it plays the note (a keyboard's chords can
         go to more than one track) and records it when armed. Bend, mod wheel and the rest go to the
         instrument, so a keyboard's controller works the track like its own UI would."""
         status = msg[0]
+        if status == 0xF8:  # the clock: its tempo is the project's
+            self.clock(when if when is not None else time.perf_counter())
+            return
         if status in (0xFA, 0xFB, 0xFC) or (status == 0xB0 and len(msg) > 2 and msg[1] in (115, 116)):
             self.transport(msg)  # the keyboard's own play/stop
             return
@@ -290,12 +318,12 @@ class Performer(Panel):
             e.rec_taken.add((k, i))
             if ahead:
                 e.rec_fresh.add((k, i))
-        return pat, i, pos, lanes
+        return pat, i, e.beats(), lanes
 
     def record_end(self, tr, take):
         pat, i, start, lanes = take
-        pos = self.engine.position(tr)
-        held = (pos - start) % pat.length if pos is not None else 1.0
+        pos = self.engine.beats()  # not the track's own position: that wraps with the pattern
+        held = pos - start if pos is not None and start is not None else 1.0
         gate = max(GATE_RES, min(MAX_GATE, round(held / GATE_RES) * GATE_RES))
         for k in lanes:
             lane = pat.lane(k)

@@ -23,9 +23,8 @@ screen; everything else keeps running.
   the kind, and for external the MIDI output it sends to, for audio the interface input it takes)
 - 16 patterns per track, 1–64 steps (polymetric tracks are fine), 8 **scenes**
 - pattern and scene changes are **quantized to the bar**: the current pattern plays to the end of the bar
-- the transport row has the **metronome** (**CLICK**) and a **COUNT**-in of 0/1/2 bars: the count-in plays its
-  clicks first and the pattern starts on the downbeat after them — and a keyboard's own play/stop works too
-  (MIDI Start/Continue/Stop, or CC 115/116), count-in included
+- the top bar has the **metronome** (**CLICK**) and a **COUNT**-in of 0/1/2 bars: the count-in plays its
+  clicks first and the pattern starts on the downbeat after them
 - **GRID** shows all tracks; **EDIT** opens the selected one:
   - melody: a **polyphonic piano roll** with a velocity/gate lane; notes can be stretched over several steps;
     rows outside the project's scale are dimmed
@@ -42,7 +41,11 @@ screen; everything else keeps running.
   once configured, **amber** when that device is away, dim when the track only plays its patterns. Incoming
   notes play the track's instrument (or its hardware output), light its pads/keys in PLAY-12 and are recorded
   when REC/OVR is armed — quantized like the on-screen pads, into the track the keyboard is routed to (which
-  need not be the selected one). Pitch bend and the mod wheel reach the instrument too
+  need not be the selected one). Pitch bend and the mod wheel reach the instrument too. A note keeps the
+  length you held it for, over the bar line included
+- the same keyboard is the **transport**: its play/stop buttons start and stop the sequencer (MIDI
+  Start/Continue/Stop, or CC 115/116), and its **clock** sets the tempo — 24 pulses per beat, smoothed, so
+  the project runs at the keyboard's bpm
 - in EDIT, **▼ trans / ▲ trans** moves the whole pattern one scale degree down or up: the step comes from the
   project's key and scale, so the pattern stays in key (a chromatic note keeps its alteration, octaves wrap);
   drum tracks have fixed voices and don't offer it
@@ -100,8 +103,8 @@ Plays the track selected in the sequencer:
 - external MIDI tracks: like melody tracks (chords, keyboard), straight out to their output port
 - **REC** (replace, like tape) or **OVR** (overdub) records what you play into the pattern, quantized to
   1/16, 1/8 or 1/4 — fingers on the pads and notes from a track's MIDI keyboard alike
-- **CLICK** and **COUNT** in the sequencer's transport row: a tick on every beat (higher on the bar's first)
-  while playing, and 0/1/2 bars of them before the pattern starts, so you can come in on time
+- **CLICK** and **COUNT** in the top bar: a tick on every beat (higher on the bar's first) while playing, and
+  0/1/2 bars of them before the pattern starts, so you can come in on time
 - with **XYFX** on the master, a **MASTER** row appears in the sequencer; selecting it turns this module
   into an **XY pad**: beat repeat left–right (straight on the right half, triplets or reverse on the left),
   low-pass down / high-pass up, the centre is "dry"
@@ -181,7 +184,7 @@ device is unplugged its notes are simply not sent, and they come back when it re
 | module rail | **⤢ / ⤡** | module full screen and back |
 | sequencer | tap **BPM** | tempo popup: drag the number, ±1/5/10, TAP tempo |
 | sequencer | tap a track header twice | opens it in EDIT |
-| sequencer | **CLICK** / **COUNT** | the metronome, and 0/1/2 bars of count-in before the pattern |
+| top bar | **CLICK** / **COUNT** | the metronome, and 0/1/2 bars of count-in before the pattern |
 | sequencer | drag a **pattern slot** onto another | copies the pattern there and switches to it (at the bar) |
 | sequencer | drag along a row | paints steps on/off |
 | piano roll | tap empty / tap a note | place / remove; drag a note sideways = length, up/down = pitch |

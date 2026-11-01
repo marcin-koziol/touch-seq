@@ -319,8 +319,8 @@ class Sequencer(Panel):
 
     def draw_top(self, p, r):
         s, e = self.s, self.engine
-        play, bpm, bar, click, count, grid, edit, _, *scenes, save = split(
-            r, [76 * s, 86 * s, 104 * s, 52 * s, 52 * s, 62 * s, 62 * s, 0] + [42 * s] * SCENES + [62 * s], 6 * s)
+        play, bpm, bar, grid, edit, _, *scenes, save = split(
+            r, [86 * s, 96 * s, 110 * s, 72 * s, 72 * s, 0] + [50 * s] * SCENES + [72 * s], 6 * s)
 
         active = e.playing or e.counting
         self.button(p, play, "", self.toggle_play, on=e.playing, color=PLAY, pending=e.counting)
@@ -345,15 +345,11 @@ class Sequencer(Panel):
             label = f"{si // STEPS_PER_BAR + 1}" if si >= 0 else "-"
             beat = (si % STEPS_PER_BAR) // 4 if si >= 0 else -1
         self.text(p, bar.adjusted(10 * s, 0, 0, 0), label, TEXT, 20, Qt.AlignLeft | Qt.AlignVCenter, bold=True)
-        cell = (bar.width() - 44 * s) / 4
+        cell = (bar.width() - 54 * s) / 4
         for b in range(4):
-            br = QRectF(bar.left() + 34 * s + b * cell, bar.center().y() - 7 * s, cell - 6 * s, 14 * s)
+            br = QRectF(bar.left() + 44 * s + b * cell, bar.center().y() - 7 * s, cell - 6 * s, 14 * s)
             self.box(p, br, PLAY if b == beat else "#222734", None, radius=3)
 
-        self.button(p, click, "CLICK", lambda: e.set_click(not pr.click), on=pr.click, color="#4ade80",
-                    sub="on" if pr.click else "off")
-        self.button(p, count, "COUNT", lambda: setattr(pr, "count_in", (pr.count_in + 1) % 3), on=pr.count_in > 0,
-                    sub="off" if not pr.count_in else f"{pr.count_in} bar" + ("s" if pr.count_in > 1 else ""))
         self.button(p, grid, "GRID", lambda: setattr(self, "view", "grid"), on=self.view == "grid")
         self.button(p, edit, "EDIT", lambda: setattr(self, "view", "edit"), on=self.view == "edit")
 

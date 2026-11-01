@@ -102,8 +102,8 @@ class Rack(Window):
     def draw_toolbar(self, p, r):
         k = self.k
         inner = r.adjusted(14 * k, 7 * k, -14 * k, -7 * k)
-        logo, file_, settings, patch, name, info, save = split(
-            inner, [150 * k, 110 * k, 130 * k, 140 * k, 0, 300 * k, 120 * k], 12 * k)
+        logo, file_, settings, patch, click, count, name, info, save = split(
+            inner, [150 * k, 110 * k, 130 * k, 140 * k, 96 * k, 104 * k, 0, 300 * k, 120 * k], 12 * k)
         f = QFont("sans-serif")
         f.setPixelSize(round(19 * k))
         f.setBold(True)
@@ -116,6 +116,12 @@ class Rack(Window):
                          on=bool(self.dialog) and self.dialog[0] == "SETTINGS")
         self.rail_button(p, patch, "PATCHBAY", self.open_patchbay, size=17,
                          on=bool(self.dialog) and self.dialog[0] == "PATCHBAY")
+        on = self.project.click
+        self.rail_button(p, click, "CLICK", lambda: self.engine.set_click(not self.project.click), size=15,
+                         on=on, sub="on" if on else "off", color="#4ade80")
+        bars = self.project.count_in
+        self.rail_button(p, count, "COUNT", self.cycle_count_in, size=15, on=bars > 0,
+                         sub="off" if not bars else f"{bars} bar" + ("s" if bars > 1 else ""))
         f.setPixelSize(round(22 * k))
         p.setFont(f)
         p.drawText(name.adjusted(20 * k, 0, 0, 0), Qt.AlignLeft | Qt.AlignVCenter, self.path.stem)
@@ -129,6 +135,10 @@ class Rack(Window):
         state = "UNSAVED" if dirty else f"SAVED {time.strftime('%H:%M:%S', self.saved_at)}"
         p.drawText(info.adjusted(0, 0, -10 * k, 0), Qt.AlignRight | Qt.AlignVCenter,
                    f"{self.project.key_name.upper()}   ·   {state}")
+
+    def cycle_count_in(self):
+        """The count-in: off, one bar of clicks, two (saved with the project)."""
+        self.project.count_in = (self.project.count_in + 1) % 3
 
     def open_file(self):
         if self.dialog and self.dialog[0] == "FILE":

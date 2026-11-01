@@ -1303,7 +1303,7 @@ class FakeInputs:
 
     def poll(self):
         got, self.msgs = self.msgs, []
-        return got
+        return [(port, msg, time.perf_counter()) for port, msg in got]
 
     def open_names(self):
         return self.open
@@ -1385,7 +1385,9 @@ ins = ts.Inputs(in_opener, lambda: ["Arturia KeyStep MIDI 1", "Novation Launchpa
 ins.use(["keystep"])
 assert list(made) == ["Arturia KeyStep MIDI 1"], made
 made["Arturia KeyStep MIDI 1"].cb(([0x90, 60, 100], 0.0))
-assert ins.poll() == [("Arturia KeyStep MIDI 1", [0x90, 60, 100])] and ins.poll() == []
+got = ins.poll()
+assert [(name, msg) for name, msg, when in got] == [("Arturia KeyStep MIDI 1", [0x90, 60, 100])], got
+assert ins.poll() == []
 assert ins.open_names() == ["Arturia KeyStep MIDI 1"]
 ins.use([])
 assert made["Arturia KeyStep MIDI 1"].closed and ins.open_names() == []
@@ -1529,3 +1531,47 @@ text = _f.read_text()
 assert "click" not in text and "count_in" not in text, "off is not stored"
 assert ts.load_project(_f).click is False and ts.load_project(_f).count_in == 0
 print("click settings OK")
+
+# --- a note held past the end of the pattern keeps its length (it used to wrap: 1/16 or a quarter) ---
+prh = ts.Project(bpm=600, tracks=[ts.Track("melody", 1, 1)])  # 600 bpm: a step is 25 ms, a bar 0.4 s
+orh = FakeOut(); ehh = ts.Engine(prh, orh); shh = ts.Sequencer(prh, ehh)
+phh = ts.Performer(prh, ehh, shh)
+shh.sel = prh.tracks[0]
+phh.mode = "rec"; ehh.start(); phh.tick()
+time.sleep(0.6)
+take = phh.record_start(prh.tracks[0], [60], 100)
+assert take, "armed and playing: the take starts"
+time.sleep(0.5)  # ~20 steps: over the bar line, where the old code wrapped to 4 steps
+phh.record_end(prh.tracks[0], take)
+step = prh.tracks[0].current.lanes[60][take[1]]
+print("held over the bar line:", round(step.gate, 3), "steps")
+assert step.gate == ts.MAX_GATE, step.gate  # a whole bar, not the remainder of the wrap
+ehh.stop(); phh.mode = None; phh.tick()
+print("long hold OK")
+
+# --- an external clock sets the tempo (the keyboard is the master) ---
+prb = ts.Project(bpm=100, tracks=[ts.Track("melody", 1, 1)])
+ebb = ts.Engine(prb, FakeOut()); shb = ts.Sequencer(prb, ebb); phb = ts.Performer(prb, ebb, shb)
+phb.inputs = FakeInputs()
+t = 1000.0
+for _ in range(48 * 2):  # two beats of clock at 128 bpm
+    phb.clock(t)
+    t += 60.0 / 128 / 24
+assert prb.bpm == 128, prb.bpm
+print("clock tempo:", prb.bpm)
+phb.clock(t + 1.0)  # the clock stopped for a second: measure again, don't jump
+assert prb.bpm == 128, prb.bpm
+t += 1.0
+for _ in range(24 * 3):  # and a new tempo is followed
+    phb.clock(t)
+    t += 60.0 / 90 / 24
+assert prb.bpm == 90, prb.bpm
+# the same through a MIDI input, which is how it actually arrives
+prb.bpm = 100
+phb.pulse_at, phb.pulse_len, phb.pulses = None, None, 0
+tt = 2000.0
+for _ in range(48 * 2):
+    phb.external("Arturia KeyStep MIDI 1", [0xF8], tt)
+    tt += 60.0 / 140 / 24
+assert prb.bpm == 140, prb.bpm
+print("clock from MIDI OK")
