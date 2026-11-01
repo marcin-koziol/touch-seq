@@ -50,15 +50,16 @@ class Rack(Window):
     def autosave(self):
         # Runs in the UI thread, which is the only one changing the project structure; the engine
         # only writes Track.pattern, so no lock is needed (and holding it would stall playback).
-        if not self.dirty:
-            return
-        text = dump_project(self.project)
-        if text != self.saved:
-            save_text(self.path, text)
-            self.saved, self.saved_at = text, time.localtime()
-            self.update()  # the toolbar shows the time of the last save
-        e = self.engine
-        self.dirty = bool(e.pending) or e.pending_scene is not None  # queued switches change it later
+        if self.dirty:
+            text = dump_project(self.project)
+            if text != self.saved:
+                save_text(self.path, text)
+                self.saved, self.saved_at = text, time.localtime()
+                self.update()  # the toolbar shows the time of the last save
+            e = self.engine
+            self.dirty = bool(e.pending) or e.pending_scene is not None  # queued switches change it later
+        if self.host.states_dirty:  # a parameter was turned: the plugin states go with the project
+            self.host.save_states()
 
     def closeEvent(self, e):
         self.engine.close()

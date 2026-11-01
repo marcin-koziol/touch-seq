@@ -180,7 +180,8 @@ Keys (with a keyboard attached): **Space** play/stop, **Esc** closes a dialog/po
 back when the app closes.
 
 Projects save themselves (every couple of seconds while editing, and on exit); plugin states are saved next
-to each project in `<name>.plugins/`.
+to each project in `<name>.plugins/`, together with their parameter values (some plugins, the XYFX among them,
+keep theirs out of the state) — a knob turned in HOST-4 is saved on that same couple-of-seconds clock.
 
 **Touchscreen on a multi-monitor GNOME/Wayland desktop:** tell Mutter which monitor the touch panel belongs
 to — the touch device's vendor:product from `lsusb`, the monitor's vendor/product/serial from

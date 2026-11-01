@@ -258,10 +258,13 @@ class StubHost(ts.Panel):
     rewired = 0
     def rewire(self):
         type(self).rewired += 1
+    states_dirty = False
+    saved_states = 0
+    def save_states(self):
+        type(self).saved_states += 1
+        self.states_dirty = False
     def draw(self, p):
         p.fillRect(self.rect(), ts.QColor(ts.BG))
-    def save_states(self):
-        pass
     def close(self):
         pass
 rack = ts.Rack(pr2, e5, OUT / "rack.json", StubHost())
@@ -1015,4 +1018,14 @@ pph.restore_params(pp, state)
 assert pph.host.values == {7: 0.25, 8: 0.75}, pph.host.values
 state.with_suffix(".params.json").unlink()  # no parameter file: nothing breaks
 pph.restore_params(pp, state)
+# a turned knob marks the states for saving, and the project's own autosave takes them along
+pph.host.values[7] = 0.0
+ts.HostPanel.set_param(pph, pp, 7, 0.5)
+assert pph.host.values[7] == 0.5 and pph.states_dirty, "a knob says the plugin state is worth saving"
+pph.save_states()
+assert not pph.states_dirty
+StubHost.saved_states = 0
+rkx.host.states_dirty = True
+rkx.autosave()
+assert StubHost.saved_states == 1 and not rkx.host.states_dirty, "the autosave saves plugin states too"
 print("plugin params OK")

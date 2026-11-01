@@ -63,6 +63,7 @@ class HostPanel(Panel):
         self.patch = [tuple(p) for p in (patch or [])]  # patchbay links: (out, in), kept with the machine
         self.wiring.replace("patchbay", self.patch)  # from the last time; heal keeps them alive
         self.buffer = buffer  # the audio graph's buffer size in samples this machine was left on (0: system)
+        self.states_dirty = False  # a parameter changed since the plugins' states were last saved
         if self.buffer:
             plugins.set_quantum(self.buffer)  # before the engine starts, so the plugins see that size
         try:
@@ -117,6 +118,12 @@ class HostPanel(Panel):
         self.rewire()
         if self.remember:
             self.remember("audio_out", name)
+
+    def set_param(self, plugin, index, value):
+        """A parameter turned in the app: the plugin's state is then worth saving with the project's autosave,
+        not just on the 30 s clock."""
+        self.host.set_value(plugin, index, value)
+        self.states_dirty = True
 
     # --- audio graph ----------------------------------------------------------
     def chain_labels(self):
@@ -322,6 +329,7 @@ class HostPanel(Panel):
         return [(outs[min(j, len(outs) - 1)], ins[min(j, len(ins) - 1)]) for j in range(max(len(outs), len(ins)))]
 
     def save_states(self):
+        self.states_dirty = False
         if not self.host or not self.loaded:
             return
         self.state_dir.mkdir(parents=True, exist_ok=True)
@@ -392,7 +400,7 @@ class HostPanel(Panel):
         plugin, prm = self.link_param(link)
         if prm:
             v = prm.lo + norm * (prm.hi - prm.lo)
-            self.host.set_value(plugin, prm.index, round(v) if prm.integer or prm.boolean else v)
+            self.set_param(plugin, prm.index, round(v) if prm.integer or prm.boolean else v)
 
     def link_to_fader(self, i):
         """Make CC fader i drive the parameter whose knob was held (self.assigning)."""
@@ -416,7 +424,7 @@ class HostPanel(Panel):
         if plugin:
             for prm in plugin.params:
                 if prm.name.lower() in values:
-                    self.host.set_value(plugin, prm.index, values[prm.name.lower()])
+                    self.set_param(plugin, prm.index, values[prm.name.lower()])
 
     def xy_values(self):
         plugin = self.xyfx()
@@ -765,7 +773,7 @@ class HostPanel(Panel):
 
         def set_(norm):
             v = prm.lo + norm * (prm.hi - prm.lo)
-            host.set_value(plugin, prm.index, round(v) if prm.integer or prm.boolean else v)
+            self.set_param(plugin, prm.index, round(v) if prm.integer or prm.boolean else v)
 
         toggle = (lambda: set_(0.0 if get() > 0.5 else 1.0)) if prm.boolean else None
         strip = self.sel[0]
