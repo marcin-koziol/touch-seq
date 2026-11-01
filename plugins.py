@@ -177,6 +177,28 @@ class Plugin:
         return self.host.plugins.index(self)
 
 
+def graph_node_names():
+    """Every node name in the audio graph ({} of names when PipeWire doesn't answer)."""
+    try:
+        dump = json.loads(subprocess.run(["pw-dump"], capture_output=True, text=True, timeout=5).stdout)
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        return []
+    return [((obj.get("info") or {}).get("props") or {}).get("node.name") or "" for obj in dump]
+
+
+def free_engine_name(base="Touch-Seq", nodes=None):
+    """A Carla engine name nothing else in the graph uses. Two engines with one name get their clients renamed
+    ("Touch-Seq.173/T1.1 …"), and every link built from the name the app knows then fails: with a name of its
+    own, a second instance (or one still closing after a project switch) works instead."""
+    if nodes is None:
+        nodes = graph_node_names()
+    name, n = base, 1
+    while any(other == name or other.startswith(name + "/") for other in nodes):
+        n += 1
+        name = f"{base} {n}"
+    return name
+
+
 class Host:
     def __init__(self, client="Touch-Seq"):
         if CARLA_PY not in sys.path:

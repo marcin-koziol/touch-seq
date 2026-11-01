@@ -6,6 +6,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import plugins
 import touchseq as ts
 from PySide6.QtCore import QPointF
 from PySide6.QtWidgets import QApplication
@@ -1575,3 +1576,10 @@ for _ in range(48 * 2):
     tt += 60.0 / 140 / 24
 assert prb.bpm == 140, prb.bpm
 print("clock from MIDI OK")
+
+# --- two Carla engines with one name get their clients renamed (and every link fails): take a free name ---
+assert plugins.free_engine_name("Touch-Seq", []) == "Touch-Seq"
+assert plugins.free_engine_name("Touch-Seq", ["Touch-Seq", "Touch-Seq/T1.1 Surge XT"]) == "Touch-Seq 2"
+assert plugins.free_engine_name("Touch-Seq", ["Touch-Seq", "Touch-Seq 2/T1.1 x"]) == "Touch-Seq 3"
+assert plugins.free_engine_name("Touch-Seq", ["Touch-Seq T1", "Touch-Seq T2"]) == "Touch-Seq", "MIDI ports are no engine"
+print("engine name OK")

@@ -70,6 +70,12 @@ buffers of its own; the curve is drawn from the same biquad maths the plugin run
 
 ### HOST-4 — plugins (Carla)
 
+Carla runs inside the app's process as a JACK client named **Touch-Seq**, and every plugin gets a client of
+its own under that name ("Touch-Seq/T1.1 Surge XT"); the audio links are built from those names. Two engines
+with one name would make Carla rename one ("Touch-Seq.173/…") and every link the app builds would then fail —
+silence, while the app looks fine. So a second Touch-Seq (or one still closing after a project switch) takes
+the first free name (*Touch-Seq 2*, …) and says so in HOST-4's status line: both keep playing.
+
 - every plugin track has a chain: **instrument → 2 effects → level/mute**; all tracks go through the
   **MASTER** (3 effects, e.g. a global reverb) to the audio output. **External MIDI** tracks have no chain at
   all — the panel shows their output port instead, with **MIDI OUT** to change it

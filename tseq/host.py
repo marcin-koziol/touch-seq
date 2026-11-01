@@ -62,8 +62,12 @@ class HostPanel(Panel):
         self.eq = EqEditor(self)  # the EQ's own editor, drawn in the parameter area
         if self.buffer:
             plugins.set_quantum(self.buffer)  # before the engine starts, so the plugins see that size
+        free = plugins.free_engine_name(name)  # a name already in the graph would rename our clients, and
+        if free != name:                      # every link built from the old name would then fail
+            self.message = f"another Touch-Seq is running: this one is “{free}”"
+        self.name = free
         try:
-            self.host = plugins.Host(name)
+            self.host = plugins.Host(self.name)
         except (RuntimeError, OSError, ImportError) as e:
             self.host, self.message = None, f"plugin host unavailable: {e}"
             return
