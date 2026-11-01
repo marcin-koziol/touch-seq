@@ -8,7 +8,7 @@ and performance faders — laid out as modules in a modular-synth rack, made for
 
 ![Touch-Seq: faders, plugin host, sequencer and chord pads](docs/screenshots/overview.png)
 
-Version 0.5.2 — early, but already played with.
+Version 0.6.0 — early, but already played with.
 
 ## The rack
 
@@ -168,11 +168,11 @@ Download the AppImage for your machine from [Releases](https://github.com/marcin
 then:
 
 ```sh
-chmod +x Touch-Seq-0.5.2-x86_64.AppImage
-./Touch-Seq-0.5.2-x86_64.AppImage
+chmod +x Touch-Seq-0.6.0-x86_64.AppImage
+./Touch-Seq-0.6.0-x86_64.AppImage
 ```
 
-It contains Python, Qt (PySide6), Carla and XYFX. The machine needs:
+It contains Python, Qt (PySide6), Carla and Touch-Seq's own plugins (XYFX, Monitor, EQ and Click). The machine needs:
 
 - Linux, x86_64 or aarch64 (e.g. Raspberry Pi 4/5 with a 64-bit OS), glibc 2.35 or newer
   (Ubuntu 22.04+, Debian 12+, Fedora 36+, Arch, Raspberry Pi OS bookworm)

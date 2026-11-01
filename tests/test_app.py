@@ -10,7 +10,7 @@ import plugins
 import touchseq as ts
 from PySide6.QtCore import QPointF
 from PySide6.QtWidgets import QApplication
-from PySide6.QtGui import QImage, QPainter
+from PySide6.QtGui import QColor, QImage, QPainter
 
 
 class View:
@@ -1708,7 +1708,7 @@ class GoodPaint(ts.Panel):
 wb2 = ts.Window([(0, 0, "B", "broken", BadPaint()), (1, 0, "G", "fine", GoodPaint())])
 wb2.resize(900, 600)
 shot = wb2.grab().toImage()
-assert wb2.broken_paint, "the failure was recorded"
+assert len(wb2.broken_paint) == 1, f"only the broken module failed: {wb2.broken_paint}"
 assert shot.width() == 900 and shot.height() == 600, "the window still painted"
 assert GoodPaint.drew == 1, f"the other module was still drawn ({GoodPaint.drew})"
 print("broken paint OK")
