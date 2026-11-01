@@ -831,3 +831,31 @@ assert ht.buffer == 256 and asked == [256] and kept == [("buffer", 256)], (asked
 assert ts.DEFAULT_CONFIG["buffer"] == 0
 ts.plugins.set_quantum = real_set_quantum
 print("audio buffer OK")
+# --- transpose: the pattern by scale degrees, keeping the key ---
+prtr = ts.Project(key=0, scale="major", tracks=[ts.Track("melody", 1, 1), ts.Track("drum", 10, 2)])
+mtr, dtr = prtr.tracks
+for n in (60, 64, 71):  # C, E, B: in C major
+    mtr.current.lane(n)[0].on = True
+mtr.current.lane(61)[0].on = True  # C#, outside the scale: it keeps its alteration
+sqtr = ts.Sequencer(prtr, ts.Engine(prtr, FakeOut()))
+sqtr.roll_bases[mtr] = 48
+sqtr.transpose(mtr, 1)
+assert sorted(mtr.current.lanes) == [62, 63, 65, 72], sorted(mtr.current.lanes)  # D, D#, F, C5
+assert mtr not in sqtr.roll_bases, "the piano roll re-centres on the notes"
+sqtr.transpose(mtr, -1)
+assert sorted(mtr.current.lanes) == [60, 61, 64, 71], "and back"
+drum_lanes = list(dtr.current.lanes)
+sqtr.transpose(dtr, 1)
+assert list(dtr.current.lanes) == drum_lanes, "drum tracks have fixed voices: nothing to transpose"
+# the step comes from the project's scale and key, the octave wraps
+assert ts.transpose(64, 1, 0, "major pentatonic") == 67, "E up is G in a pentatonic"
+assert ts.transpose(71, 1, 0, "major") == 72, "B up is the next C"
+assert ts.transpose(60, 1, 7, "major") == 62, "in G, C up is D"
+assert ts.transpose(60, 1, 0, "chromatic") == 61 and ts.transpose(60, 7, 0, "major") == 72
+assert ts.transpose(61, 1, 0, "major") == 63, "an outside note moves within the key and keeps its alteration"
+# a note pushed out of the MIDI range stays where it is (instead of being dropped)
+hi = ts.Project(tracks=[ts.Track("melody")])
+hi.tracks[0].current.lane(127)[0].on = True
+ts.Sequencer(hi, ts.Engine(hi, FakeOut())).transpose(hi.tracks[0], 1)
+assert list(hi.tracks[0].current.lanes) == [127], list(hi.tracks[0].current.lanes)
+print("transpose OK")

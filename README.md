@@ -28,6 +28,9 @@ running.
   - drums: a voice × step matrix, voices in fixed colors (kick red, snare orange, hats yellow, …)
   - external MIDI: the same piano roll, but the track has **no plugins**: its notes, velocity, gate and the
     faders go straight out to the chosen hardware output (and nowhere else), and its header shows the port
+- in EDIT, **▼ trans / ▲ trans** moves the whole pattern one scale degree down or up: the step comes from the
+  project's key and scale, so the pattern stays in key (a chromatic note keeps its alteration, octaves wrap);
+  drum tracks have fixed voices and don't offer it
 
 ![Piano roll](docs/screenshots/piano-roll.png)
 ![Drum editor](docs/screenshots/drums.png)

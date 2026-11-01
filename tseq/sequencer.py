@@ -11,7 +11,7 @@ from .constants import (BG, BORDER, BPM_MAX, BPM_MIN, DIM, DRUM_COLORS, DRUM_KIT
                         PALETTE, PANEL, PATTERNS, PLAY, SCENES, STEPS_PER_BAR, TEXT, WARN)
 from .gestures import Drag, Gesture, Hold, ScrollOrTap
 from .model import DEFAULT_STEP, Step
-from .music import note_name
+from .music import note_name, transpose
 from .ui import Panel, split
 
 
@@ -208,6 +208,20 @@ class Sequencer(Panel):
     def add_track(self, kind, port=""):
         self.sel = self.engine.add_track(kind, port)
         self.scroll = 1e9  # clamped on paint: shows the new row
+
+    def transpose(self, tr, steps):
+        """The track's current pattern up (down for a negative `steps`) by scale degrees, in the project's key:
+        the intervals stay, notes outside the scale keep their alteration, and a note pushed out of range
+        stays where it is. Drum tracks have fixed voices, so they are left alone."""
+        if tr.drum:
+            return
+        moved = {}
+        for note, lane in tr.current.lanes.items():
+            to = transpose(note, steps, self.project.key, self.project.scale)
+            moved[to if 0 <= to <= 127 else note] = lane
+        tr.current.lanes = moved
+        tr.last_note = min(127, max(0, transpose(tr.last_note, steps, self.project.key, self.project.scale)))
+        self.roll_bases.pop(tr, None)  # the roll re-centres on where the notes are now
 
     def delete_track(self):
         tracks = self.project.tracks
@@ -477,13 +491,17 @@ class Sequencer(Panel):
         g = 8 * s
         ctrl = QRectF(r.left() + g, r.top() + g, r.width() - 2 * g, 58 * s)
         params = ("step", "vel") if tr.drum else ("vel", "gate")
-        octaves = [] if tr.drum else [80 * s, 80 * s]
+        octaves = [] if tr.drum else [68 * s, 68 * s]
+        shifts = [] if tr.drum else [64 * s, 64 * s]  # transpose the pattern; drums have fixed voices
         name, ch, length, mute, _, *param_r, _, delete = split(
-            ctrl, [110 * s, 90 * s, 90 * s, 80 * s, 0] + [90 * s] * len(params) + octaves + [0, 110 * s], 6 * s)
+            ctrl, [104 * s, 84 * s, 84 * s, 76 * s, 0] + [84 * s] * len(params) + octaves + shifts + [0, 104 * s],
+            6 * s)
         if octaves:
-            *param_r, down, up = param_r
+            *param_r, down, up, shift_dn, shift_up = param_r
             self.button(p, down, "OCT ▼", lambda: self.scroll_roll(tr, -12))
             self.button(p, up, "OCT ▲", lambda: self.scroll_roll(tr, 12))
+            self.button(p, shift_dn, "▼", lambda: self.transpose(tr, -1), sub="trans")
+            self.button(p, shift_up, "▲", lambda: self.transpose(tr, 1), sub="trans")
 
         self.box(p, name, color, None)
         self.text(p, name.adjusted(0, 0, 0, -name.height() * 0.3), f"T{tr.number}  P{tr.pattern + 1}",

@@ -6,6 +6,19 @@ def note_name(n):
     return f"{NOTE_NAMES[n % 12]}{n // 12 - 1}"
 
 
+def transpose(note, steps, key=0, scale="chromatic"):
+    """`note` moved `steps` scale degrees in `scale` above `key`, the way a player reads it: a note outside the
+    scale keeps its alteration (a blue note stays a blue note) and octaves wrap, so the result is always in the
+    key. Chromatic scales move in semitones."""
+    degrees = SCALES[scale]
+    rel = note - key
+    pc = rel % 12
+    below = max(i for i, d in enumerate(degrees) if d <= pc)  # degrees always start at the key itself
+    alteration = pc - degrees[below]
+    octave, degree = divmod(rel // 12 * len(degrees) + below + steps, len(degrees))
+    return key + octave * 12 + degrees[degree] + alteration
+
+
 SCALES = {  # name -> semitones above the key
     "chromatic": range(12),
     "major": (0, 2, 4, 5, 7, 9, 11),
