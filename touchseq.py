@@ -29,7 +29,7 @@ from tseq.rack import *  # noqa: F401,F403
 from tseq.dialogs import *  # noqa: F401,F403
 from tseq.app import *  # noqa: F401,F403
 
-__version__ = "0.2.0"
+__version__ = "0.5.0"
 
 if __name__ == "__main__":
     main(__version__)
