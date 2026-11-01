@@ -17,6 +17,7 @@ from tseq.constants import *  # noqa: F401,F403
 from tseq.music import *  # noqa: F401,F403
 from tseq.model import *  # noqa: F401,F403
 from tseq.engine import *  # noqa: F401,F403
+from tseq.midiin import *  # noqa: F401,F403
 from tseq.gestures import *  # noqa: F401,F403
 from tseq.ui import *  # noqa: F401,F403
 from tseq.sequencer import *  # noqa: F401,F403

@@ -498,7 +498,7 @@ assert pat.lanes[60][4].on and any(st.on for st in pat.lanes[62]), "overdub adds
 perf.mode = "ovr"; sqp.sel = prp.tracks[1]; perf.tick()
 gd = perf.press_pad(("drum", 1), prp.tracks[1], [(1, 38)], r, QPointF(50, 90)); gd.release(None)
 assert any(st.on for st in prp.tracks[1].current.lanes[1])
-ep.stop(); perf.mode = None; perf.tick(); assert ep.rec is None
+ep.stop(); perf.mode = None; perf.tick(); assert not ep.rec
 # no recording when stopped
 before = sum(st.on for lane in pat.lanes.values() for st in lane)
 perf.mode = "rec"; perf.tick(); gs = perf.press_pad(3, mel, [(65, 65)], r, QPointF(50, 50)); gs.release(None)
@@ -1285,3 +1285,153 @@ assert ah2.assigning is None, "the pick mode ends once the fader is chosen"
 ah2.toggle_assign(); assert ah2.assigning == "pick"
 ah2.toggle_assign(); assert ah2.assigning is None, "and ASSIGN again cancels"
 print("assign button OK")
+
+# --- a track's MIDI input: device + channel, playing, lighting and recording from a keyboard ---
+pry = ts.Project(bpm=240, tracks=[ts.Track("melody", 1, 1), ts.Track("melody", 2, 2)])
+ty1, ty2 = pry.tracks
+ty1.in_port, ty1.in_channel = "keystep", 2
+ty2.in_port = "keystep"  # all channels
+outy = FakeOut(); ey = ts.Engine(pry, outy); sqy = ts.Sequencer(pry, ey)
+py = ts.Performer(pry, ey, sqy)
+
+class FakeInputs:
+    def __init__(self):
+        self.msgs, self.names, self.open = [], [], []
+
+    def use(self, names):
+        self.names = [n for n in names if n]
+
+    def poll(self):
+        got, self.msgs = self.msgs, []
+        return got
+
+    def open_names(self):
+        return self.open
+
+    def close(self):
+        pass
+
+py.inputs = FakeInputs()
+
+def keyboard(status, a=0, b=0, port="Arturia KeyStep MIDI 1"):
+    py.inputs.msgs.append((port, [status, a, b]))
+    py.tick()
+
+def said(*msgs):
+    return [m for _, m in outy.log] == list(msgs)
+
+keyboard(0x91, 60, 100)  # channel 2: T1 wants 2, T2 wants every channel
+assert said([0x90, 60, 100], [0x91, 60, 100]), [m for _, m in outy.log]
+assert py.inputs.names == ["keystep", "keystep"], py.inputs.names
+assert py.lit(ty1, 60) and py.lit(ty2, 60), "the pads and keys light up"
+keyboard(0x91, 60, 0)
+assert [m for _, m in outy.log][-2:] == [[0x80, 60, 0], [0x81, 60, 0]] and not py.midi_in, "note-off reaches each track once"
+outy.log.clear()
+keyboard(0x92, 64, 100)  # channel 3: only the track that takes all of them
+assert said([0x91, 64, 100]), [m for _, m in outy.log]
+keyboard(0x82, 64, 0); outy.log.clear()
+keyboard(0x90, 65, 100, port="Novation Launchpad")  # a device no track listens to
+assert not outy.log, "a device no track listens to plays nothing"
+keyboard(0xB1, 1, 70)  # mod wheel: straight to the instruments
+assert said([0xB1, 1, 70], [0xB1, 1, 70]), [m for _, m in outy.log]
+outy.log.clear()
+py.mode = "rec"; py.tick(); ey.start()
+time.sleep(step_len * 3.3)
+keyboard(0x91, 67, 100)  # the keyboard records into the track it is routed to
+time.sleep(step_len * 2)
+keyboard(0x81, 67, 0)
+rec = sorted((k, i, round(st.gate, 3)) for k, lane in ty1.current.lanes.items() for i, st in enumerate(lane) if st.on)
+print("MIDI keyboard recorded:", rec)
+assert rec and rec[0][0] == 67 and 1.5 <= rec[0][2] <= 2.5, rec
+assert any(st.on for lane in ty2.current.lanes.values() for st in lane), "both listening tracks record"
+ey.stop(); py.mode = None; py.tick()
+assert not ey.rec and not py.midi_in, "disarming ends the recording"
+print("MIDI keyboard OK")
+
+# a drum track takes a pad controller into the kit's voice lanes, not into lanes of raw notes
+prd = ts.Project(bpm=240, tracks=[ts.Track("drum", 10, 1)])
+dr = prd.tracks[0]; dr.in_port = "pads"
+ed = ts.Engine(prd, FakeOut()); sd = ts.Sequencer(prd, ed); pd = ts.Performer(prd, ed, sd)
+pd.inputs = FakeInputs()
+pd.mode = "rec"; ed.start(); pd.tick()
+time.sleep(step_len * 1.2)
+pd.inputs.msgs.append(("pads", [0x99, 36, 120])); pd.tick()
+pd.inputs.msgs.append(("pads", [0x89, 36, 0])); pd.tick()
+assert any(st.on for st in dr.current.lanes[0]), "note 36 lands in the kick lane"
+assert 36 not in dr.current.lanes, "not in a lane of its own"
+ed.stop(); pd.mode = None; pd.tick()
+print("drum input OK")
+
+# --- the input manager: opens what a track asks for, queues what arrives, lets go of the rest ---
+class FakeIn:
+    def __init__(self, name):
+        self.name, self.cb, self.closed = name, None, False
+
+    def set_callback(self, cb):
+        self.cb = cb
+
+    def cancel_callback(self):
+        self.cb = None
+
+    def close_port(self):
+        self.closed = True
+
+made = {}
+def in_opener(name):
+    made[name] = FakeIn(name)
+    return made[name]
+
+ins = ts.Inputs(in_opener, lambda: ["Arturia KeyStep MIDI 1", "Novation Launchpad"])
+ins.use(["keystep"])
+assert list(made) == ["Arturia KeyStep MIDI 1"], made
+made["Arturia KeyStep MIDI 1"].cb(([0x90, 60, 100], 0.0))
+assert ins.poll() == [("Arturia KeyStep MIDI 1", [0x90, 60, 100])] and ins.poll() == []
+assert ins.open_names() == ["Arturia KeyStep MIDI 1"]
+ins.use([])
+assert made["Arturia KeyStep MIDI 1"].closed and ins.open_names() == []
+assert py.input_ok(ty1) is False, "a track whose device is not open says so"
+py.inputs.open = ["Arturia KeyStep MIDI 1"]
+assert py.input_ok(ty1) is True
+print("input manager OK")
+
+# --- the EDIT socket: dim, green with its channel, amber when the device is away ---
+def socket(tr, ok=None):
+    img = QImage(46, 58, QImage.Format_ARGB32); img.fill(0)
+    q = QPainter(img); q.setRenderHint(QPainter.Antialiasing)
+    sqy.s, sqy.input_ok, sqy.hits = 1.0, (lambda t: ok) if ok is not None else None, []
+    sqy.draw_input(q, QRectF(0, 0, 46, 58), tr)
+    q.end()
+    return {img.pixelColor(x, y).name() for x in range(46) for y in range(58)}
+
+assert "#4ade80" in socket(ty1), "configured and here: green"
+assert "#ff8c42" in socket(ty1, False), "configured but the device is away: amber"
+assert not {"#4ade80", "#ff8c42"} & socket(ts.Track("melody", 5, 9)), "not configured: dim"
+picked = []
+sqy.choose_input = picked.append
+socket(ty1)
+sqy.press(1, QPointF(23, 29))
+assert picked == [ty1], "tapping the socket asks for the input dialog"
+print("input socket OK")
+
+# --- the input dialog: a port and a channel, applied at once ---
+applied = []
+dlg = ts.MidiInputs(lambda port, ch: applied.append((port, ch)), list_ports=lambda: ["Arturia KeyStep MIDI 1"])
+img = QImage(1200, 700, QImage.Format_ARGB32); img.fill(0)
+q = QPainter(img); q.setRenderHint(QPainter.Antialiasing); dlg.paint(q, 1200, 700); q.end()
+dlg.pick("Arturia KeyStep MIDI 1")
+assert applied == [("Arturia KeyStep MIDI 1", 0)], applied
+dlg.take(5)
+assert applied[-1] == ("Arturia KeyStep MIDI 1", 5), applied
+img.fill(0); q = QPainter(img); dlg.paint(q, 1200, 700); q.end()  # the new state paints
+print("input dialog OK")
+
+# --- a track's input survives a save and load ---
+
+_f = OUT / "in.json"
+py3 = ts.Project(tracks=[ts.Track("melody", 1, 1, in_port="keystep", in_channel=7)])
+_f.write_text(ts.dump_project(py3))
+back = ts.load_project(_f)
+assert back.tracks[0].in_port == "keystep" and back.tracks[0].in_channel == 7
+_f.write_text(ts.dump_project(ts.Project(tracks=[ts.Track("melody", 1, 1)])))
+assert "in_port" not in _f.read_text(), "a track with no input does not store one"
+print("input saved OK")

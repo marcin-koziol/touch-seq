@@ -137,6 +137,8 @@ class Sequencer(Panel):
         self.master_focus = False  # the MASTER row is selected (PLAY-12 shows the XY pad)
         self.new_track = lambda: None  # the rack: the "+" dialog (drum, melody, external MIDI, audio)
         self.choose_source = lambda tr: None  # the rack: pick the input of an audio track
+        self.choose_input = lambda tr: None  # the rack: pick the MIDI keyboard a track plays from
+        self.input_ok = None  # the rack: is the track's MIDI input open? (None: unknown, assume it is)
         self.reroute = lambda: None  # the rack: rebuild the audio wiring after an input or pan change
 
     # --- actions --------------------------------------------------------
@@ -542,9 +544,12 @@ class Sequencer(Panel):
         params = () if tr.audio else ("step", "vel") if tr.drum else ("vel", "gate")
         octaves = [] if tr.drum or tr.audio else [68 * s, 68 * s]
         shifts = [] if tr.drum or tr.audio else [64 * s, 64 * s]  # transpose; drums and inputs have no pitch
-        name, ch, length, mute, _, *param_r, _, delete = split(
-            ctrl, [104 * s, 84 * s, 84 * s, 76 * s, 0] + [84 * s] * len(params) + octaves + shifts + [0, 104 * s],
-            6 * s)
+        cols = split(ctrl, ([46 * s] if not tr.audio else []) + [100 * s, 80 * s, 80 * s, 72 * s, 0]
+                     + [84 * s] * len(params) + octaves + shifts + [0, 100 * s], 6 * s)
+        if not tr.audio:
+            icon, *cols = cols
+            self.draw_input(p, icon, tr)
+        name, ch, length, mute, _, *param_r, _, delete = cols
         if octaves:
             *param_r, down, up, shift_dn, shift_up = param_r
             self.button(p, down, "OCT ▼", lambda: self.scroll_roll(tr, -12))
@@ -594,6 +599,24 @@ class Sequencer(Panel):
             self.draw_audio_edit(p, area, tr, color)
         else:
             (self.draw_drum_matrix if tr.drum else self.draw_roll)(p, area, tr, color)
+
+    def draw_input(self, p, r, tr):
+        """The track's MIDI input as a DIN socket: lit green with its channel once a keyboard is chosen,
+        amber while that device is away, dim when the track only plays its patterns."""
+        s = self.s
+        on, ready = bool(tr.in_port), self.input_ok is None or self.input_ok(tr)
+        color = "#4ade80" if on and ready else ("#ff8c42" if on else DIM)
+        self.box(p, r, "#11141b", color, 1.6, radius=8)
+        cx, cy = r.center().x(), r.center().y() - 3 * s
+        rad = min(r.width(), r.height()) * 0.24
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(color))
+        for deg in (200, 235, 270, 305, 340):  # the five pins of a DIN socket, in an arc
+            a = math.radians(deg)
+            p.drawEllipse(QPointF(cx + rad * math.cos(a), cy - rad * math.sin(a)), 1.7 * s, 1.7 * s)
+        label = ("ALL" if not tr.in_channel else f"CH{tr.in_channel}") if on else "IN"
+        self.text(p, QRectF(r.left(), r.bottom() - 18 * s, r.width(), 15 * s), label, color, 9)
+        self.on_press(r, lambda: self.choose_input(tr))
 
     def draw_audio_edit(self, p, area, tr, color):
         """An audio track's edit view: which input, how it is panned, and where it goes. Its effects live in

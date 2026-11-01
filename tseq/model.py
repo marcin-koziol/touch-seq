@@ -79,6 +79,8 @@ class Track:
     bus: int = 0  # 0: straight into the master, else the number of the bus it goes through
     source: str = ""  # audio: the input port it takes its sound from (a mono capture port)
     pan: str = "center"  # audio: "left", "center" or "right" - a mono input into one or both sides
+    in_port: str = ""  # MIDI: the input it plays and records from (a name from the system's inputs)
+    in_channel: int = 0  # MIDI: the channel that input is taken on, 0 = any
 
     def __post_init__(self):
         if not self.patterns:
@@ -186,6 +188,7 @@ def dump_project(pr):
          "voice": t.voice, "last": astuple(t.last), "last_note": t.last_note, "strip": dump_strip(t.strip),
          **({"port": t.port} if t.external else {}), **({"bus": t.bus} if t.bus else {}),
          **({"source": t.source, "pan": t.pan} if t.audio else {}),
+         **({"in_port": t.in_port, "in_channel": t.in_channel} if t.in_port else {}),
          "patterns": [pattern(p) for p in t.patterns]}
         for t in pr.tracks], "controls": [astuple(c) for c in pr.controls],
         "master": dump_strip(pr.master),
@@ -223,6 +226,7 @@ def load_project(path):
         tr = Track(t["kind"], t["channel"], t.get("number", n), pattern=t["pattern"], scenes=t["scenes"], mute=t["mute"],
                    voice=t["voice"], last=Step(*last), last_note=last_note, port=t.get("port", ""),
                    bus=t.get("bus", 0), source=t.get("source", ""), pan=t.get("pan", "center"),
+                   in_port=t.get("in_port", ""), in_channel=t.get("in_channel", 0),
                    strip=load_strip(t["strip"]) if "strip" in t else Strip())
         for p, pd in zip(tr.patterns, t["patterns"]):
             p.length = pd["length"]

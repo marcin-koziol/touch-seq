@@ -33,6 +33,13 @@ screen; everything else keeps running.
     the one track kind with no MIDI at all. It is patched by the rack, so it survives chain changes: its input
     goes through the track's effects (HOST-4) and on into its bus or the master, and that is how a synth
     plugged into an input is heard through the master's reverb
+- every MIDI track (melody, drum, external) can play and record from its **own MIDI keyboard**: the socket
+  at the left of its EDIT header opens a dialog with the system's MIDI inputs and a channel (**ALL** or 1–16,
+  so one keyboard can drive several tracks on different channels). The socket is **green with the channel**
+  once configured, **amber** when that device is away, dim when the track only plays its patterns. Incoming
+  notes play the track's instrument (or its hardware output), light its pads/keys in PLAY-12 and are recorded
+  when REC/OVR is armed — quantized like the on-screen pads, into the track the keyboard is routed to (which
+  need not be the selected one). Pitch bend and the mod wheel reach the instrument too
 - in EDIT, **▼ trans / ▲ trans** moves the whole pattern one scale degree down or up: the step comes from the
   project's key and scale, so the pattern stays in key (a chromatic note keeps its alteration, octaves wrap);
   drum tracks have fixed voices and don't offer it
@@ -41,6 +48,7 @@ screen; everything else keeps running.
 ![Drum editor](docs/screenshots/drums.png)
 ![Adding a track: drum, melody, external MIDI or audio](docs/screenshots/new-track.png)
 ![An audio track: an interface input, panned, through the track's chain and into a bus](docs/screenshots/audio.png)
+![A track's MIDI keyboard: the socket in EDIT and the dialog with the inputs and the channel](docs/screenshots/midi-in.png)
 
 ### EQ — eight bands, drawn in the app
 
@@ -88,7 +96,7 @@ Plays the track selected in the sequencer:
 - drum tracks: 12 pads in the voices' colors
 - external MIDI tracks: like melody tracks (chords, keyboard), straight out to their output port
 - **REC** (replace, like tape) or **OVR** (overdub) records what you play into the pattern, quantized to
-  1/16, 1/8 or 1/4
+  1/16, 1/8 or 1/4 — fingers on the pads and notes from a track's MIDI keyboard alike
 - with **XYFX** on the master, a **MASTER** row appears in the sequencer; selecting it turns this module
   into an **XY pad**: beat repeat left–right (straight on the right half, triplets or reverse on the left),
   low-pass down / high-pass up, the centre is "dry"
@@ -177,6 +185,7 @@ device is unplugged its notes are simply not sent, and they come back when it re
 | LEAD | toggle off and on | restarts voice leading from root position |
 | XY pad | LATCH | keeps the effect on after the finger lifts |
 | keyboard | lower on the key | louder (pads: higher = louder) |
+| EDIT header | the **DIN socket** at the left | a track's MIDI keyboard and channel (green = it is there) |
 
 Keys (with a keyboard attached): **Space** play/stop, **Esc** closes a dialog/popup, then quits; **Ctrl+C** quits.
 

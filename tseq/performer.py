@@ -7,6 +7,7 @@ from PySide6.QtGui import QColor, QLinearGradient, QPen
 
 from .constants import BG, BORDER, DIM, DRUM_COLORS, DRUM_KIT, GATE_RES, MAX_GATE, PANEL, TEXT, WARN
 from .gestures import Gesture
+from .midiin import Inputs
 from .music import (BORROWED, CHORD_SCALE, SCALES, XYFX_MODES, chord_name, note_name, roman, stack, xyfx_filter,
                     xyfx_repeat)
 from .ui import Panel, split
@@ -64,6 +65,35 @@ class Pad(Gesture):
 
     def cancel(self):
         self.release(None)
+
+
+class InNote:
+    """A note from a MIDI keyboard or controller: it plays on the track it is routed to, lights that pad or
+    key, and is recorded there like a held pad while the track is armed."""
+
+    def __init__(self, perf, tr, note, vel):
+        self.perf, self.tr, self.note = perf, tr, note
+        perf.on(tr, note, vel)
+        notes = perf.midi_in.setdefault(tr, {})
+        notes[note] = notes.get(note, 0) + 1
+        if perf.mode:  # this track records what it hears, whatever is selected
+            perf.engine.rec[tr] = perf.mode == "rec"
+        lane = note  # a melody's lane is its pitch; a drum's is the kit voice that note plays
+        if tr.drum:
+            lane = next((v for v, (_, n) in enumerate(DRUM_KIT) if n == note), None)
+        self.take = perf.record_start(tr, [] if lane is None else [lane], vel)
+
+    def release(self):
+        perf = self.perf
+        notes = perf.midi_in.get(self.tr, {})
+        notes[self.note] = notes.get(self.note, 0) - 1
+        if notes[self.note] <= 0:  # the same note on two devices: the last one off ends it
+            notes.pop(self.note, None)
+            if not notes:
+                perf.midi_in.pop(self.tr, None)
+        perf.off(self.tr, self.note)
+        if self.take:
+            perf.record_end(self.tr, self.take)
 
 
 class KeySlide(Gesture):
@@ -139,6 +169,10 @@ class Performer(Panel):
         self.held = {}  # pad key -> count of fingers on it (for lighting)
         self.layout = "chords"  # melody tracks: "chords" (pads) or "keys" (keyboard)
         self.voices = {}  # (channel, note) -> number of held pads sounding it
+        self.inputs = Inputs()  # the tracks' MIDI keyboards
+        self.midi_in = {}  # Track -> {note: count} the MIDI keyboards are holding (for lighting)
+        self.midi_keys = {}  # (port, channel, note) -> [InNote]: what is sounding, to release on note-off
+        self.arm_key = None  # (selected track, mode) the current recording was armed with
 
     # --- sound + recording -----------------------------------------------------
     def on(self, tr, note, vel):
@@ -158,15 +192,71 @@ class Performer(Panel):
 
     def tick(self):
         super().tick()
-        rec = (self.seq.sel, self.mode == "rec") if self.mode else None
-        if rec != self.engine.rec:  # a new recording starts: earlier takes may be replaced again
+        self.inputs.use(tr.in_port for tr in self.project.tracks if not tr.audio)
+        for port, msg in self.inputs.poll():
+            self.external(port, msg)
+        self.arm()
+
+    def arm(self):
+        """Which tracks record what is played: the selected one (the pads play it) and every track hearing a
+        MIDI keyboard note. Arming again (the mode or the track) starts a new take, so earlier ones may be
+        replaced again."""
+        wanted = {}
+        if self.mode and self.seq.sel is not None:
+            wanted[self.seq.sel] = self.mode == "rec"
+            for tr in self.midi_in:
+                wanted.setdefault(tr, self.mode == "rec")
+        if (self.seq.sel, self.mode) != self.arm_key:
+            self.arm_key = (self.seq.sel, self.mode)
             self.engine.rec_taken.clear()
-            self.engine.rec = rec
+        self.engine.rec = wanted
+
+    def close(self):
+        self.inputs.close()
+
+    # --- MIDI input ------------------------------------------------------------
+    def input_ok(self, tr):
+        """Whether the track's input is actually open (its icon says so when the device is away)."""
+        return any(tr.in_port.lower() in name.lower() for name in self.inputs.open_names())
+
+    def lit(self, tr, note):
+        """A note the track's MIDI keyboard is holding: its pads and keys light up like a finger would."""
+        return self.midi_in.get(tr, {}).get(note, 0) > 0
+
+    def listening(self, port, channel):
+        """The tracks that take this input and channel: any MIDI track whose chosen device name is part of
+        this one, on its own channel or on all of them."""
+        return [tr for tr in self.project.tracks
+                if not tr.audio and tr.in_port and tr.in_port.lower() in port.lower()
+                and (not tr.in_channel or tr.in_channel == channel)]
+
+    def external(self, port, msg):
+        """A message from a MIDI input: every track listening to it plays the note (a keyboard's chords can
+        go to more than one track) and records it when armed. Bend, mod wheel and the rest go to the
+        instrument, so a keyboard's controller works the track like its own UI would."""
+        status = msg[0]
+        kind, channel = status & 0xF0, (status & 0x0F) + 1
+        tracks = self.listening(port, channel)
+        if not tracks:
+            return
+        if kind in (0x80, 0x90) and len(msg) >= 3:
+            note, vel = msg[1], msg[2]
+            key = (port, channel, note)
+            if kind == 0x90 and vel:
+                if key not in self.midi_keys:  # the same note on again without a note-off: no double
+                    self.midi_keys[key] = [InNote(self, tr, note, vel) for tr in tracks]
+            elif key in self.midi_keys:
+                for held in self.midi_keys.pop(key):
+                    held.release()
+            return
+        if status < 0xF0:  # pitch bend, mod wheel, aftertouch: the instrument
+            for tr in tracks:
+                self.engine.send(msg, tr)
 
     def record_start(self, tr, lanes, vel):
         """Write notes at the quantized position; returns what record_end needs, or None (not recording)."""
         e = self.engine
-        pos = e.position(tr) if self.mode and e.rec and e.rec[0] is tr else None
+        pos = e.position(tr) if self.mode and tr in e.rec else None
         if pos is None:
             return None
         pat = tr.current
@@ -261,8 +351,8 @@ class Performer(Panel):
         draw = self.draw_drum_pads if tr.drum else self.draw_keys if self.layout == "keys" else self.draw_chord_pads
         draw(p, body, tr)
 
-    def pad(self, p, r, key, color, title, sub):
-        lit = self.held.get(key, 0) > 0
+    def pad(self, p, r, key, color, title, sub, lit=False):
+        lit = lit or self.held.get(key, 0) > 0  # a finger on it, or the keyboard playing it
         fill = QColor(color)
         fill.setAlpha(230 if lit else 45)
         self.box(p, r, fill, color if not lit else "#ffffff", 2, radius=12)
@@ -288,7 +378,8 @@ class Performer(Panel):
         bottom = QRectF(pads.left(), top.bottom() + 8 * s, pads.width(), pads.bottom() - top.bottom() - 8 * s)
         rects = split(top, [0] * 7, 7 * s) + split(bottom, [0] * len(BORROWED), 7 * s)
         for n, ((label, name, tones, color), rect) in enumerate(zip(chords, rects)):
-            self.pad(p, rect, n, color, label, name)
+            self.pad(p, rect, n, color, label, name,
+                     lit=any(self.lit(tr, note) for note in self.voice(tones)))
 
             def notes_of(n=n):
                 return [(m, m) for m in self.voice(self.chords()[n][2])]
@@ -410,7 +501,7 @@ class Performer(Panel):
         color, scaled = self.seq.color(tr), pr.scale != "chromatic"
         for black, keys in ((False, whites), (True, blacks)):  # black keys drawn (and hit) on top
             for note, rect in keys:
-                lit = self.held.get(("key", note), 0) > 0
+                lit = self.held.get(("key", note), 0) > 0 or self.lit(tr, note)
                 outside = scaled and not pr.in_scale(note)
                 fill = color if lit else (("#14171d" if outside else "#262b36") if black else
                                           ("#7d8594" if outside else "#d7deea"))
@@ -440,6 +531,6 @@ class Performer(Panel):
         for v, (name, note) in enumerate(DRUM_KIT):
             row = QRectF(r.left(), r.top() + (v // cols) * r.height() / rows, r.width(), r.height() / rows)
             rect = split(row.adjusted(0, 4 * s, 0, -4 * s), [0] * cols, 8 * s)[v % cols]
-            self.pad(p, rect, ("drum", v), DRUM_COLORS[v], name, str(note))
+            self.pad(p, rect, ("drum", v), DRUM_COLORS[v], name, str(note), lit=self.lit(tr, note))
             self.region(rect, lambda pos, v=v, note=note, rect=rect: self.press_pad(("drum", v), tr, [(v, note)],
                                                                                   rect, pos))

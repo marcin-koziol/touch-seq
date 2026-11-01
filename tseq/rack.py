@@ -8,7 +8,7 @@ from PySide6.QtGui import QColor, QFont, Qt
 
 from .constants import WARN
 from .controls import Controls
-from .dialogs import AudioSources, Chooser, MidiPorts, NewTrack, Settings
+from .dialogs import AudioSources, Chooser, MidiInputs, MidiPorts, NewTrack, Settings
 from .model import dump_project, free_project_path, save_text
 from .patchbay import Patchbay
 from .performer import Performer
@@ -30,12 +30,15 @@ class Rack(Window):
         host.select_track = lambda tr: setattr(self.seq, "sel", tr)
         self.seq.new_track = self.open_new_track
         self.seq.choose_source = self.open_source_choice
+        self.seq.choose_input = self.open_input_choice
         self.seq.reroute = host.rewire
         host.choose_port = self.open_port_choice
+        self.perf = Performer(project, engine, self.seq, host)  # owns the tracks' MIDI inputs
+        self.seq.input_ok = self.perf.input_ok  # its socket says when a keyboard is away
         super().__init__([(0, 0, "CTRL-10", "performance controls", self.controls),
                           (0, 1, "SEQ-64", "step sequencer", self.seq),
                           (1, 0, "HOST-4", "plugin host", host),
-                          (1, 1, "PLAY-12", "live chords · pads", Performer(project, engine, self.seq, host))])
+                          (1, 1, "PLAY-12", "live chords · pads", self.perf)])
         self.saved = dump_project(project)
         self.saved_at = time.localtime()
         self.restart = False  # close and start again: on the start screen, or on `next_project`
@@ -75,6 +78,7 @@ class Rack(Window):
 
     def closeEvent(self, e):
         self.engine.close()
+        self.perf.close()  # let go of the MIDI keyboards (the next instance opens them again)
         self.host.close()
         self.dirty = True
         self.autosave()
@@ -171,6 +175,20 @@ class Rack(Window):
         self.dirty = True
         self.autosave()
         self.close_dialog()
+
+    def open_input_choice(self, tr):
+        """A track's MIDI keyboard: the device and the channel it takes. Taps apply at once (the socket in
+        EDIT lights up); the faceplate's x closes."""
+        if self.dialog:
+            return self.close_dialog()
+        self.open_dialog("MIDI IN", f"track T{tr.number} · where it plays from",
+                         MidiInputs(lambda port, channel: self.set_track_input(tr, port, channel),
+                                    tr.in_port, tr.in_channel))
+
+    def set_track_input(self, tr, port, channel):
+        tr.in_port, tr.in_channel = port, channel
+        self.dirty = True
+        self.autosave()
 
     def open_port_choice(self, tr):
         if self.dialog:

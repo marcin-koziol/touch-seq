@@ -151,7 +151,7 @@ class Engine:
         self.scene = None  # last launched scene
         self.sounding = {}  # (channel, note) -> (note-off time, track)
         self.step_time, self.step_len = 0.0, 0.125  # when the last step played, and a step's length (s)
-        self.rec = None  # (track, replace) while recording live playing into a track
+        self.rec = {}  # Track -> replace (bool): the tracks recording live playing into them
         self.rec_fresh = set()  # (lane, step) just played in ahead of the playhead: not replayed, not erased
         self.rec_taken = set()  # (lane, step) recorded since recording started: REC doesn't erase them
         threading.Thread(target=self.run, daemon=True).start()
@@ -189,9 +189,10 @@ class Engine:
             i = self.pos.get(tr, self.step_index) % pat.length  # a track added mid-play joins in step
             self.playhead[tr] = i
             self.pos[tr] = (i + 1) % pat.length
-            recording = self.rec is not None and self.rec[0] is tr
+            replace = self.rec.get(tr)  # False: overdub, True: REC (replace what was there)
+            recording = tr in self.rec
             lanes = list(pat.lanes.items())  # a copy: the UI thread may add a lane meanwhile
-            if recording and self.rec[1]:  # REC replaces what was there before this recording
+            if recording and replace:  # REC replaces what was there before this recording
                 for k, lane in lanes:
                     if (k, i) not in self.rec_taken:
                         lane[i].on = False

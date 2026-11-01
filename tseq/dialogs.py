@@ -12,6 +12,7 @@ import plugins
 
 from .constants import BG, BORDER, DIM, NOTE_NAMES, PANEL, TEXT, WARN
 from .engine import midi_outputs
+from .midiin import midi_inputs
 from .gestures import Hold, ScrollOrTap
 from .model import dump_project, free_project_path, new_project, project_files, save_text
 from .music import SCALES
@@ -216,9 +217,11 @@ class Settings(Panel):
         p.restore()
 
 
-def draw_ports(panel, p, r, ports, get_scroll, set_scroll, pick, empty="no MIDI outputs found"):
-    """A scrollable list of MIDI outputs, a row each: tapping a row calls pick(name). The scroll offset lives
-    in the panel, hence the get/set pair; an empty name renders as "no port yet", for choosing one later."""
+def draw_ports(panel, p, r, ports, get_scroll, set_scroll, pick, empty="no MIDI outputs found", current="",
+               none="NO PORT — choose one later"):
+    """A scrollable list of ports, a row each: tapping a row calls pick(name). The scroll offset lives in the
+    panel, hence the get/set pair; an empty name renders as "no port yet", for choosing one later, and the
+    row of `current` is lit."""
     s = panel.s
     panel.box(p, r, "#11141b", BORDER, radius=8)
     if not ports:
@@ -234,9 +237,10 @@ def draw_ports(panel, p, r, ports, get_scroll, set_scroll, pick, empty="no MIDI 
         entry = ports[n]
         port, label = entry if isinstance(entry, tuple) else (entry, entry)  # (port, longer label) or a name
         row = QRectF(r.left() + 6 * s, r.top() + 4 * s + n * rh - scroll, r.width() - 12 * s, rh - 8 * s)
-        panel.box(p, row, PANEL, BORDER, radius=6)
+        used = bool(port) and bool(current) and current.lower() in port.lower()
+        panel.box(p, row, PANEL, "#4ade80" if used else BORDER, 2 if used else 1, radius=6)
         panel.text(p, row.adjusted(14 * s, 0, -14 * s, 0),
-                   label or "NO PORT — choose one later", TEXT if port else DIM, 16,
+                   label or none, "#4ade80" if used else (TEXT if port else DIM), 16,
                    Qt.AlignLeft | Qt.AlignVCenter, bold=bool(port), elide=True)
         panel.region(row.intersected(r), lambda pos, port=port: ScrollOrTap(
             pos, get_scroll, set_scroll, lambda: pick(port)))
@@ -328,7 +332,46 @@ class MidiPorts(Panel):
         self.button(p, again, "RESCAN", self.rescan, sub="plugged in?")
         area = QRectF(g, head.bottom() + 12 * s, w - 2 * g, h - head.bottom() - 12 * s - g)
         draw_ports(self, p, area, self.ports, lambda: self.scroll,
-                   lambda v: setattr(self, "scroll", v), self.choose)
+                   lambda v: setattr(self, "scroll", v), self.choose, current=self.current)
+
+
+class MidiInputs(Panel):
+    """What a MIDI track listens to: one of the system's inputs and the channel it takes (ALL or one of 16).
+    Every tap applies at once, so the sequencer's socket lights up as you go; the faceplate's x closes."""
+
+    def __init__(self, apply, port="", channel=0, list_ports=midi_inputs):
+        super().__init__()
+        self.apply, self.port, self.channel = apply, port, channel  # apply(port, channel) -> None
+        self.list_ports = list_ports
+        self.scroll = 0.0
+        self.rescan()
+
+    def rescan(self):
+        self.ports = self.list_ports() + [""]  # the empty row: no input, the track plays its patterns only
+
+    def pick(self, port):
+        self.port = port
+        self.apply(port, self.channel)
+
+    def take(self, channel):
+        self.channel = channel
+        self.apply(self.port, channel)
+
+    def draw(self, p):
+        s, w, h, g = self.s, self.w, self.h, 14 * self.s
+        p.fillRect(self.rect(), QColor(BG))
+        head = QRectF(g, g, w - 2 * g, 54 * s)
+        title, now, again = split(head, [0, 340 * s, 130 * s], 12 * s)
+        self.text(p, title, "MIDI INPUT", TEXT, 20, Qt.AlignLeft | Qt.AlignVCenter, bold=True)
+        self.text(p, now, f"now: {self.port or 'none'}", DIM, 13, Qt.AlignRight | Qt.AlignVCenter, elide=True)
+        self.button(p, again, "RESCAN", self.rescan, sub="plugged in?")
+        chans = split(QRectF(g, head.bottom() + 12 * s, w - 2 * g, 50 * s), [0] * 17, 6 * s)
+        for n, rect in enumerate(chans):
+            self.button(p, rect, "ALL" if not n else str(n), lambda n=n: self.take(n), on=self.channel == n)
+        area = QRectF(g, chans[0].bottom() + 12 * s, w - 2 * g, h - chans[0].bottom() - 12 * s - g)
+        draw_ports(self, p, area, self.ports, lambda: self.scroll, lambda v: setattr(self, "scroll", v),
+                   self.pick, empty="no MIDI inputs found", current=self.port,
+                   none="NONE — the track plays only its patterns")
 
 
 class AudioSources(MidiPorts):
