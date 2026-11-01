@@ -586,8 +586,9 @@ class HostPanel(Panel):
         return max(0.0, min(1.0, (db + 60.0) / 60.0))
 
     def sample_meters(self):
-        """Read every chain's output peak (the last plugin, so after its fader): the bars fall back, the peak
-        holds for a moment and then follows."""
+        """Read every chain's level on a clock: an audio track's *input* (its first plugin), every other
+        chain's output (the last plugin, so after its fader). The bars fall back, the peak holds, then
+        follows."""
         now = time.monotonic()
         live = set(self.strips())
         changed = False
@@ -595,7 +596,9 @@ class HostPanel(Panel):
             chain = self.chain(strip)
             if not chain:
                 continue
-            left, right = self.host.peaks(chain[-1])
+            tr = self.track_of(strip)
+            into = bool(tr and tr.audio)  # an audio track shows what arrives at its chain, not what leaves it
+            left, right = self.host.peaks(chain[0] if into else chain[-1], into=into)
             meter = self.meters.setdefault(strip, {"l": 0.0, "r": 0.0, "peak": 0.0, "at": 0.0})
             before = (meter["l"], meter["r"], meter["peak"])
             meter["l"] = max(left, meter["l"] * 0.72)  # a needle that falls back between frames

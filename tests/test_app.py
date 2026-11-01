@@ -914,9 +914,11 @@ class FakeCarla:
     def __init__(self):
         self.volumes = []
         self.level = 0.0
+        self.reads = []
     def ports(self, plugin):
         return 2, 2
-    def peaks(self, plugin):
+    def peaks(self, plugin, into=False):
+        self.reads.append((plugin.client, into))
         return self.level, self.level * 0.5
     def set_volume(self, plugin, volume):
         self.volumes.append((plugin.client, round(volume, 2)))
@@ -1066,4 +1068,15 @@ assert mh.meters[strip1]["peak"] < 0.8 and mh.meters[strip1]["l"] < 0.05, mh.met
 mh.project.tracks.clear()  # a deleted track takes its meter with it
 mh.sample_meters()
 assert not mh.meters, mh.meters
-print("meters OK")
+# an audio track's meter is what arrives at its chain (its input); every other strip's is what leaves it
+mh_in = FakeHostPanel(ts.Project(tracks=[ts.Track("audio", 1, 1, source="/in:FL")]))
+mh_in.loaded = {(mh_in.project.tracks[0].strip, 0): FakePlugin("T1.1 Rev")}
+mh_in.meters, mh_in.host.level = {}, 0.5
+mh_in.sample_meters()
+assert mh_in.host.reads == [("T1.1 Rev", True)], mh_in.host.reads
+mh_out = FakeHostPanel(ts.Project(tracks=[ts.Track("melody", 1, 1)]))
+mh_out.loaded = {(mh_out.project.tracks[0].strip, 1): FakePlugin("T2.1 Rev")}
+mh_out.meters, mh_out.host.level = {}, 0.5
+mh_out.sample_meters()
+assert mh_out.host.reads == [("T2.1 Rev", False)], mh_out.host.reads
+print("input meter OK")

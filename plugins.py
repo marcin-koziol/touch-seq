@@ -231,9 +231,11 @@ class Host:
     def set_value(self, plugin, index, value):
         self.h.set_parameter_value(plugin.pid, index, value)
 
-    def peaks(self, plugin):
-        """A plugin's output peaks as (left, right), linear (0.0 = silence): Carla's own meter data."""
-        return (self.h.get_output_peak_value(plugin.pid, True), self.h.get_output_peak_value(plugin.pid, False))
+    def peaks(self, plugin, into=False):
+        """A plugin's output peaks as (left, right), linear (0.0 = silence): Carla's own meter data. `into`
+        reads what arrives at its inputs instead (an audio track's input level)."""
+        side = self.h.get_input_peak_value if into else self.h.get_output_peak_value
+        return (side(plugin.pid, True), side(plugin.pid, False))
 
     def set_volume(self, plugin, volume):
         self.h.set_volume(plugin.pid, volume)
