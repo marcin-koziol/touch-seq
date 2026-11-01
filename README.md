@@ -8,7 +8,7 @@ and performance faders — laid out as modules in a modular-synth rack, made for
 
 ![Touch-Seq: faders, plugin host, sequencer and chord pads](docs/screenshots/overview.png)
 
-Version 0.1.1 — early, but already played with.
+Version 0.2.0 — early, but already played with.
 
 ## The rack
 
@@ -31,6 +31,7 @@ running.
 
 ![Piano roll](docs/screenshots/piano-roll.png)
 ![Drum editor](docs/screenshots/drums.png)
+![Adding a track: drum, melody or external MIDI](docs/screenshots/new-track.png)
 
 ### HOST-4 — plugins (Carla)
 
@@ -95,14 +96,16 @@ screen; the links themselves are kept with this machine (config.json, not the pr
 device comes back. The app's own cables — plugin chains and the master output — are thin and dashed and are
 left to the app.
 
+![Patchbay: devices as boxes, links as cables](docs/screenshots/patchbay.png)
+
 ## Install
 
 Download the AppImage for your machine from [Releases](https://github.com/marcin-koziol/touch-seq/releases),
 then:
 
 ```sh
-chmod +x Touch-Seq-0.1.1-x86_64.AppImage
-./Touch-Seq-0.1.1-x86_64.AppImage
+chmod +x Touch-Seq-0.2.0-x86_64.AppImage
+./Touch-Seq-0.2.0-x86_64.AppImage
 ```
 
 It contains Python, Qt (PySide6), Carla and XYFX. The machine needs:
