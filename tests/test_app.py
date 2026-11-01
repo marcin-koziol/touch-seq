@@ -923,6 +923,8 @@ class FakeCarla:
     def peaks(self, plugin, into=False):
         self.reads.append((plugin.client, into))
         return self.level, self.level * 0.5
+    def idle(self):
+        pass
     def set_volume(self, plugin, volume):
         self.volumes.append((plugin.client, round(volume, 2)))
 class FakeWiring:
@@ -936,6 +938,16 @@ class FakeHostPanel(ts.HostPanel):
         self.project, self.sink, self.name = project, "sink", "TS"
         self.loaded, self.wiring, self.host = {}, FakeWiring(), FakeCarla()
         self.meters, self.states_dirty = {}, False
+        self.monitor, self.eq = None, ts.EqEditor(self)
+        self.router = type("R", (), {"refresh": lambda self, tracks: None, "taps": {}})()
+        self.sink_changed = False
+        self.gestures, self.hits, self.stale = {}, [], False
+        self.s, self.view, self.sel, self.focus, self.page, self.mixer_page = 1.0, "track", None, None, 0, 0
+        self.browser, self.assigning, self.browser_scroll, self.browser_fmt = None, None, 0.0, None
+        self.failed, self.message, self.audio_out = set(), "", "default"
+        self.catalog = type("C", (), {"plugins": [], "ready": True, "progress": "", "scanning": False,
+                                      "rescan": lambda self: None})()
+        self.selected = lambda: project.tracks[0]
 
 prb = ts.Project(tracks=[ts.Track("melody", 1, 1), ts.Track("melody", 2, 2)])
 prb.buses.append(ts.Bus(1))
@@ -1198,3 +1210,45 @@ wbroken.tick()
 assert wbroken.panels[0].ticks == 2, "the clock kept calling it"
 assert wbroken.animating() or True
 print("stale plugin OK")
+
+# --- removing a bus: the bus chain's DELETE (hold) and the mixer's x, and where its tracks go ---
+class BusHost(FakeHostPanel):
+    def __init__(self, project):
+        super().__init__(project)
+        self.unloaded, self.rewired = [], 0
+    def unload(self, strip, k):
+        self.unloaded.append((strip, k))
+    def rewire(self):
+        self.rewired += 1
+
+pr_bus = ts.Project(tracks=[ts.Track("melody", 1, 1), ts.Track("melody", 2, 2)])
+pr_bus.buses.append(ts.Bus(1))
+t1b, t2b, b1 = pr_bus.tracks[0], pr_bus.tracks[1], pr_bus.buses[0]
+t1b.bus = t2b.bus = 1
+bh_bus = BusHost(pr_bus)
+bh_bus.loaded = {(b1.strip, 0): FakePlugin("B1.1 Rev")}
+bh_bus.state_dir = OUT / "bus-states"
+bh_bus.monitor = None
+bh_bus.focus, bh_bus.sel = b1.strip, (b1.strip, 0)
+bh_bus.remove_bus(b1)
+assert pr_bus.buses == [] and t1b.bus == 0 and t2b.bus == 0, (pr_bus.buses, t1b.bus, t2b.bus)
+assert (b1.strip, 0) in bh_bus.unloaded and bh_bus.rewired, "its plugin went with it and the graph was rebuilt"
+assert bh_bus.focus is None and bh_bus.sel is None, "the view goes back to the track"
+# the DELETE button beside a bus chain's title needs a hold, and then removes it
+pr_bus2 = ts.Project(tracks=[ts.Track("melody", 1, 1)])
+pr_bus2.buses.append(ts.Bus(1))
+removed = []
+bh2 = BusHost(pr_bus2)
+bh2.s, bh2.focus = 1.0, pr_bus2.buses[0].strip
+bh2.state_dir = OUT / "bus-states"
+bh2.remove_bus = lambda bus: removed.append(bus.number)
+img = QImage(1024, 600, QImage.Format_ARGB32); img.fill(0)
+q = QPainter(img); q.setRenderHint(QPainter.Antialiasing)
+bh2.paint(q, 1024, 600); q.end()
+btn = next(r for r, f in reversed(bh2.hits) if abs(r.width() - 84) < 2)  # DELETE, beside the bus title
+bh2.press(1, btn.center())
+assert any(isinstance(g, ts.Hold) for g in bh2.gestures.values()), "DELETE is a hold"
+for _ in range(20):
+    bh2.tick(); time.sleep(0.05)
+assert removed == [1], removed
+print("remove bus OK")

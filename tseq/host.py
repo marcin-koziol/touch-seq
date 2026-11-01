@@ -454,6 +454,8 @@ class HostPanel(Panel):
                 f.unlink()
         self.wiring.replace(bus.strip, [])
         self.project.buses.remove(bus)
+        if self.focus is bus.strip:
+            self.focus, self.sel = None, None  # the view goes back to the selected track
         self.rewire()
 
     def set_bus(self, tr, number):
@@ -552,9 +554,12 @@ class HostPanel(Panel):
         title = QRectF(r.left(), r.top(), r.width(), 34 * s)
         self.box(p, QRectF(title.left(), title.top() + 6 * s, 5 * s, title.height() - 12 * s), color, None, radius=2)
         name = (f"T{tr.number}  {tr.kind}  CH{tr.channel}" if tr else
-                f"BUS {bus.number}  ·  into the master" if bus else "MASTER  ·  all tracks → output")
-        self.text(p, title.adjusted(14 * s, 0, 0, 0), name, color, 16, Qt.AlignLeft | Qt.AlignVCenter, bold=True,
-                  elide=True)
+                f"BUS {bus.number}" if bus else "MASTER  ·  all tracks → output")
+        self.text(p, title.adjusted(14 * s, 0, -92 * s if bus else 0, 0), name, color, 16,
+                  Qt.AlignLeft | Qt.AlignVCenter, bold=True, elide=True)
+        if bus:  # a bus is ours to remove (its tracks go back to the master, its effects go with it)
+            delete = QRectF(title.right() - 84 * s, title.top(), 84 * s, title.height() - 4 * s)
+            self.delete_button(p, delete, lambda bus=bus: self.remove_bus(bus), key=bus)
         top = title.bottom() + 8 * s
         if tr:  # a track picks where its chain goes: the master or a bus
             top = self.draw_destination(p, QRectF(r.left(), top, r.width(), 38 * s), tr)
@@ -663,6 +668,31 @@ class HostPanel(Panel):
         if peak > 0.5:
             p.setPen(QPen(QColor("#ff5d5d" if meter["peak"] > 0.95 else "#e6e9ee"), 1.6 * s))
             p.drawLine(QPointF(r.left() + 1 * s, r.bottom() - peak), QPointF(r.right() - 1 * s, r.bottom() - peak))
+
+    def hold_button(self, p, r, label, action, key, color=WARN):
+        """A small button that does something destructive only after a held touch: it fills as it is held."""
+        self.box(p, r, PANEL, BORDER, radius=5)
+        self.text(p, r, label, color, 13, bold=True)
+        held = next((g for g in self.gestures.values() if isinstance(g, Hold) and g.key == key), None)
+        if held:
+            fill = QRectF(r.left(), r.top(), r.width() * held.progress(), r.height())
+            p.save()
+            p.setClipRect(fill)
+            self.box(p, r, QColor(255, 93, 93, 150), None, radius=5)
+            p.restore()
+        self.region(r, lambda pos: Hold(action, key=key))
+
+    def delete_button(self, p, r, action, key):
+        """The wider version used beside a chain's title: DELETE, hold to make it happen."""
+        self.button(p, r, "DELETE", None, color=WARN, sub="hold")
+        held = next((g for g in self.gestures.values() if isinstance(g, Hold) and g.key == key), None)
+        if held:
+            fill = QRectF(r.left(), r.top(), r.width() * held.progress(), r.height())
+            p.save()
+            p.setClipRect(fill)
+            self.box(p, r, QColor(255, 93, 93, 140), None)
+            p.restore()
+        self.region(r, lambda pos: Hold(action, key=key))
 
     def draw_fader(self, p, r, strip, label=True):
         s = self.s
@@ -778,6 +808,8 @@ class HostPanel(Panel):
         self.text(p, head.adjusted(6 * s, head.height() * 0.5, -6 * s, 0),
                   chain[0].ref.name if chain else "no effects", TEXT if chain else "#5b6577", 12, elide=True)
         self.on_press(head, lambda strip=strip: self.focus_on(strip))
+        close = QRectF(col.right() - 34 * s, col.top() + 4 * s, 28 * s, 26 * s)
+        self.hold_button(p, close, "✕", lambda bus=bus: self.remove_bus(bus), key=bus)
         y = head.bottom() + 4 * s
         for k in range(SLOTS):
             slot = QRectF(col.left() + 6 * s, y, col.width() - 12 * s, 40 * s)
