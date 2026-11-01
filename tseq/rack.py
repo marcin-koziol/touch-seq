@@ -22,6 +22,7 @@ class Rack(Window):
 
     def __init__(self, project, engine, path, host):
         self.project, self.engine, self.path, self.host = project, engine, path, host
+        engine.click_tap = getattr(host, "click_note", None)  # the metronome lives in the graph with the plugin
         self.seq = Sequencer(project, engine)
         self.controls = Controls(project, engine, host)
         self.controls.selected = lambda: self.seq.sel

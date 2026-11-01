@@ -82,7 +82,9 @@ the first free name (*Touch-Seq 2*, …) and says so in HOST-4's status line: bo
 - **audio tracks** have a chain too (slot 0 is an effect, not an instrument): the input is patched into it, so
   effects and the fader work as soon as there is one. A track with no effects gets **Touch-Seq Monitor**, a
   transparent gain/pan node (`monitor/` in this repo, built like XYFX) — it is what gives a bare input a
-  level to meter and a fader to set; remove it and the input is a plain patch again (no meter, no fader)
+  level to meter and a fader to set; remove it and the input is a plain patch again (no meter, no fader).
+  The **metronome** is the same idea the other way round: `click/` sits between the master and the output and
+  plays a click for every beat note the sequencer sends it
 - **effects buses**: a track's chain can go into a bus instead of straight into the master — **→ MASTER** under
   the chain cycles through the buses, **+ BUS** makes a new one. A bus has its own 3 slots and its own level,
   so one reverb can process just the two of five tracks you route into it; buses are their own columns in the
@@ -222,10 +224,11 @@ Keys (with a keyboard attached): **Space** play/stop, **Esc** closes a dialog/po
 | `buffer` | audio buffer size in samples for the whole graph while the app runs, `0` = the system's own |
 | `click_lead` | the metronome's own delay in ms, when the machine needs it nudged (left out = the graph's buffer) |
 
-The metronome's click is synthesized in the app and played by `pw-cat` (or `pacat` / `aplay`), so it needs no
-audio engine of its own: it is one more small stream in PipeWire, and only exists while **CLICK** is on. Its
-own buffer is set to the graph's (one quantum), and each beat is queued that much before its time, so the
-click sits with the notes instead of a buffer behind them.
+The metronome is **Touch-Seq Click**, our own plugin (`click/`, CLAP/LV2, like the monitor and the EQ): the
+master's audio goes through it and the engine plays it one note per beat, so the click is rendered inside the
+same audio graph as the instruments — sample-locked to them, under Carla's care, and with nothing to drift.
+Without the plugin installed the app falls back to its own stream (`pw-cat`), which is fine but a buffer
+behind; `click_lead` shifts that one by hand if a machine needs it.
 
 `buffer` is applied with `clock.force-quantum`, so it wins over a `min-quantum = max-quantum` pin in
 `pipewire.conf.d` (such a pin is why a size may look stuck in the settings); the machine's own size is put
@@ -279,7 +282,7 @@ QT_QPA_PLATFORM=offscreen python tests/test_app.py   # sequencer, UI, projects, 
 QT_QPA_PLATFORM=offscreen python tests/test_host.py  # plugin host with real Carla + PipeWire (local only)
 QT_QPA_PLATFORM=offscreen python tests/test_xyfx.py  # XYFX + XY pad with real Carla (local only)
 packaging/build-appimage.sh                           # dist/Touch-Seq-<version>-<arch>.AppImage
-xyfx/install.sh monitor/install.sh eq/install.sh      # our CLAP/LV2 plugins into ~/.clap and ~/.lv2
+xyfx/install.sh monitor/install.sh eq/install.sh click/install.sh   # our plugins into ~/.clap and ~/.lv2
 ```
 
 CI runs the app tests and the XYFX build and DSP test on every push; a `v*` tag builds AppImages for x86_64

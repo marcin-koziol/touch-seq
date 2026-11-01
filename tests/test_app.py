@@ -1675,3 +1675,21 @@ assert trq.patterns[1].length == 64, f"clearing reset the length to {trq.pattern
 assert trq.patterns[1].empty(), "the notes are gone"
 eq2.close()
 print("clear keeps the length OK")
+
+# --- the metronome in the audio graph: the beats go to the click plugin, no stream of our own ---
+prk2 = ts.Project(bpm=600, tracks=[ts.Track("melody", 1, 1)], click=True)
+ekk = ts.Engine(prk2, FakeOut()); ekk.clicker = FakeClicker()
+beats = []
+ekk.click_tap = lambda accent: beats.append(accent)
+ekk.start()
+time.sleep(0.3)
+assert len(beats) >= 2, f"beats went to the plugin: {beats}"
+assert beats[0] is True, "the first of the bar is the accented one"
+assert ekk.clicker.prepared == 0, "with the plugin in the graph there is no stream to open"
+ekk.set_click(False)
+assert prk2.click is False and ekk.clicker.prepared == 0
+ekk.click_tap = None  # no plugin (or it went away): the app's own stream takes over
+ekk.set_click(True)
+assert ekk.clicker.prepared == 1, "the fallback stream is opened"
+ekk.stop(); ekk.close()
+print("click plugin path OK")

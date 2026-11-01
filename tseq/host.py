@@ -14,8 +14,8 @@ from PySide6.QtGui import QColor, QLinearGradient, QPen
 import plugins
 
 from .model import Bus
-from .constants import (BG, BORDER, DIM, EQ_LABELS, MONITOR_LABELS, PALETTE, PANEL, SLOTS, TEXT, WARN,
-                        XYFX_LABELS)
+from .constants import (BG, BORDER, CLICK_ACCENT, CLICK_BEAT, CLICK_LABELS, DIM, EQ_LABELS, MONITOR_LABELS,
+                        PALETTE, PANEL, SLOTS, TEXT, WARN, XYFX_LABELS)
 from .eq import EqEditor
 from .gestures import Drag, Hold, ScrollOrTap, Slide
 from .ui import Panel, param_color, split
@@ -31,6 +31,9 @@ class HostPanel(Panel):
     of the rack works as before."""
     KNOB_COLS, KNOB_ROWS = 5, 3
     LETTERS = "#ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    click_plugin = None  # the metronome node (click/ in this repo); None: the app's own stream
+    click_out = None  # the MIDI port that plays it
+    click_note = None  # (accent) -> None, one beat of the metronome
 
     def __init__(self, project, router, state_dir, cache_path, audio_out="default", remember=None, name="Touch-Seq",
                  patch=None, buffer=0):
@@ -59,6 +62,10 @@ class HostPanel(Panel):
         self.states_dirty = False  # a parameter changed since the plugins' states were last saved
         self.meters = {}  # Strip -> {"l", "r", "peak", "at"}: what its chain's output is doing
         self.monitor = None  # the monitor plugin's ref, looked up once (False: not installed)
+        self.click_ref_cache = None  # the click plugin's ref, the same way
+        self.click_plugin = None  # the metronome node between the master and the output
+        self.click_out = None  # the MIDI port that plays it
+        self.click_note = None  # (accent) -> None: one beat of the metronome, None without the plugin
         self.eq = EqEditor(self)  # the EQ's own editor, drawn in the parameter area
         if self.buffer:
             plugins.set_quantum(self.buffer)  # before the engine starts, so the plugins see that size
@@ -74,6 +81,7 @@ class HostPanel(Panel):
         self.catalog = plugins.Catalog(cache_path)
         self.sink = self.current_sink()
         self.sink_changed = False
+        self.click_plugin = self.load_click()  # before the first rewire: the master goes through it
         for strip in self.strips():
             for k, ref in enumerate(strip.slots):
                 if ref:
@@ -254,8 +262,11 @@ class HostPanel(Panel):
         outs = lambda pl: [f"{pl.client}:output_{n}" for n in range(1, self.host.ports(pl)[1] + 1)]
         ins = lambda pl: [f"{pl.client}:input_{n}" for n in range(1, self.host.ports(pl)[0] + 1)]
         sink = [f"{self.sink}:playback_FL", f"{self.sink}:playback_FR"] if self.sink else []
+        click = self.click_plugin
+        click_in, click_out = (ins(click), outs(click)) if click else ([], [])
+        to_output = click_in or sink  # everything that reaches the output goes through the click when it is there
         master = self.chain(self.project.master)
-        into_master = ins(master[0]) if master else sink
+        into_master = ins(master[0]) if master else to_output
 
         def bus_into(number):
             """Where a track routed to bus `number` goes; an empty bus is transparent."""
@@ -282,12 +293,14 @@ class HostPanel(Panel):
                 links += self.pair(outs(a), ins(b))
             if chain:
                 if strip is self.project.master:
-                    links += self.pair(outs(chain[-1]), sink)
+                    links += self.pair(outs(chain[-1]), to_output)
                 elif bus:
                     links += self.pair(outs(chain[-1]), into_master)
                 else:
                     links += self.pair(outs(chain[-1]), bus_into(tr.bus) if tr and tr.bus else into_master)
             self.wiring.replace(strip, links)
+        if click:  # the metronome's own node: the audio out of it, and the notes that play it
+            self.wiring.replace("click", self.pair(click_out, sink) + [(f"{self.name} Click:midi", f"{click.client}:events-in")])
         self.apply_levels()
 
     def apply_levels(self):
@@ -356,6 +369,9 @@ class HostPanel(Panel):
                 self.host.set_value(plugin, prm.index, value)
 
     def close(self):
+        if self.click_out:
+            self.click_out.close_port()
+            self.click_out, self.click_note = None, None
         if self.host:
             self.save_states()
             self.host.close()
@@ -596,6 +612,35 @@ class HostPanel(Panel):
                 self.monitor = plugins.find_monitor()
             self.monitor = self.monitor or False
         return self.monitor or None
+
+    # --- the click node ---------------------------------------------------------
+    def click_ref(self):
+        """The metronome plugin (click/ in this repo): in the catalog when it is there, else found on disk."""
+        if self.click_ref_cache is None:
+            catalog = getattr(self, "catalog", None)
+            if catalog is not None and catalog.ready:
+                self.click_ref_cache = next((r for r in catalog.plugins if r.label in CLICK_LABELS), None)
+            if not self.click_ref_cache:
+                self.click_ref_cache = plugins.find_click()
+            self.click_ref_cache = self.click_ref_cache or False
+        return self.click_ref_cache or None
+
+    def load_click(self):
+        """Put the metronome in the graph: the master's audio goes through it and the engine plays it one note
+        per beat, so the click is rendered with the instruments instead of through a stream of its own."""
+        ref = self.click_ref()
+        if not ref or not self.host:
+            return None
+        try:
+            plugin = self.host.add(ref, "Click")
+            self.click_out = rtmidi.MidiOut(rtmidi.API_UNIX_JACK, name=f"{self.name} Click")
+            self.click_out.open_virtual_port("midi")
+        except (RuntimeError, rtmidi.RtMidiError) as e:
+            self.message = str(e)
+            return None
+        self.click_note = lambda accent: self.click_out.send_message(
+            [0x90, CLICK_ACCENT if accent else CLICK_BEAT, 127 if accent else 100])
+        return plugin
 
     def ensure_monitor(self, tr):
         """Put the monitor in an audio track that has no plugins (an empty one is a bare patch: no meter, no

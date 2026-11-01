@@ -51,6 +51,17 @@ jobs:
       - name: DSP test
         run: monitor/build/monitor-test
 
+  click:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - run: sudo apt-get update && sudo apt-get install -y build-essential cmake
+      - run: cmake -B click/build -S click -DCMAKE_BUILD_TYPE=Release && cmake --build click/build -j"$(nproc)"
+      - name: DSP test
+        run: click/build/click-test
+
   eq:
     name: EQ plugin (CLAP + LV2)
     runs-on: ubuntu-22.04

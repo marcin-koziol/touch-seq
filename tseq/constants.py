@@ -81,3 +81,5 @@ XYFX_LABELS = {"touchseq.xyfx", "urn:touch-seq:xyfx"}  # CLAP id, LV2 URI (xyfx/
 MONITOR_LABELS = {"touchseq.monitor", "urn:touch-seq:monitor"}
 # our eight band EQ, whose editor the host panel draws (eq/ in this repo)
 EQ_LABELS = {"touchseq.eq", "urn:touch-seq:eq"}
+CLICK_LABELS = {"touchseq.click", "urn:touch-seq:click"}  # CLAP id, LV2 URI (click/ in this repo)
+CLICK_BEAT, CLICK_ACCENT = 77, 76  # the metronome plugin's notes: a beat, and the first beat of the bar

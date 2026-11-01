@@ -355,6 +355,18 @@ def find_monitor():
     return None
 
 
+def find_click():
+    """The click plugin's ref, looked for in the usual CLAP folders: it ships with the app, so it must not
+    need a catalog RESCAN."""
+    for folder in SEARCH["clap"]:
+        path = folder / "touchseq-click.clap"
+        if path.is_file():
+            refs = run_discovery("clap", str(path))  # the file is the click: take what it reports
+            if refs:
+                return refs[0]
+    return None
+
+
 def audio_input_choices():
     """The inputs of audio_inputs() as (port, "device · channel"), the shape the picker dialogs take."""
     return [(port, f"{label} · {name}") for port, label, name in audio_inputs()]

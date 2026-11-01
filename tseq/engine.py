@@ -156,6 +156,7 @@ class Engine:
         self.rec_fresh = set()  # (lane, step) a held take is sounding: the pattern leaves it to the fingers
         self.rec_taken = set()  # (lane, step) recorded since recording started: REC doesn't erase them
         self.clicker = Clicker()  # the metronome's tick (silent until it is switched on)
+        self.click_tap = None  # the click plugin: (accent) -> None, inside the audio graph; None: the stream
         self.counting = False  # the count-in before the first bar
         self.count_left = 0  # count-in beats still to play
         self.count_beat = 0.0  # when the next count-in tick is due
@@ -194,9 +195,11 @@ class Engine:
         step_len = TICKS_PER_STEP * 60 / (self.project.bpm * PPQN)
         self.step_time, self.step_len = t, step_len
         if self.project.click and self.step_index % 4 == 0:  # a beat: higher on the first of the bar
-            # the click stream runs a buffer behind, so the next beat is queued a whole beat early
-            nxt = self.step_index + 4
-            self.clicker.at(t + 4 * step_len, accent=nxt % STEPS_PER_BAR == 0)
+            if self.click_tap is not None:  # the graph plays it with the notes: send it as the step plays
+                self.click_beat(t, self.step_index % STEPS_PER_BAR == 0)
+            else:  # a stream of our own runs a buffer behind: queue the next beat a whole beat early
+                nxt = self.step_index + 4
+                self.clicker.at(t + 4 * step_len, accent=nxt % STEPS_PER_BAR == 0)
         for tr in self.project.tracks:
             pat = tr.current
             i = self.pos.get(tr, self.step_index) % pat.length  # a track added mid-play joins in step
@@ -268,25 +271,37 @@ class Engine:
         self.playhead.clear()
         self.next_tick = time.perf_counter() + 0.005
         if self.project.click:
-            self.clicker.prepare()
-            if first:  # no count-in to give the downbeat: queue this one now (as soon as the stream allows)
-                self.clicker.at(self.next_tick, accent=True)
+            if self.click_tap is None:  # no plugin: our own stream has to be up before the first beat
+                self.clicker.prepare()
+            if first:  # no count-in to give the downbeat: play it now
+                self.click_beat(self.next_tick, True)
         self.out.send_message([0xFA])
 
     def count(self, now):
         """The count-in: a tick per beat, the first of each bar higher, and the pattern starts on the next."""
         beat = 60.0 / self.project.bpm
-        while self.count_left > 0 and now >= self.count_beat - self.clicker.lead:  # written before it is due
-            self.clicker.at(self.count_beat, accent=int(self.count_left) % 4 == 0)
+        lead = 0.0 if self.click_tap is not None else self.clicker.lead  # a stream is written before it is due
+        while self.count_left > 0 and now >= self.count_beat - lead:
+            self.click_beat(self.count_beat, int(self.count_left) % 4 == 0)
             self.count_left -= 1
             self.count_beat += beat
         if self.count_left <= 0 and now >= self.count_beat:
             self.counting = False
             self.begin(first=False)
 
+    def click_beat(self, when, accent):
+        """One beat of the metronome: the click plugin's note (the graph renders it with the instruments), or
+        an event for the app's own stream when there is no plugin."""
+        if self.click_tap is not None:
+            self.click_tap(accent)
+        else:
+            self.clicker.at(when, accent)
+
     def set_click(self, on):
         """The metronome: on keeps the click stream ready (a silent node between beats), off lets it go."""
         self.project.click = bool(on)
+        if self.click_tap is not None:  # the graph has it: nothing to open or close
+            return
         if self.project.click:
             self.clicker.prepare()
         elif not self.counting:
