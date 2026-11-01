@@ -13,8 +13,9 @@ Version 0.2.0 — early, but already played with.
 ## The rack
 
 The window is a 2×2 rack under a toolbar (**FILE**: projects, **SETTINGS**: key/scale and audio output,
-**PATCHBAY**: audio routing). **⤢** on a module's rail blows it up to full screen; everything else keeps
-running.
+**PATCHBAY**: audio routing, **SAVE**: write now — it lights up while there is something unsaved, and the time
+next to it is the last save of anything, project or plugin). **⤢** on a module's rail blows it up to full
+screen; everything else keeps running.
 
 ### SEQ-64 — step sequencer
 

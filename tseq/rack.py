@@ -6,6 +6,7 @@ import time
 from PySide6.QtCore import QTimer
 from PySide6.QtGui import QColor, QFont, Qt
 
+from .constants import WARN
 from .controls import Controls
 from .dialogs import AudioSources, Chooser, MidiPorts, NewTrack, Settings
 from .model import dump_project, free_project_path, save_text
@@ -50,16 +51,27 @@ class Rack(Window):
     def autosave(self):
         # Runs in the UI thread, which is the only one changing the project structure; the engine
         # only writes Track.pattern, so no lock is needed (and holding it would stall playback).
+        saved = False
         if self.dirty:
             text = dump_project(self.project)
             if text != self.saved:
                 save_text(self.path, text)
-                self.saved, self.saved_at = text, time.localtime()
-                self.update()  # the toolbar shows the time of the last save
+                self.saved, saved = text, True
             e = self.engine
             self.dirty = bool(e.pending) or e.pending_scene is not None  # queued switches change it later
         if self.host.states_dirty:  # a parameter was turned: the plugin states go with the project
             self.host.save_states()
+            saved = True
+        if saved:
+            self.saved_at = time.localtime()  # the toolbar says when anything was last saved
+            self.update()
+
+    def save_now(self):
+        """The SAVE button: write the project and the plugins' states now, changed or not."""
+        self.dirty, self.host.states_dirty = True, True
+        self.autosave()
+        self.saved_at = time.localtime()
+        self.update()
 
     def closeEvent(self, e):
         self.engine.close()
@@ -86,8 +98,8 @@ class Rack(Window):
     def draw_toolbar(self, p, r):
         k = self.k
         inner = r.adjusted(14 * k, 7 * k, -14 * k, -7 * k)
-        logo, file_, settings, patch, name, info = split(inner, [150 * k, 110 * k, 130 * k, 140 * k, 0, 500 * k],
-                                                         14 * k)
+        logo, file_, settings, patch, name, info, save = split(
+            inner, [150 * k, 110 * k, 130 * k, 140 * k, 0, 300 * k, 120 * k], 12 * k)
         f = QFont("sans-serif")
         f.setPixelSize(round(19 * k))
         f.setBold(True)
@@ -103,13 +115,16 @@ class Rack(Window):
         f.setPixelSize(round(22 * k))
         p.setFont(f)
         p.drawText(name.adjusted(20 * k, 0, 0, 0), Qt.AlignLeft | Qt.AlignVCenter, self.path.stem)
+        dirty = self.dirty or self.host.states_dirty
+        self.rail_button(p, save, "SAVE", self.save_now, size=16, on=dirty)
         f.setPixelSize(round(16 * k))
         f.setBold(False)
         f.setLetterSpacing(QFont.AbsoluteSpacing, 1 * k)
         p.setFont(f)
-        p.setPen(QColor("#9aa3b0"))
-        p.drawText(info, Qt.AlignRight | Qt.AlignVCenter,
-                   f"{self.project.key_name.upper()}   ·   SAVED {time.strftime('%H:%M:%S', self.saved_at)}")
+        p.setPen(QColor(WARN if dirty else "#9aa3b0"))
+        state = "UNSAVED" if dirty else f"SAVED {time.strftime('%H:%M:%S', self.saved_at)}"
+        p.drawText(info.adjusted(0, 0, -10 * k, 0), Qt.AlignRight | Qt.AlignVCenter,
+                   f"{self.project.key_name.upper()}   ·   {state}")
 
     def open_file(self):
         if self.dialog and self.dialog[0] == "FILE":

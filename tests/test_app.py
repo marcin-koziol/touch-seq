@@ -832,6 +832,18 @@ assert rkx.dialog and rkx.dialog[0] == "PATCHBAY", rkx.dialog
 rkx.grab().save(str(OUT / "rack_patchbay.png"))
 rkx.close_dialog()
 print("patchbay in the rack OK")
+# the SAVE button writes everything now, and the toolbar clock follows any save
+rkx.saved_at = time.localtime(0)  # a long time ago
+StubHost.saved_states = 0
+rkx.dirty, rkx.host.states_dirty = False, True
+rkx.autosave()
+assert StubHost.saved_states == 1 and rkx.saved_at != time.localtime(0), "a state save moves the clock"
+rkx.grab()
+save_btn = next(r for r, a in rkx.rail_buttons if getattr(a, "__name__", "") == "save_now")
+rkx.saved_at, rkx.host.states_dirty = time.localtime(0), False
+rkx.press(20, save_btn.center())
+assert rkx.saved_at != time.localtime(0) and StubHost.saved_states == 2, "SAVE writes it now"
+print("save button OK")
 # --- settings → audio: the audio graph's buffer size (a machine setting, like the output) ---
 asked, kept = [], []
 real_set_quantum = ts.plugins.set_quantum
