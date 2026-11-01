@@ -8,7 +8,7 @@ and performance faders — laid out as modules in a modular-synth rack, made for
 
 ![Touch-Seq: faders, plugin host, sequencer and chord pads](docs/screenshots/overview.png)
 
-Version 0.6.0 — early, but already played with.
+Version 0.6.1 — early, but already played with.
 
 ## The rack
 
@@ -50,6 +50,7 @@ screen; everything else keeps running.
   project's key and scale, so the pattern stays in key (a chromatic note keeps its alteration, octaves wrap);
   drum tracks have fixed voices and don't offer it
 
+![The metronome: CLICK and COUNT in the top bar, counting in before the pattern](docs/screenshots/metronome.png)
 ![Piano roll](docs/screenshots/piano-roll.png)
 ![Drum editor](docs/screenshots/drums.png)
 ![Adding a track: drum, melody, external MIDI or audio](docs/screenshots/new-track.png)
@@ -168,8 +169,8 @@ Download the AppImage for your machine from [Releases](https://github.com/marcin
 then:
 
 ```sh
-chmod +x Touch-Seq-0.6.0-x86_64.AppImage
-./Touch-Seq-0.6.0-x86_64.AppImage
+chmod +x Touch-Seq-0.6.1-x86_64.AppImage
+./Touch-Seq-0.6.1-x86_64.AppImage
 ```
 
 It contains Python, Qt (PySide6), Carla and Touch-Seq's own plugins (XYFX, Monitor, EQ and Click). The machine needs:
@@ -222,7 +223,7 @@ Keys (with a keyboard attached): **Space** play/stop, **Esc** closes a dialog/po
 | `audio_out` | `default` (follow PipeWire's default output) or a sink node name — easier set in SETTINGS → AUDIO |
 | `patch` | audio links made in PATCHBAY, as `[[out port, in port], …]` — this machine's cables |
 | `buffer` | audio buffer size in samples for the whole graph while the app runs, `0` = the system's own |
-| `click_lead` | the metronome's own delay in ms, when the machine needs it nudged (left out = the graph's buffer) |
+| `click_lead` | the metronome stream's own delay in ms — only for the fallback without the click plugin |
 
 The metronome is **Touch-Seq Click**, our own plugin (`click/`, CLAP/LV2, like the monitor and the EQ): the
 master's audio goes through it and the engine plays it one note per beat, so the click is rendered inside the
