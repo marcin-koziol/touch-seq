@@ -101,7 +101,7 @@ class Controls(Panel):
         p.fillRect(self.rect(), QColor(BG))
         header = QRectF(g, g, self.w - 2 * g, 56 * s)
         info, edit = split(header, [0, 130 * s], 6 * s)
-        hint = ("TARGET: tap to switch · a plugin parameter: hold its knob in HOST" if self.editing
+        hint = ("TARGET: tap to switch · a plugin parameter: ASSIGN on its knob in HOST" if self.editing
                 else "pitch bend · mod wheel · CC")
         self.text(p, info.adjusted(6 * s, 0, 0, 0), hint, DIM, 15, Qt.AlignLeft | Qt.AlignVCenter)
         self.button(p, edit, "EDIT", lambda: setattr(self, "editing", not self.editing), on=self.editing,

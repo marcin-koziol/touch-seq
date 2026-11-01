@@ -488,7 +488,7 @@ class HostPanel(Panel):
         if self.browser:
             self.draw_browser(p)
             return
-        if self.assigning:
+        if isinstance(self.assigning, tuple):  # a knob was chosen with ASSIGN: pick the fader
             self.draw_assign(p)
             return
         header = QRectF(g, g, self.w - 2 * g, 44 * s)
@@ -850,9 +850,11 @@ class HostPanel(Panel):
                             lambda: self.open_browser(*sel))
             return
         inner = r.adjusted(10 * s, 8 * s, -10 * s, -8 * s)
-        title, ui, change, remove = split(QRectF(inner.left(), inner.top(), inner.width(), 44 * s),
-                                          [0, 56 * s, 84 * s, 84 * s], 6 * s)
+        title, assign, ui, change, remove = split(QRectF(inner.left(), inner.top(), inner.width(), 44 * s),
+                                                  [0, 86 * s, 56 * s, 84 * s, 84 * s], 6 * s)
         self.text(p, title, plugin.ref.name, TEXT, 15, Qt.AlignLeft | Qt.AlignVCenter, bold=True, elide=True)
+        picking = self.assigning == "pick"
+        self.button(p, assign, "ASSIGN", self.toggle_assign, on=picking, sub="to a fader")
         self.button(p, ui, "UI", lambda: self.host.show_ui(plugin), enabled=self.host.has_ui(plugin))
         self.button(p, change, "CHANGE", lambda: self.open_browser(*sel))
         self.button(p, remove, "REMOVE", lambda: None, color=WARN, sub="hold")
@@ -875,7 +877,9 @@ class HostPanel(Panel):
         nav = QRectF(inner.left(), inner.bottom() - 40 * s, inner.width(), 40 * s)
         prev, label, nxt = split(nav, [70 * s, 0, 70 * s], 6 * s)
         self.button(p, prev, "◀", lambda: setattr(self, "page", max(0, self.page - 1)), enabled=self.page > 0)
-        self.text(p, label, f"{self.page + 1} / {pages}  ·  {len(plugin.params)} params", DIM, 12)
+        hint = "tap a knob to drive it from a CTRL fader" if picking else f"{self.page + 1} / {pages}  ·  " \
+            f"{len(plugin.params)} params"
+        self.text(p, label, hint, "#38d6ff" if picking else DIM, 12)
         self.button(p, nxt, "▶", lambda: setattr(self, "page", min(pages - 1, self.page + 1)),
                     enabled=self.page < pages - 1)
         grid = QRectF(inner.left(), title.bottom() + 8 * s, inner.width(), nav.top() - title.bottom() - 16 * s)
@@ -908,21 +912,31 @@ class HostPanel(Panel):
             v = prm.lo + norm * (prm.hi - prm.lo)
             self.set_param(plugin, prm.index, round(v) if prm.integer or prm.boolean else v)
 
+        if self.assigning == "pick":  # the ASSIGN button is on: this tap chooses the knob, it does not turn it
+            self.box(p, r, QColor(0, 0, 0, 0), "#38d6ff", 1.2, radius=8)
+            self.on_press(r, lambda prm=prm: self.assign_knob(prm))
+            return
         toggle = (lambda: set_(0.0 if get() > 0.5 else 1.0)) if prm.boolean else None
-        strip = self.sel[0]
-        hold = lambda: setattr(self, "assigning", (strip, self.sel[1], prm))  # hold: drive it from a fader
-        self.region(r, lambda pos: Drag(pos, get, set_, 0.0, 1.0, 1.5 * s, 1 / 150, toggle, on_hold=hold))
+        self.region(r, lambda pos: Drag(pos, get, set_, 0.0, 1.0, 1.5 * s, 1 / 150, toggle))
+
+    def toggle_assign(self):
+        """The ASSIGN button: the next knob tapped is the one a CTRL fader will drive (tap again to cancel)."""
+        self.assigning = None if self.assigning else "pick"
+
+    def assign_knob(self, prm):
+        """A knob chosen in ASSIGN mode: pick the fader that will drive it."""
+        self.assigning = (self.sel[0], self.sel[1], prm)
 
     def draw_assign(self, p):
-        """Which CTRL fader should drive the held knob's parameter."""
+        """Which CTRL fader should drive the knob chosen with ASSIGN."""
         s, g = self.s, 16 * self.s
         strip, slot, prm = self.assigning
         color = param_color(prm.name)
         self.text(p, QRectF(g, g, self.w - 2 * g, 40 * s), f"Fader for  {prm.name}", color, 22,
                   Qt.AlignLeft | Qt.AlignVCenter, bold=True, elide=True)
         self.text(p, QRectF(g, g + 40 * s, self.w - 2 * g, 26 * s),
-                  "CTRL-10 fader that will move this parameter directly (no MIDI):", DIM, 14,
-                  Qt.AlignLeft | Qt.AlignVCenter)
+                  "CTRL-10 fader that will move this parameter directly (no MIDI); CANCEL keeps it as it is:",
+                  DIM, 14, Qt.AlignLeft | Qt.AlignVCenter)
         faders = [(i, c) for i, c in enumerate(self.project.controls) if c.kind == "cc"]
         grid = QRectF(g, g + 80 * s, self.w - 2 * g, self.h - 2 * g - 80 * s - 64 * s)
         cols = 4

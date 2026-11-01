@@ -925,6 +925,10 @@ class FakeCarla:
         return self.level, self.level * 0.5
     def idle(self):
         pass
+    def has_ui(self, plugin):
+        return False
+    def show_ui(self, plugin, on=True):
+        pass
     def set_volume(self, plugin, volume):
         self.volumes.append((plugin.client, round(volume, 2)))
 class FakeWiring:
@@ -1036,6 +1040,8 @@ class ParamCarla(FakeCarla):
         return self.values.get(index, 0.0)
     def set_value(self, plugin, index, value):
         self.values[index] = value
+    def text(self, plugin, index):
+        return str(self.values.get(index, 0.0))
     def save_state(self, plugin, path):
         Path(path).write_text("state")
 pp = FakePlugin("M.1 Reverb")
@@ -1252,3 +1258,30 @@ for _ in range(20):
     bh2.tick(); time.sleep(0.05)
 assert removed == [1], removed
 print("remove bus OK")
+
+# --- ASSIGN: a knob is picked with a tap, not held, and the fader list follows ---
+ah2 = FakeHostPanel(ts.Project(tracks=[ts.Track("melody", 1, 1)]))
+ah2.host = ParamCarla()
+ah2.host.values = {0: 0.3, 1: 0.7}
+pl2 = FakePlugin("T1.1 Rev")
+pl2.params = [type("Pr", (), {"index": i, "name": n, "lo": 0.0, "hi": 1.0, "integer": False, "boolean": False})()
+              for i, n in ((0, "Cutoff"), (1, "Mix"))]
+ah2.loaded = {(ah2.project.tracks[0].strip, 0): pl2}
+ah2.sel = (ah2.project.tracks[0].strip, 0)
+ah2.toggle_assign()
+assert ah2.assigning == "pick", ah2.assigning
+img2 = QImage(1024, 600, QImage.Format_ARGB32); img2.fill(0)
+q2 = QPainter(img2); q2.setRenderHint(QPainter.Antialiasing)
+ah2.paint(q2, 1024, 600); q2.end()
+knob = next(r for r, f in ah2.hits  # the first knob cell (a slot is wider)
+            if 60 < r.width() < 150 and r.height() > 60 and r.top() > 120)
+ah2.press(5, knob.center())  # a tap in ASSIGN mode picks the knob instead of turning it
+assert isinstance(ah2.assigning, tuple) and ah2.assigning[2].name == "Cutoff", ah2.assigning
+assert ah2.host.values[0] == 0.3, "a tap in ASSIGN mode must not turn the knob"
+ah2.link_to_fader(3)  # then the fader
+ctrl = ah2.project.controls[3]
+assert ctrl.target == "param" and ctrl.param == [1, 0, 0, "Cutoff"], ctrl
+assert ah2.assigning is None, "the pick mode ends once the fader is chosen"
+ah2.toggle_assign(); assert ah2.assigning == "pick"
+ah2.toggle_assign(); assert ah2.assigning is None, "and ASSIGN again cancels"
+print("assign button OK")

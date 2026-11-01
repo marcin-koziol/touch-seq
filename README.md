@@ -102,8 +102,9 @@ Pitch bend (springs back), mod wheel and 8 CC faders. Each fader has a **target*
 
 - **TRACK** — that track's instrument, on its channel; **SEL** = whichever track is selected
 - **CHANNEL** — plain MIDI on a channel (outboard gear on the MIDI port)
-- **PARAM** — a plugin parameter directly, no MIDI learn needed: hold the parameter's knob in HOST-4 and
-  pick a fader; fader and knob then move together
+- **PARAM** — a plugin parameter directly, no MIDI learn needed: **ASSIGN** at the top of HOST-4 puts its
+  knobs into a choice mode, tap the knob you want, then tap the fader — fader and knob then move together
+  (tap ASSIGN again to cancel, or CANCEL in the fader list)
 
 Optional 14-bit (MSB/LSB pairs) and bipolar faders.
 
@@ -171,7 +172,7 @@ device is unplugged its notes are simply not sent, and they come back when it re
 | sequencer | drag along a row | paints steps on/off |
 | piano roll | tap empty / tap a note | place / remove; drag a note sideways = length, up/down = pitch |
 | piano roll | drag the keyboard on the left | scroll; OCT ▼▲ jumps an octave |
-| plugin knobs | drag up/down; **hold** | turn; hold = drive this parameter from a CTRL fader |
+| plugin knobs | drag up/down | turn; to drive one from a CTRL fader, **ASSIGN** in HOST-4 then tap the knob and the fader |
 | chord pads | 7 / 9 / SUS while holding a chord | the held chord changes right away |
 | LEAD | toggle off and on | restarts voice leading from root position |
 | XY pad | LATCH | keeps the effect on after the finger lifts |
