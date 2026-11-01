@@ -150,7 +150,7 @@ class Rack(Window):
         """The sequencer's "+": which kind of track, and for an external one which MIDI output."""
         if self.dialog:
             return self.close_dialog()
-        self.open_dialog("NEW TRACK", "drum · melody · external MIDI", NewTrack(self.add_track))
+        self.open_dialog("NEW TRACK", "drum · melody · external MIDI · audio", NewTrack(self.add_track))
 
     def add_track(self, kind, value=""):
         self.seq.add_track(kind, value)

@@ -39,7 +39,8 @@ screen; everything else keeps running.
 
 ![Piano roll](docs/screenshots/piano-roll.png)
 ![Drum editor](docs/screenshots/drums.png)
-![Adding a track: drum, melody or external MIDI](docs/screenshots/new-track.png)
+![Adding a track: drum, melody, external MIDI or audio](docs/screenshots/new-track.png)
+![An audio track: an interface input, panned, through the track's chain and into a bus](docs/screenshots/audio.png)
 
 ### EQ — eight bands, drawn in the app
 
@@ -50,6 +51,8 @@ put the chosen band there — near the bass end it becomes a **low cut**, near t
 middle a bell — and the menu underneath sets its **mode** (bell, low/high shelf, low/high cut) and **width**.
 The spectrum is measured in the plugin and read back through output parameters, because Touch-Seq has no audio
 buffers of its own; the curve is drawn from the same biquad maths the plugin runs.
+
+![The EQ: the curve, the spectrum, the bands and their menu](docs/screenshots/eq.png)
 
 ### HOST-4 — plugins (Carla)
 
