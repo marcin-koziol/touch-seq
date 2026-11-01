@@ -8,8 +8,8 @@ import zlib
 
 import rtmidi
 
-from PySide6.QtCore import QRectF, Qt
-from PySide6.QtGui import QColor, QPen
+from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtGui import QColor, QLinearGradient, QPen
 
 import plugins
 
@@ -64,6 +64,7 @@ class HostPanel(Panel):
         self.wiring.replace("patchbay", self.patch)  # from the last time; heal keeps them alive
         self.buffer = buffer  # the audio graph's buffer size in samples this machine was left on (0: system)
         self.states_dirty = False  # a parameter changed since the plugins' states were last saved
+        self.meters = {}  # Strip -> {"l", "r", "peak", "at"}: what its chain's output is doing
         if self.buffer:
             plugins.set_quantum(self.buffer)  # before the engine starts, so the plugins see that size
         try:
@@ -365,6 +366,7 @@ class HostPanel(Panel):
         self.router.refresh(self.project.tracks)  # external tracks: look for their MIDI outputs again
         if self.host:
             self.host.idle()
+            self.sample_meters()
             self.forget_deleted_tracks()
             if self.xyfx() and self.xy_values().get("bpm") != self.project.bpm:  # repeats follow the tempo
                 self.xy(bpm=self.project.bpm)
@@ -574,16 +576,78 @@ class HostPanel(Panel):
         self.button(p, plus, "+ BUS", lambda: self.add_bus(tr), sub="effects")
         return r.bottom() + 8 * s
 
+    # --- meters ---------------------------------------------------------------
+    @staticmethod
+    def db_fraction(value):
+        """A peak as a 0..1 bar height: -60 dB at the bottom, 0 dB at the top."""
+        if value <= 0.0:
+            return 0.0
+        db = 20 * math.log10(value)
+        return max(0.0, min(1.0, (db + 60.0) / 60.0))
+
+    def sample_meters(self):
+        """Read every chain's output peak (the last plugin, so after its fader): the bars fall back, the peak
+        holds for a moment and then follows."""
+        now = time.monotonic()
+        live = set(self.strips())
+        changed = False
+        for strip in live:
+            chain = self.chain(strip)
+            if not chain:
+                continue
+            left, right = self.host.peaks(chain[-1])
+            meter = self.meters.setdefault(strip, {"l": 0.0, "r": 0.0, "peak": 0.0, "at": 0.0})
+            before = (meter["l"], meter["r"], meter["peak"])
+            meter["l"] = max(left, meter["l"] * 0.72)  # a needle that falls back between frames
+            meter["r"] = max(right, meter["r"] * 0.72)
+            top = max(left, right)
+            if top >= meter["peak"]:
+                meter["peak"], meter["at"] = top, now
+            elif now - meter["at"] > 1.2:  # the peak holds, then slides down
+                meter["peak"] = max(meter["l"], meter["r"], meter["peak"] * 0.94)
+            if max(abs(a - b) for a, b in zip(before, (meter["l"], meter["r"], meter["peak"]))) > 0.002:
+                changed = True
+        for strip in [s for s in self.meters if s not in live]:
+            del self.meters[strip]
+        if changed:
+            self.invalidate()  # the bars move: one frame per change
+
+    def draw_meter(self, p, r, strip):
+        """A stereo peak meter: two bars from -60 to 0 dB, with a peak line that holds and falls."""
+        s = self.s
+        self.box(p, r, "#0f1117", BORDER, 1, radius=3)
+        meter = self.meters.get(strip)
+        if not meter:
+            return
+        gradient = QLinearGradient(0, r.bottom(), 0, r.top())
+        gradient.setColorAt(0.0, QColor("#4ade80"))
+        gradient.setColorAt(0.72, QColor("#facc15"))
+        gradient.setColorAt(1.0, QColor("#ff5d5d"))
+        p.setPen(Qt.NoPen)
+        p.setBrush(gradient)
+        half = r.width() / 2
+        for value, left in ((meter["l"], r.left()), (meter["r"], r.center().x())):
+            height = r.height() * self.db_fraction(value)
+            if height > 0.5:
+                p.drawRect(QRectF(left + 1.2 * s, r.bottom() - height, half - 2.4 * s, height))
+        peak = r.height() * self.db_fraction(meter["peak"])
+        if peak > 0.5:
+            p.setPen(QPen(QColor("#ff5d5d" if meter["peak"] > 0.95 else "#e6e9ee"), 1.6 * s))
+            p.drawLine(QPointF(r.left() + 1 * s, r.bottom() - peak), QPointF(r.right() - 1 * s, r.bottom() - peak))
+
     def draw_fader(self, p, r, strip, label=True):
         s = self.s
         mute = QRectF(r.left(), r.bottom() - 40 * s, r.width(), 40 * s)
         self.button(p, mute, "M", lambda: self.set_mix(strip, mute=not strip.mute), on=strip.mute, color=WARN)
         bottom = mute.top() - (24 * s if label else 8 * s)
-        track = QRectF(r.center().x() - 14 * s, r.top() + 4 * s, 28 * s, bottom - r.top() - 4 * s)
+        top = r.top() + 4 * s
+        track = QRectF(r.center().x() - 21 * s, top, 20 * s, bottom - top)  # the fader, with the meter beside it
+        meter = QRectF(r.center().x() + 3 * s, top, 13 * s, bottom - top)
         self.box(p, track, "#141821", BORDER, radius=8)
         level = track.height() * strip.volume
         self.box(p, QRectF(track.left(), track.bottom() - level, track.width(), level), QColor(74, 222, 128, 150),
                  None, radius=6)
+        self.draw_meter(p, meter, strip)
         if label:
             self.text(p, QRectF(r.left(), track.bottom() + 2 * s, r.width(), 20 * s), f"{round(strip.volume * 100)}%",
                       DIM, 11)

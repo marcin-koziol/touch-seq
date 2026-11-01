@@ -231,6 +231,10 @@ class Host:
     def set_value(self, plugin, index, value):
         self.h.set_parameter_value(plugin.pid, index, value)
 
+    def peaks(self, plugin):
+        """A plugin's output peaks as (left, right), linear (0.0 = silence): Carla's own meter data."""
+        return (self.h.get_output_peak_value(plugin.pid, True), self.h.get_output_peak_value(plugin.pid, False))
+
     def set_volume(self, plugin, volume):
         self.h.set_volume(plugin.pid, volume)
 

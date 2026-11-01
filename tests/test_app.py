@@ -844,6 +844,7 @@ rkx.saved_at, rkx.host.states_dirty = time.localtime(0), False
 rkx.press(20, save_btn.center())
 assert rkx.saved_at != time.localtime(0) and StubHost.saved_states == 2, "SAVE writes it now"
 print("save button OK")
+
 # --- settings → audio: the audio graph's buffer size (a machine setting, like the output) ---
 asked, kept = [], []
 real_set_quantum = ts.plugins.set_quantum
@@ -912,8 +913,11 @@ class FakePlugin:
 class FakeCarla:
     def __init__(self):
         self.volumes = []
+        self.level = 0.0
     def ports(self, plugin):
         return 2, 2
+    def peaks(self, plugin):
+        return self.level, self.level * 0.5
     def set_volume(self, plugin, volume):
         self.volumes.append((plugin.client, round(volume, 2)))
 class FakeWiring:
@@ -926,6 +930,7 @@ class FakeHostPanel(ts.HostPanel):
     def __init__(self, project):
         self.project, self.sink, self.name = project, "sink", "TS"
         self.loaded, self.wiring, self.host = {}, FakeWiring(), FakeCarla()
+        self.meters, self.states_dirty = {}, False
 
 prb = ts.Project(tracks=[ts.Track("melody", 1, 1), ts.Track("melody", 2, 2)])
 prb.buses.append(ts.Bus(1))
@@ -1041,3 +1046,24 @@ rkx.host.states_dirty = True
 rkx.autosave()
 assert StubHost.saved_states == 1 and not rkx.host.states_dirty, "the autosave saves plugin states too"
 print("plugin params OK")
+# --- the mixer's meters: bars fall back, the peak holds and then follows ---
+mh = FakeHostPanel(ts.Project(tracks=[ts.Track("melody", 1, 1)]))
+mh.loaded = {(mh.project.tracks[0].strip, 1): FakePlugin("T1.1 A")}
+strip1 = mh.project.tracks[0].strip
+mh.host.level = 0.8
+mh.sample_meters()
+m = mh.meters[strip1]
+assert round(m["l"], 2) == 0.8 and round(m["r"], 2) == 0.4 and m["peak"] == 0.8, m
+assert ts.HostPanel.db_fraction(1.0) == 1.0 and ts.HostPanel.db_fraction(0.0) == 0.0
+assert 0.85 < ts.HostPanel.db_fraction(0.5) < 0.95, "0.5 is about -6 dB: nearly full, as in any DAW"
+mh.host.level = 0.0
+mh.sample_meters()
+assert 0 < mh.meters[strip1]["l"] < 0.8 and mh.meters[strip1]["peak"] == 0.8, "the bar falls, the peak holds"
+time.sleep(1.4)
+for _ in range(20):
+    mh.sample_meters(); time.sleep(0.02)
+assert mh.meters[strip1]["peak"] < 0.8 and mh.meters[strip1]["l"] < 0.05, mh.meters[strip1]
+mh.project.tracks.clear()  # a deleted track takes its meter with it
+mh.sample_meters()
+assert not mh.meters, mh.meters
+print("meters OK")

@@ -55,7 +55,8 @@ screen; everything else keeps running.
   MIXER and boxes in the PATCHBAY (`BUS 1 · Reverb`), so an interface's input can be patched through one too
 - **TRACK** view: the chain of the track selected in the sequencer (or of the bus you tapped in the mixer) and
   the plugin's parameters as knobs, colored by what they are (filter, envelope, LFO, oscillator, level, effect)
-- **MIXER** view: a column per plugin track, one per bus, plus the master
+- **MIXER** view: a column per plugin track, one per bus, plus the master, each with a **stereo peak meter**
+  (Carla's own data, taken after the chain's fader) whose peak line holds for a moment and then falls
 - a touch-friendly plugin browser (format filter, A–Z strip, **ADD** buttons so scrolling never adds),
   plugin GUIs open in their own windows (**UI**)
 - the audio output follows PipeWire's default (headphones ↔ speakers) or is pinned in SETTINGS → AUDIO
