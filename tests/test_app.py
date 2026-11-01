@@ -1693,3 +1693,22 @@ ekk.set_click(True)
 assert ekk.clicker.prepared == 1, "the fallback stream is opened"
 ekk.stop(); ekk.close()
 print("click plugin path OK")
+
+# --- a panel that cannot draw must not freeze the window: it says so, the rest still paints ---
+class BadPaint(ts.Panel):
+    def draw(self, p):
+        raise RuntimeError("no paint today")
+
+class GoodPaint(ts.Panel):
+    drew = 0
+    def draw(self, p):
+        type(self).drew += 1
+        p.fillRect(self.rect(), QColor("#123456"))
+
+wb2 = ts.Window([(0, 0, "B", "broken", BadPaint()), (1, 0, "G", "fine", GoodPaint())])
+wb2.resize(900, 600)
+shot = wb2.grab().toImage()
+assert wb2.broken_paint, "the failure was recorded"
+assert shot.width() == 900 and shot.height() == 600, "the window still painted"
+assert GoodPaint.drew == 1, f"the other module was still drawn ({GoodPaint.drew})"
+print("broken paint OK")

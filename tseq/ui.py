@@ -2,6 +2,7 @@
 regions, one gesture per touch), the primitives every panel draws with, and `Window` (faceplates, modular
 layout, dialogs over the rack, the repaint clock)."""
 import re
+import sys
 import time
 import traceback
 
@@ -173,6 +174,8 @@ class Window(QWidget):
         self.owner = {}  # touch id -> panel
         self.dirty = False  # something may have been edited since the last save
         self.broken = set()  # panels whose tick raised: reported once, the clock keeps going
+        self.broken_paint = set()  # panels whose draw raised: drawn as an error, the rest still paints
+        self.slow_paint_at = 0.0  # when a slow frame was last reported
         QTimer(self, interval=40, timeout=self.tick).start()
 
     # --- input ----------------------------------------------------------
@@ -285,7 +288,12 @@ class Window(QWidget):
                 if id(panel) not in self.broken:
                     self.broken.add(id(panel))
                     traceback.print_exc()
-        if self.animating() or any(p.stale for p in panels):
+        try:
+            animating = self.animating()
+        except Exception:  # a panel that cannot say whether it moves still has to let the frame through
+            traceback.print_exc()
+            animating = True
+        if animating or any(p.stale for p in panels):
             for panel in panels:
                 panel.stale = False
             self.update()
@@ -297,6 +305,7 @@ class Window(QWidget):
 
     # --- drawing --------------------------------------------------------
     def paintEvent(self, _):
+        started = time.perf_counter()
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
         p.fillRect(self.rect(), QColor("#08090b"))
@@ -332,14 +341,41 @@ class Window(QWidget):
             self.screens[panel] = self.draw_faceplate(p, self.dialog_rect, 7, name, desc, panel,
                                                       ("✕", self.close_dialog))
             self.paint_panel(p, panel, self.screens[panel])
+        spent = time.perf_counter() - started
+        if spent > 0.25 and time.monotonic() - self.slow_paint_at > 5.0:  # a frame this slow is a frozen screen
+            self.slow_paint_at = time.monotonic()
+            print(f"touch-seq: a frame took {spent * 1000:.0f} ms", file=sys.stderr)
 
-    @staticmethod
-    def paint_panel(p, panel, screen):
+    def paint_panel(self, p, panel, screen):
+        """Draw a panel. One that raises (a plugin gone mid-frame, say) is reported once and drawn as an error:
+        a broken panel used to take the window's whole frame with it, so the screen froze while the app went on."""
         p.save()
         p.translate(screen.topLeft())
         p.setClipRect(QRectF(0, 0, screen.width(), screen.height()))
-        panel.paint(p, screen.width(), screen.height())
+        try:
+            panel.paint(p, screen.width(), screen.height())
+        except Exception as e:  # noqa: BLE001 - anything a panel's drawing does must not stop the frame
+            if id(panel) not in self.broken_paint:
+                self.broken_paint.add(id(panel))
+                traceback.print_exc()
+            self.draw_broken(p, screen, e)
         p.restore()
+
+    def draw_broken(self, p, screen, error):
+        """What a panel that cannot draw shows instead of nothing."""
+        k = self.k
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor("#2a1512"))
+        p.drawRect(QRectF(0, 0, screen.width(), screen.height()))
+        f = QFont("sans-serif")
+        f.setPixelSize(round(15 * k))
+        f.setBold(True)
+        p.setFont(f)
+        p.setPen(QColor("#ff8c42"))
+        box = QRectF(16 * k, 0, screen.width() - 32 * k, screen.height())
+        p.drawText(box, Qt.AlignCenter | Qt.TextWordWrap,
+                   f"this module cannot draw itself\n{type(error).__name__}: {error}\n"
+                   f"(the rest keeps playing; the terminal has the traceback)")
 
     def draw_rail(self, p, r):
         """A strip of brushed metal (module panel without screen)."""

@@ -3,6 +3,8 @@ import json
 import os
 import signal
 import sys
+import time
+import traceback
 from pathlib import Path
 
 from PySide6.QtCore import Qt
@@ -34,6 +36,24 @@ DEFAULT_CONFIG = {
 }
 
 
+ERROR_LOG = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "touch-seq" / "errors.log"
+
+
+def log_errors():
+    """Uncaught exceptions - a paint or a timer slot that broke - go to a file as well as to the terminal: a
+    frozen or half-drawn screen is easier to explain with the traceback that caused it."""
+    def hook(kind, value, tb):
+        traceback.print_exception(kind, value, tb)
+        try:
+            ERROR_LOG.parent.mkdir(parents=True, exist_ok=True)
+            with open(ERROR_LOG, "a") as f:
+                f.write(time.strftime("\n=== %Y-%m-%d %H:%M:%S ===\n"))
+                traceback.print_exception(kind, value, tb, file=f)
+        except OSError:
+            pass
+    sys.excepthook = hook
+
+
 def config_path():
     """The config: the command line's, else config.json beside the program (a source checkout), else
     ~/.config/touch-seq/config.json, written with the defaults the first time."""
@@ -50,6 +70,7 @@ def config_path():
 
 
 def main(version):
+    log_errors()
     if sys.argv[1:2] == ["--version"]:
         print(f"Touch-Seq {version}")
         return
