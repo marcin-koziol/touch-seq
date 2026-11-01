@@ -9,6 +9,7 @@ from PySide6.QtGui import QColor, QFont, Qt
 from .controls import Controls
 from .dialogs import Chooser, MidiPorts, NewTrack, Settings
 from .model import dump_project, free_project_path, save_text
+from .patchbay import Patchbay
 from .performer import Performer
 from .sequencer import Sequencer
 from .ui import Window, split
@@ -82,7 +83,8 @@ class Rack(Window):
     def draw_toolbar(self, p, r):
         k = self.k
         inner = r.adjusted(14 * k, 7 * k, -14 * k, -7 * k)
-        logo, file_, settings, name, info = split(inner, [150 * k, 110 * k, 140 * k, 0, 520 * k], 14 * k)
+        logo, file_, settings, patch, name, info = split(inner, [150 * k, 110 * k, 130 * k, 140 * k, 0, 500 * k],
+                                                         14 * k)
         f = QFont("sans-serif")
         f.setPixelSize(round(19 * k))
         f.setBold(True)
@@ -93,6 +95,8 @@ class Rack(Window):
         self.rail_button(p, file_, "FILE", self.open_file, size=17, on=bool(self.dialog) and self.dialog[0] == "FILE")
         self.rail_button(p, settings, "SETTINGS", self.open_settings, size=17,
                          on=bool(self.dialog) and self.dialog[0] == "SETTINGS")
+        self.rail_button(p, patch, "PATCHBAY", self.open_patchbay, size=17,
+                         on=bool(self.dialog) and self.dialog[0] == "PATCHBAY")
         f.setPixelSize(round(22 * k))
         p.setFont(f)
         p.drawText(name.adjusted(20 * k, 0, 0, 0), Qt.AlignLeft | Qt.AlignVCenter, self.path.stem)
@@ -116,6 +120,12 @@ class Rack(Window):
         if self.dialog and self.dialog[0] == "SETTINGS":
             return self.close_dialog()
         self.open_dialog("SETTINGS", "project & audio", Settings(self.project, self.host))
+
+    def open_patchbay(self):
+        """The audio graph by hand: e.g. an interface's input into its own output, to hear a synth."""
+        if self.dialog:
+            return self.close_dialog()
+        self.open_dialog("PATCHBAY", "audio routing", Patchbay(self.host.patch_links, self.host.set_patch))
 
     def open_new_track(self):
         """The sequencer's "+": which kind of track, and for an external one which MIDI output."""

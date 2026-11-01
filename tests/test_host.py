@@ -118,16 +118,16 @@ assert (f"{client}:output_1", f"{sink}:playback_FL") in plugins.existing_links()
 print("and back")
 # picking an output by hand pins it (and is remembered); "default" follows the system again
 kept = []
-host.remember = kept.append
+host.remember = lambda key, value: kept.append((key, value))
 host.set_output(other)
 time.sleep(1.5)
 l = plugins.existing_links()
 assert (f"{client}:output_1", f"{other}:playback_FL") in l and (f"{client}:output_1", f"{sink}:playback_FL") not in l
 for _ in range(60):  # the default doesn't move a pinned output
     host.tick(); time.sleep(0.05)
-assert (f"{client}:output_1", f"{other}:playback_FL") in plugins.existing_links() and kept == [other]
+assert (f"{client}:output_1", f"{other}:playback_FL") in plugins.existing_links() and kept == [("audio_out", other)]
 host.set_output("default"); time.sleep(1.5)
-assert (f"{client}:output_1", f"{sink}:playback_FL") in plugins.existing_links() and kept == [other, "default"]
+assert (f"{client}:output_1", f"{sink}:playback_FL") in plugins.existing_links() and kept == [("audio_out", other), ("audio_out", "default")]
 print("output pinned + back to default; sinks:", [d for _, d in plugins.sinks()])
 
 # notes on ch10 reach strip 1's port (and the main port), ch1 doesn't

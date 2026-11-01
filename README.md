@@ -12,8 +12,9 @@ Version 0.1.1 — early, but already played with.
 
 ## The rack
 
-The window is a 2×2 rack under a toolbar (**FILE**: projects, **SETTINGS**: key/scale and audio output).
-**⤢** on a module's rail blows it up to full screen; everything else keeps running.
+The window is a 2×2 rack under a toolbar (**FILE**: projects, **SETTINGS**: key/scale and audio output,
+**PATCHBAY**: audio routing). **⤢** on a module's rail blows it up to full screen; everything else keeps
+running.
 
 ### SEQ-64 — step sequencer
 
@@ -83,6 +84,14 @@ other project. SETTINGS sets the project's key and scale (chord pads, piano roll
 
 ![Settings](docs/screenshots/settings.png)
 
+### PATCHBAY — audio routing
+
+Every audio port of the machine, sources on the left and destinations on the right: tap a source and a
+destination to connect them, the same pair again to cut it. That's how a synth plugged into an interface's
+input is heard through that interface's output, or how a plugin's output is sent to another device. The links
+are kept with this machine (config.json, not the project) and re-made when a device comes back; the app's own
+cables — plugin chains and the master output — are shown with a hollow dot and are left to the app.
+
 ## Install
 
 Download the AppImage for your machine from [Releases](https://github.com/marcin-koziol/touch-seq/releases),
@@ -139,6 +148,7 @@ Keys (with a keyboard attached): **Space** play/stop, **Esc** closes a dialog/po
 | `midi_port` | MIDI out: an existing port whose name contains this, otherwise a virtual port of that name |
 | `projects` | projects folder (default `~/.local/share/touch-seq/projects`) |
 | `audio_out` | `default` (follow PipeWire's default output) or a sink node name — easier set in SETTINGS → AUDIO |
+| `patch` | audio links made in PATCHBAY, as `[[out port, in port], …]` — this machine's cables |
 
 Projects save themselves (every couple of seconds while editing, and on exit); plugin states are saved next
 to each project in `<name>.plugins/`.
@@ -196,8 +206,8 @@ The app is `touchseq.py` (the entry point: it flattens the package back into one
 touchseq as ts` in the tests sees everything) plus the `tseq/` package, one module per concern:
 `model` (the project and its files), `engine` (MIDI out and the playback thread), `ui` (the drawing toolkit,
 `Panel` and the module window), one module per rack panel (`sequencer`, `controls`, `host`, `performer`),
-then `rack`, `dialogs` and `app` (startup). `tseq/__init__.py` lists them in dependency order; nothing in
-the package imports anything above it.
+then `patchbay` (audio routing), `rack`, `dialogs` and `app` (startup). `tseq/__init__.py` lists them in
+dependency order; nothing in the package imports anything above it.
 
 ## License
 

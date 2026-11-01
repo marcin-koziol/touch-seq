@@ -23,6 +23,7 @@ from tseq.sequencer import *  # noqa: F401,F403
 from tseq.controls import *  # noqa: F401,F403
 from tseq.host import *  # noqa: F401,F403
 from tseq.performer import *  # noqa: F401,F403
+from tseq.patchbay import *  # noqa: F401,F403
 from tseq.rack import *  # noqa: F401,F403
 from tseq.dialogs import *  # noqa: F401,F403
 from tseq.app import *  # noqa: F401,F403

@@ -29,6 +29,7 @@ DEFAULT_CONFIG = {
     "midi_port": "Touch-Seq",  # MIDI out: an existing port whose name contains this, else a virtual one
     "projects": str(DATA_HOME / "projects"),  # relative paths are relative to the config file
     "audio_out": "default",  # plugin audio: "default" (follow PipeWire's default) or a sink's node name
+    "patch": [],  # patchbay links: [[out port, in port], ...] (this machine's cables, not the project's)
 }
 
 
@@ -79,8 +80,8 @@ def main(version):
 
     racks = []
 
-    def remember_output(name):  # the audio output belongs to this machine, not to a project
-        cfg["audio_out"] = name
+    def remember(key, value):  # audio output and patchbay cables belong to this machine, not to a project
+        cfg[key] = value
         save_text(cfg_path, json.dumps(cfg, indent=2) + "\n")
 
     def open_project(path):
@@ -89,7 +90,7 @@ def main(version):
         engine = Engine(project, router)
         host = HostPanel(project, router, path.with_suffix(".plugins"),
                          Path.home() / ".cache" / "touch-seq" / "plugins.json", cfg.get("audio_out", "default"),
-                         remember_output)
+                         remember, patch=cfg.get("patch", []))
         racks.append(Rack(project, engine, path, host))
         show(racks[-1])
 

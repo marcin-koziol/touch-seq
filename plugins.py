@@ -298,6 +298,36 @@ def existing_links():
     return links
 
 
+def audio_ports():
+    """Audio ports as (sources, destinations), each a list of (port, node label, port name) with `port` being
+    what pw-link takes ("node:port"). Sources are the ports audio comes out of (an interface's inputs, a
+    plugin's outputs), destinations the ones it goes into. One `pw-dump`; MIDI and video ports are left out
+    and the channel order is kept."""
+    try:
+        dump = json.loads(subprocess.run(["pw-dump"], capture_output=True, text=True, timeout=5).stdout)
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        return [], []
+    nodes = {}
+    for obj in dump:
+        props = (obj.get("info") or {}).get("props") or {}
+        name = props.get("node.name") or props.get("client.name")
+        if name:
+            nodes[obj["id"]] = (name, props.get("node.description") or props.get("node.nick") or name)
+    outs, ins = [], []
+    for obj in dump:
+        info = obj.get("info") or {}
+        props = info.get("props") or {}
+        if obj.get("type") != "PipeWire:Interface:Port" or "audio" not in (props.get("format.dsp") or ""):
+            continue
+        node = nodes.get(props.get("node.id"))
+        if not node:
+            continue
+        item = (props.get("port.id", 0), f"{node[0]}:{props.get('port.name')}", node[1], props.get("port.name", ""))
+        (outs if props.get("port.direction") == "out" else ins).append(item)
+    return ([(port, label, name) for _, port, label, name in sorted(outs, key=lambda i: (i[2].lower(), i[0]))],
+            [(port, label, name) for _, port, label, name in sorted(ins, key=lambda i: (i[2].lower(), i[0]))])
+
+
 class Wiring:
     """Port links made with pw-link, grouped by owner so an owner's links can be replaced at once.
     Runs in worker threads: freshly created JACK ports take a moment to appear in PipeWire, and links

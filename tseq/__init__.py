@@ -10,6 +10,7 @@
     controls    the fader bank module
     host        the plugin host (Carla) module
     performer   the live-play module (pads, keyboard, XY pad)
+    patchbay    the audio patchbay (two columns of ports, tap to link)
     rack        the four modules composed into one window
     dialogs     project chooser and settings
     app         config, startup, project switching

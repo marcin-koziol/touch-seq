@@ -244,8 +244,13 @@ out5 = FakeOut()
 e5 = ts.Engine(pr2, out5)
 class StubHost(ts.Panel):
     host, message = None, "plugin host unavailable (test stub)"
+    patch = []
     def xyfx(self):
         return None
+    def patch_links(self):
+        return list(self.patch)
+    def set_patch(self, links):
+        self.patch = list(links)
     def draw(self, p):
         p.fillRect(self.rect(), ts.QColor(ts.BG))
     def save_states(self):
@@ -753,3 +758,45 @@ assert new.kind == "external" and rkx.seq.sel is new and len(prx.tracks) == 2, (
 assert (OUT / "ext_rack.json").exists() and f'"port":{ts.json.dumps(new.port)}' in (OUT / "ext_rack.json").read_text()
 rkx.grab().save(str(OUT / "rack_external.png"))  # the external header paints (and no slot is offered for it)
 print("external track OK")
+# --- patchbay: the audio graph by hand (an interface's input into its own output, say) ---
+patch = [("/app:out", "/sink:1")]
+def set_patch(links):
+    patch[:] = links
+
+ports = ([("/in:a", "Synth", "capture_1"), ("/in:b", "Synth", "capture_2")],
+         [("/out:x", "Interface", "playback_1"), ("/out:y", "Interface", "playback_2")])
+pb = ts.Patchbay(lambda: list(patch), set_patch, ports=lambda: ports,
+                 existing=lambda: set(patch) | {("/master:1", "/sink:1")})
+assert [p for p, _, _ in pb.sources] == ["/in:a", "/in:b"], "the ports are there when the dialog opens"
+vp = View(pb); vp.grab().save(str(OUT / "patchbay.png"))
+pb.tap("out", "/in:a"); assert pb.src == "/in:a" and pb.dst is None
+pb.tap("in", "/out:x"); assert ("/in:a", "/out:x") in patch and pb.src == "/in:a", "the source stays chosen"
+pb.tap("in", "/out:y"); assert ("/in:a", "/out:y") in patch, "one source, a second destination"
+pb.tap("in", "/out:y"); assert ("/in:a", "/out:y") not in patch, "the same pair again cuts it"
+pb.tap("out", "/in:a"); assert pb.src is None, "tapping the chosen source lets go of it"
+pb.tap("in", "/out:y"); assert pb.dst == "/out:y"     # destination first ...
+pb.tap("out", "/in:b"); assert ("/in:b", "/out:y") in patch and pb.dst is None, "... then a source links them"
+vp.grab()  # repaints with the links marked (● ours, ○ the app's)
+pb.list_ports = lambda: (ports[0][:1], ports[1])  # the device's second input went away
+pb.refresh()
+assert [p for p, _, _ in pb.sources] == ["/in:a"] and pb.src is None, "a chosen port that is gone is dropped"
+print("patchbay OK")
+# links made there are kept with the machine (not the project) and re-wired
+class FakeWiring:
+    def __init__(self):
+        self.calls = []
+    def replace(self, owner, links):
+        self.calls.append((owner, list(links)))
+kept = []
+hosty = type("Host", (), {"patch": [], "wiring": FakeWiring(), "remember": lambda self, k, v: kept.append((k, v))})()
+ts.HostPanel.set_patch(hosty, [("/in:a", "/out:x"), ("/in:a", "/out:y")])
+assert hosty.patch == [("/in:a", "/out:x"), ("/in:a", "/out:y")]
+assert hosty.wiring.calls == [("patchbay", [("/in:a", "/out:x"), ("/in:a", "/out:y")])], hosty.wiring.calls
+assert kept == [("patch", [("/in:a", "/out:x"), ("/in:a", "/out:y")])], kept
+# the rack: PATCHBAY in the toolbar opens it over everything
+btn = next(r for r, a in rkx.rail_buttons if getattr(a, "__name__", "") == "open_patchbay")
+rkx.press(9, btn.center())
+assert rkx.dialog and rkx.dialog[0] == "PATCHBAY", rkx.dialog
+rkx.grab().save(str(OUT / "rack_patchbay.png"))
+rkx.close_dialog()
+print("patchbay in the rack OK")

@@ -37,10 +37,11 @@ class HostPanel(Panel):
     KNOB_COLS, KNOB_ROWS = 5, 3
     LETTERS = "#ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
-    def __init__(self, project, router, state_dir, cache_path, audio_out="default", remember=None, name="Touch-Seq"):
+    def __init__(self, project, router, state_dir, cache_path, audio_out="default", remember=None, name="Touch-Seq",
+                 patch=None):
         super().__init__()
         self.project, self.router, self.state_dir, self.audio_out, self.name = project, router, state_dir, audio_out, name
-        self.remember = remember  # called with a newly chosen audio output, to keep it for next time
+        self.remember = remember  # (key, value) -> None: keep a machine setting (audio output, patchbay links)
         self.selected = lambda: project.tracks[0]  # the track whose chain TRACK shows (the rack: the sequencer's)
         self.select_track = lambda tr: None  # the rack: select a track in the sequencer
         self.choose_port = lambda tr: None  # the rack: choose the MIDI output of an external track
@@ -56,6 +57,8 @@ class HostPanel(Panel):
         self.browser_scroll = 0.0
         self.message = ""
         self.wiring = plugins.Wiring()
+        self.patch = [tuple(p) for p in (patch or [])]  # patchbay links: (out, in), kept with the machine
+        self.wiring.replace("patchbay", self.patch)  # from the last time; heal keeps them alive
         try:
             self.host = plugins.Host(name)
         except (RuntimeError, OSError, ImportError) as e:
@@ -95,7 +98,18 @@ class HostPanel(Panel):
         self.sink = self.current_sink()
         self.rewire()
         if self.remember:
-            self.remember(name)
+            self.remember("audio_out", name)
+
+    # --- patchbay -------------------------------------------------------------
+    def patch_links(self):
+        """The links made in the patchbay; the dialog keeps them and asks for a rewire on every change."""
+        return list(self.patch)
+
+    def set_patch(self, links):
+        self.patch = [tuple(p) for p in links]
+        self.wiring.replace("patchbay", self.patch)  # heals them too, like the app's own wiring
+        if self.remember:
+            self.remember("patch", self.patch)
 
     def watch_output(self):
         """Background: follow the default output (it changes e.g. when headphones are plugged in or out)
