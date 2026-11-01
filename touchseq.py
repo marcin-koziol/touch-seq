@@ -721,6 +721,16 @@ class Panel:
         self.s = 1.0  # UI scale relative to a 1024x600 layout
         self.gestures = {}
         self.hits = []
+        self.stale = False  # changed outside a touch: repaint even though nothing is animating
+
+    def invalidate(self):
+        """Ask for a repaint after a change made without a touch (touches repaint by themselves)."""
+        self.stale = True
+
+    def animating(self):
+        """Is anything in this panel changing on its own? While a gesture is down (a drag, a held knob's
+        progress ring) the UI needs frames; otherwise a repaint has to be asked for."""
+        return bool(self.gestures)
 
     def rect(self):
         return QRectF(0, 0, self.w, self.h)
@@ -1478,6 +1488,11 @@ class Controls(Panel):
                 f = 0.5 + (f - 0.5) * keep
                 self.set_value(i, 0.5 if abs(f - 0.5) < 0.002 else f)
 
+    def animating(self):
+        # a pitch-bend fader springs back for a moment after the finger lifts
+        return super().animating() or any(
+            c.kind == "pb" and self.values[i] != 0.5 for i, c in enumerate(self.project.controls))
+
     def draw(self, p):
         s, g = self.s, 8 * self.s
         p.fillRect(self.rect(), QColor(BG))
@@ -1840,6 +1855,10 @@ class HostPanel(Panel):
             if self.sink_changed:  # Carla calls belong in this (the UI) thread
                 self.sink_changed = False
                 self.rewire()
+
+    def animating(self):
+        # knobs read the plugins' live values: their own LFOs and envelopes move them
+        return super().animating() or bool(self.loaded)
 
     # --- fader links (Controls target "param") ------------------------------------
     def link_plugin(self, link):
@@ -2851,9 +2870,18 @@ class Window(QWidget):
             self.close()
 
     def tick(self):
-        for panel in self.panels + ([self.dialog[2]] if self.dialog else []):
+        panels = self.panels + ([self.dialog[2]] if self.dialog else [])
+        for panel in panels:
             panel.tick()
-        self.update()
+        if self.animating() or any(p.stale for p in panels):
+            for panel in panels:
+                panel.stale = False
+            self.update()
+
+    def animating(self):
+        """Is anything on screen changing by itself? Repainting is expensive (a full 4K frame is a lot of
+        software antialiased drawing), so a still rack - stopped, nothing held - must not repaint at all."""
+        return any(p.animating() for p in self.panels + ([self.dialog[2]] if self.dialog else []))
 
     # --- drawing --------------------------------------------------------
     def paintEvent(self, _):
@@ -3037,6 +3065,10 @@ class Rack(Window):
         # plugin states change inside the plugins (their own UIs too), so they're saved on a clock
         QTimer(self, interval=30000, timeout=host.save_states).start()
 
+    def animating(self):
+        # the playhead, and the blinking borders of queued pattern/scene switches
+        return self.engine.playing or super().animating()
+
     def autosave(self):
         # Runs in the UI thread, which is the only one changing the project structure; the engine
         # only writes Track.pattern, so no lock is needed (and holding it would stall playback).
@@ -3046,6 +3078,7 @@ class Rack(Window):
         if text != self.saved:
             save_text(self.path, text)
             self.saved, self.saved_at = text, time.localtime()
+            self.update()  # the toolbar shows the time of the last save
         e = self.engine
         self.dirty = bool(e.pending) or e.pending_scene is not None  # queued switches change it later
 
