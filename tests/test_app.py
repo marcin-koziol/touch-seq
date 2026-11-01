@@ -776,7 +776,8 @@ pb.tap("in", "/out:y"); assert ("/in:a", "/out:y") not in patch, "the same pair 
 pb.tap("out", "/in:a"); assert pb.src is None, "tapping the chosen source lets go of it"
 pb.tap("in", "/out:y"); assert pb.dst == "/out:y"     # destination first ...
 pb.tap("out", "/in:b"); assert ("/in:b", "/out:y") in patch and pb.dst is None, "... then a source links them"
-vp.grab()  # repaints with the links marked (● ours, ○ the app's)
+vp.grab()  # repaints with the links drawn as cables (● ours, ○ the app's)
+assert "/in:b" in pb.seen["out"] and "/out:y" in pb.seen["in"], "the rows on screen are cable ends"
 pb.list_ports = lambda: (ports[0][:1], ports[1])  # the device's second input went away
 pb.refresh()
 assert [p for p, _, _ in pb.sources] == ["/in:a"] and pb.src is None, "a chosen port that is gone is dropped"

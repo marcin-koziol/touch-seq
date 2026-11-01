@@ -86,11 +86,14 @@ other project. SETTINGS sets the project's key and scale (chord pads, piano roll
 
 ### PATCHBAY — audio routing
 
-Every audio port of the machine, sources on the left and destinations on the right: tap a source and a
-destination to connect them, the same pair again to cut it. That's how a synth plugged into an interface's
-input is heard through that interface's output, or how a plugin's output is sent to another device. The links
-are kept with this machine (config.json, not the project) and re-made when a device comes back; the app's own
-cables — plugin chains and the master output — are shown with a hollow dot and are left to the app.
+Every audio port of the machine, grouped by the device or plugin it belongs to: sources on the left,
+destinations on the right, and a **cable** drawn for every link between the two. Tap a port and then one on
+the other side to patch them, the same pair again to cut it — one source stays chosen, so a 4-channel input is
+patched with a tap per channel. That is how a synth plugged into an interface's input is heard through that
+interface's output, or how a plugin's output is sent to another device. Cables are drawn for the ports on
+screen; the links themselves are kept with this machine (config.json, not the project) and re-made when a
+device comes back. The app's own cables — plugin chains and the master output — are thin and dashed and are
+left to the app.
 
 ## Install
 

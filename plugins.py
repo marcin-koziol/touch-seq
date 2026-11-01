@@ -298,11 +298,23 @@ def existing_links():
     return links
 
 
+CHANNELS = {"FL": 0, "FR": 1, "FC": 2, "LFE": 3}  # then the numbered channels, in order
+
+
+def port_order(name):
+    """Sort key that keeps a device's ports in a natural order: capture_FL, capture_FR, capture_FC, ...,
+    then numbered ones - rather than alphabetically (FC before FL, 10 before 2)."""
+    base, _, channel = name.rpartition("_")
+    if channel.isdigit():
+        return base, 4, int(channel), 0
+    return base, CHANNELS.get(channel, 9), 0, 0
+
+
 def audio_ports():
     """Audio ports as (sources, destinations), each a list of (port, node label, port name) with `port` being
     what pw-link takes ("node:port"). Sources are the ports audio comes out of (an interface's inputs, a
-    plugin's outputs), destinations the ones it goes into. One `pw-dump`; MIDI and video ports are left out
-    and the channel order is kept."""
+    plugin's outputs), destinations the ones it goes into - so a device's ports end up together, in channel
+    order. One `pw-dump`; MIDI and video ports are left out."""
     try:
         dump = json.loads(subprocess.run(["pw-dump"], capture_output=True, text=True, timeout=5).stdout)
     except (OSError, subprocess.TimeoutExpired, ValueError):
@@ -324,8 +336,12 @@ def audio_ports():
             continue
         item = (props.get("port.id", 0), f"{node[0]}:{props.get('port.name')}", node[1], props.get("port.name", ""))
         (outs if props.get("port.direction") == "out" else ins).append(item)
-    return ([(port, label, name) for _, port, label, name in sorted(outs, key=lambda i: (i[2].lower(), i[0]))],
-            [(port, label, name) for _, port, label, name in sorted(ins, key=lambda i: (i[2].lower(), i[0]))])
+
+    def sorted_ports(ports):
+        return [(port, label, name) for _, port, label, name
+                in sorted(ports, key=lambda i: (i[2].lower(), port_order(i[3]), i[0]))]
+
+    return sorted_ports(outs), sorted_ports(ins)
 
 
 class Wiring:
