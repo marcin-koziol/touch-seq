@@ -15,7 +15,8 @@ import plugins
 
 from .model import Bus
 from .constants import (BG, BORDER, BUILTIN_LABELS, CLICK_ACCENT, CLICK_BEAT, CLICK_LABELS, DIM, EQ_LABELS,
-                        MONITOR_LABELS, PALETTE, PANEL, SLOTS, TEXT, WARN, XYFX_LABELS)
+                        INTERNAL_LABELS, MONITOR_LABELS, PALETTE, PANEL, SLOTS, SPACE_LABELS, TEXT, WARN,
+                        XYFX_LABELS)
 from .eq import EqEditor
 from .gestures import Drag, Hold, ScrollOrTap, Slide
 from .ui import Panel, param_color, split
@@ -390,9 +391,19 @@ class HostPanel(Panel):
             self.forget_deleted_tracks()
             if self.xyfx() and self.xy_values().get("bpm") != self.project.bpm:  # repeats follow the tempo
                 self.xy(bpm=self.project.bpm)
+            self.follow_tempo()  # and so does a synced delay
             if self.sink_changed:  # Carla calls belong in this (the UI) thread
                 self.sink_changed = False
                 self.rewire()
+
+    def follow_tempo(self):
+        """Plugins that keep their own tempo (Space's synced delay): give them the project's, when it changes."""
+        for plugin in list(self.loaded.values()):
+            if plugin.ref.label not in SPACE_LABELS:
+                continue
+            prm = next((q for q in plugin.params if q.name.lower() == "bpm"), None)
+            if prm and round(self.host.value(plugin, prm.index)) != self.project.bpm:
+                self.set_param(plugin, prm.index, float(self.project.bpm))
 
     def animating(self):
         # knobs read the plugins' live values: their own LFOs and envelopes move them
@@ -1024,6 +1035,8 @@ class HostPanel(Panel):
         instrument = self.instrument_slot(*self.browser)
 
         def shown(ref):
+            if ref.label in INTERNAL_LABELS:  # the app puts those in place: nothing to add by hand
+                return False
             if self.browser_fmt == "builtin":
                 return ref.label in BUILTIN_LABELS
             return self.browser_fmt in (None, ref.fmt)

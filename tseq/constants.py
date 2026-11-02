@@ -86,5 +86,9 @@ CLICK_BEAT, CLICK_ACCENT = 77, 76  # the metronome plugin's notes: a beat, and t
 CC_LANES = 4  # a pattern takes this many controller lanes at most
 # a delay into a reverb, the two effects a live set always needs (space/ in this repo)
 SPACE_LABELS = {"touchseq.space", "urn:touch-seq:space"}
-# the plugins that ship with the app, whatever their format: the browser's BUILTIN list
+# the plugins that ship with the app, whatever their format
 BUILTIN_LABELS = XYFX_LABELS | MONITOR_LABELS | EQ_LABELS | CLICK_LABELS | SPACE_LABELS
+# the ones the app puts in place itself - the monitor in a bare audio track, the click between master and
+# output: not for the browser, there is nothing to add by hand. XYFX is not one of them: it is an effect like
+# any other, and on the master it is what PLAY-12's XY pad drives
+INTERNAL_LABELS = MONITOR_LABELS | CLICK_LABELS

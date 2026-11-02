@@ -19,9 +19,15 @@ public:
     float size = 0.55f;          // 0 small room .. 1 long hall
     float damp = 0.4f;           // 0 bright .. 1 dark
     float delayAmount = 0.35f;   // how much of the delay
-    float delayMs = 375.0f;      // 10 .. 2000 ms
+    float delayMs = 375.0f;      // 10 .. 2000 ms, when the delay runs free
     float feedback = 0.35f;      // delay repeats, 0 .. 0.95
     float tone = 0.55f;          // the delay's lowpass: 0 dark .. 1 bright
+    bool sync = false;           // the delay time follows the tempo instead of the Time knob
+    int noteDivision = 4;        // 0 1/32, 1 1/16T, 2 1/16, 3 1/8T, 4 1/8, 5 1/4T, 6 1/4, 7 1/2
+    float bpm = 120.0f;          // 20 .. 300, kept in step with the project by Touch-Seq
+
+    // How long the delay is, in seconds (what the delay line is actually running at).
+    float delaySeconds() const { return float(delaySamples) / rate; }
 
     void prepare(double sampleRate) {
         rate = sampleRate > 1000.0 ? float(sampleRate) : 48000.0f;
@@ -56,7 +62,15 @@ public:
         // the delay's lowpass: a one-pole, dark to bright
         const float t = std::max(0.0f, std::min(1.0f, tone));
         toneCoefficient = 0.02f + t * t * 0.95f;
-        const float ms = std::max(10.0f, std::min(2000.0f, delayMs));
+        // 1/32 .. 1/2 of a beat, triplets included; synced, the tempo decides and Time is left alone
+        static const float beats[8] = {0.125f, 1.0f / 6.0f, 0.25f, 1.0f / 3.0f, 0.5f, 2.0f / 3.0f, 1.0f, 2.0f};
+        float ms = delayMs;
+        if (sync) {
+            const int d = std::max(0, std::min(7, noteDivision));
+            const float tempo = std::max(20.0f, std::min(300.0f, bpm));
+            ms = 60000.0f / tempo * beats[d];
+        }
+        ms = std::max(10.0f, std::min(2000.0f, ms));  // the line is two seconds long: longer is clamped
         delaySamples = std::min(delaySize - 4, int(ms * rate / 1000.0f));
         delayFeedback = std::max(0.0f, std::min(0.95f, feedback));
     }

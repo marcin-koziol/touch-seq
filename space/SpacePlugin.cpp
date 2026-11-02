@@ -5,9 +5,15 @@
 
 START_NAMESPACE_DISTRHO
 
+namespace {
+ParameterEnumerationValue kNoteValues[] = {{0.0f, "1/32"}, {1.0f, "1/16T"}, {2.0f, "1/16"}, {3.0f, "1/8T"},
+                                           {4.0f, "1/8"}, {5.0f, "1/4T"}, {6.0f, "1/4"}, {7.0f, "1/2"}};
+}  // namespace
+
 class SpacePlugin : public Plugin {
 public:
-    enum Param { kMix, kReverb, kSize, kDamp, kDelay, kTime, kFeedback, kTone, kParamCount };
+    enum Param { kMix, kReverb, kSize, kDamp, kDelay, kTime, kFeedback, kTone, kSync, kNote, kBpm, kParamCount };
+    static constexpr int kNotes = 8;
 
     SpacePlugin() : Plugin(kParamCount, 0, 0) {
         core.prepare(getSampleRate());
@@ -42,6 +48,27 @@ protected:
             p.ranges = ParameterRanges(0.35f, 0.0f, 0.95f);
             break;
         case kTone: p.name = "Tone"; p.symbol = "tone"; p.ranges = ParameterRanges(0.55f, 0.0f, 1.0f); break;
+        case kSync:
+            p.name = "Sync";
+            p.symbol = "sync";
+            p.hints |= kParameterIsBoolean;
+            p.ranges = ParameterRanges(0.0f, 0.0f, 1.0f);
+            break;
+        case kNote:
+            p.name = "Note";
+            p.symbol = "note";
+            p.hints |= kParameterIsInteger;
+            p.ranges = ParameterRanges(4.0f, 0.0f, float(kNotes - 1));
+            p.enumValues.count = kNotes;
+            p.enumValues.restrictedMode = true;
+            p.enumValues.values = kNoteValues;
+            p.enumValues.deleteLater = false;
+            break;
+        case kBpm:
+            p.name = "Bpm";  // kept in step with the project by Touch-Seq: the delay follows the tempo
+            p.symbol = "bpm";
+            p.ranges = ParameterRanges(120.0f, 20.0f, 300.0f);
+            break;
         }
     }
 
@@ -54,7 +81,10 @@ protected:
         case kDelay: return core.delayAmount;
         case kTime: return core.delayMs;
         case kFeedback: return core.feedback;
-        default: return core.tone;
+        case kTone: return core.tone;
+        case kSync: return core.sync ? 1.0f : 0.0f;
+        case kNote: return float(core.noteDivision);
+        default: return core.bpm;
         }
     }
 
@@ -67,7 +97,10 @@ protected:
         case kDelay: core.delayAmount = value; return;
         case kTime: core.delayMs = value; break;
         case kFeedback: core.feedback = value; break;
-        default: core.tone = value; break;
+        case kTone: core.tone = value; break;
+        case kSync: core.sync = value > 0.5f; break;
+        case kNote: core.noteDivision = int(value + 0.5f); break;
+        default: core.bpm = value; break;
         }
         core.update();  // the ones that shape the delay line or the tail
     }

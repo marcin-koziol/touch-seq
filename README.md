@@ -107,9 +107,14 @@ the first free name (*Touch-Seq 2*, …) and says so in HOST-4's status line: bo
   plays a click for every beat note the sequencer sends it
 - **Space** is our delay-and-reverb in one (`space/`): a stereo delay with a lowpass in its loop and a
   ping-pong cross-feed, into a reverb (eight damped combs, four allpasses a side), with Mix, Reverb, Size,
-  Damp, Delay, Time, Feedback and Tone as knobs — the two effects a live set always needs, without hunting
-  for a plugin. Our own plugins (XYFX, Monitor, EQ, Click, Space) are also the browser's **BUILTIN** list, and
-  come first in **ALL**
+  Damp, Delay, Time, Feedback and Tone as knobs. **Sync** + **Note** make the delay follow the tempo
+  (1/32 … 1/2, triplets too) — and since the project's tempo follows the keyboard's clock, that is a
+  MIDI-synced delay; the two effects a live set always needs, without hunting
+  for a plugin. **BUILTIN** in the browser lists our own (XYFX, EQ, Space) first, and they come first in
+  **ALL**; the two the app puts in place itself — the monitor and the click — are not offered there, because
+  there is nothing to add by hand
+
+![Space: the delay and reverb in one, its knobs in HOST-4](docs/screenshots/space.png)
 - **effects buses**: a track's chain can go into a bus instead of straight into the master — **→ MASTER** under
   the chain cycles through the buses, **+ BUS** makes a new one. A bus has its own 3 slots and its own level,
   so one reverb can process just the two of five tracks you route into it; buses are their own columns in the

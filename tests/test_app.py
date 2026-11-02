@@ -1953,17 +1953,24 @@ def fake_ref(name, label, fmt="clap", instrument=False, effect=True):
 
 fb = types.SimpleNamespace(
     catalog=types.SimpleNamespace(plugins=[fake_ref("Zyn", "zyn"), fake_ref("Touch-Seq EQ", "touchseq.eq"),
+                                           fake_ref("Touch-Seq Monitor", "touchseq.monitor"),
+                                           fake_ref("Touch-Seq Click", "touchseq.click"),
+                                           fake_ref("Touch-Seq XYFX", "touchseq.xyfx"),
                                            fake_ref("Reaverb", "rev", fmt="lv2")]),
     browser=("strip", 0), browser_fmt="builtin", _builtin=[], instrument_slot=lambda strip, k: False)
 fb.builtin_plugins = lambda: fb._builtin  # the real one caches what it finds on disk
 items = ts.HostPanel.browser_items(fb)
-assert [r.name for r in items] == ["Touch-Seq EQ"], [r.name for r in items]
+assert [r.name for r in items] == ["Touch-Seq EQ", "Touch-Seq XYFX"], [r.name for r in items]
 fb.browser_fmt = None
-assert [r.name for r in ts.HostPanel.browser_items(fb)] == ["Touch-Seq EQ", "Reaverb", "Zyn"]
+assert [r.name for r in ts.HostPanel.browser_items(fb)] == ["Touch-Seq EQ", "Touch-Seq XYFX", "Reaverb", "Zyn"]
 fb.browser_fmt = "lv2"
 assert [r.name for r in ts.HostPanel.browser_items(fb)] == ["Reaverb"]
+# the two the app puts in place (monitor, click) are not offered; XYFX is an ordinary effect
+fb.browser_fmt = None
+names = [r.name for r in ts.HostPanel.browser_items(fb)]
+assert names == ["Touch-Seq EQ", "Touch-Seq XYFX", "Reaverb", "Zyn"], names
 # one of ours that a stale catalog does not know about is still offered
 fb.browser_fmt = "builtin"
 fb._builtin = [fake_ref("Touch-Seq Space", "touchseq.space")]
-assert [r.name for r in ts.HostPanel.browser_items(fb)] == ["Touch-Seq EQ", "Touch-Seq Space"]
+assert [r.name for r in ts.HostPanel.browser_items(fb)] == ["Touch-Seq EQ", "Touch-Seq Space", "Touch-Seq XYFX"]
 print("builtin browser OK")

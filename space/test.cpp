@@ -51,6 +51,23 @@ int main() {
     assert(early < 1e-6f);  // nothing before the delay time
     std::puts("delay: silent until its time");
 
+    // synced, the tempo and the note decide the time (and Time is left alone)
+    core.sync = true;
+    core.bpm = 120.0f;
+    core.noteDivision = 4;  // 1/8
+    core.update();
+    assert(std::fabs(core.delaySeconds() - 0.25f) < 0.001f);
+    core.bpm = 90.0f;
+    core.update();
+    assert(std::fabs(core.delaySeconds() - 0.3333f) < 0.002f);
+    core.noteDivision = 7;  // 1/2 at 90: 1.33 s
+    core.update();
+    assert(std::fabs(core.delaySeconds() - 1.3333f) < 0.005f);
+    std::printf("sync: 1/8 at 90 is %.0f ms\n", core.delaySeconds() * 1000.0f);
+    core.sync = false;
+    core.update();
+    assert(std::fabs(core.delaySeconds() - 0.1f) < 0.001f);  // back to the Time knob (100 ms)
+
     // the tail: an impulse into the reverb rings for a while and is gone after a few seconds
     core.reset();
     core.mix = 1.0f;
