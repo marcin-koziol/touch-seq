@@ -471,16 +471,18 @@ class Window(QWidget):
         p.setFont(f)
         p.setPen(QColor("#e6e9ee"))
         if icon:
-            area = QRectF(r.left() + r.width() * 0.16, r.top() + r.height() * 0.10, r.width() * 0.68,
-                          r.height() * (0.62 if sub else 0.80))
+            area = (QRectF(r.left() + r.width() * 0.20, r.top() + r.height() * 0.08, r.width() * 0.60,
+                           r.height() * 0.52) if sub else  # room for the badge under it
+                    QRectF(r.left() + r.width() * 0.18, r.top() + r.height() * 0.18, r.width() * 0.64,
+                           r.height() * 0.64))
             glyph(p, area, icon, color if on else "#c8cdd6", lit=lit)
-            if sub:  # a badge under the icon (COUNT: how many bars will count in)
-                f.setPixelSize(round(max(10, size - 5) * k))
+            if sub:  # a small badge under the icon (COUNT: how many bars will count in)
+                f.setPixelSize(round(10 * k))
                 f.setBold(True)
                 p.setFont(f)
                 p.setPen(QColor(color if on else "#8a929e"))
-                p.drawText(QRectF(r.left(), r.top() + r.height() * 0.66, r.width(), r.height() * 0.34),
-                           Qt.AlignCenter, sub)
+                p.drawText(QRectF(r.left() + r.width() * 0.1, r.top() + r.height() * 0.58,
+                                  r.width() * 0.8, r.height() * 0.36), Qt.AlignCenter, sub)
         elif sub:
             p.drawText(r.adjusted(0, 0, 0, -r.height() * 0.32), Qt.AlignCenter, label)
             f.setPixelSize(round(max(9, size - 6) * k))
