@@ -1126,7 +1126,7 @@ class Sequencer(Panel):
         self.button(p, plus, "+ CC", self.open_cc_pick)
         # the roll up (when hidden) or down (to hide it): the lane gets the whole panel either way
         roll_b = QRectF(tabs.right() - 60 * s, tabs.top(), 56 * s, tabs.height())
-        self.button(p, roll_b, "▲" if self.lane_only else "▼", lambda: setattr(self, "lane_only", not self.lane_only),
+        self.button(p, roll_b, "▼" if self.lane_only else "▲", lambda: setattr(self, "lane_only", not self.lane_only),
                     on=self.lane_only)
         if self.param == "cc":
             self.draw_cc_lane(p, bars, tr, self.cc_num, color)
