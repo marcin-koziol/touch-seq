@@ -132,6 +132,7 @@ class Sequencer(Panel):
         self.scroll = 0.0
         self.song_sel = 0  # the song step the panel below shows
         self.song_scroll = 0.0
+        self.song_track_scroll = 0.0  # the step's tracks: they scroll, they never squeeze
         self.song_pick = None  # (step, track number) while choosing a pattern for it
         self.master_fx = lambda: False  # the rack: is XYFX on the master (adds a MASTER row)
         self.master_focus = False  # the MASTER row is selected (PLAY-12 shows the XY pad)
@@ -481,7 +482,7 @@ class Sequencer(Panel):
                      PLAY if playing else "#98a2b3" if chosen else BORDER, 2 if playing or chosen else 1.5,
                      radius=8)
             num, chips, bars_b, reps_b, close = split(row.adjusted(4 * s, 4 * s, -4 * s, -4 * s),
-                                                      [38 * s, 0, 86 * s, 50 * s, 30 * s], 6 * s)
+                                                      [38 * s, 0, 86 * s, 50 * s, 34 * s], 6 * s)
             self.text(p, num, str(n + 1), PLAY if playing else TEXT, 19, bold=True)
             if playing:  # how far into the step the playhead is
                 done = bar / max(1, step.span)
@@ -504,7 +505,15 @@ class Sequencer(Panel):
                           DIM, 10)
             self.button(p, bars_b, f"{step.bars} bars", None)
             self.button(p, reps_b, f"×{step.repeats}", None, on=step.repeats > 1)
-            self.button(p, close, "✕", None, color=WARN)
+            self.box(p, close, PANEL, BORDER, radius=6)
+            self.text(p, close.adjusted(0, 0, 0, -close.height() * 0.26), "✕", WARN, 15, bold=True)
+            self.text(p, close.adjusted(0, close.height() * 0.42, 0, 0), "hold", DIM, 9)
+            held = next((g for g in self.gestures.values() if isinstance(g, Hold) and g.key == ("song", n)), None)
+            if held:  # filling up as it is held: let go and nothing happens
+                p.save()
+                p.setClipRect(QRectF(close.left(), close.top(), close.width() * held.progress(), close.height()))
+                self.box(p, close, QColor(255, 93, 93, 150), None, radius=6)
+                p.restore()
             self.region(row.intersected(rows), lambda pos, n=n: ScrollOrTap(
                 pos, lambda: self.song_scroll, lambda v: setattr(self, "song_scroll", v),
                 lambda: self.select_song_step(n)))
@@ -531,10 +540,15 @@ class Sequencer(Panel):
             return
         step = steps[n]
         tracks = [t for t in pr.tracks if not t.audio]
-        top = r.top() + 48 * s
-        rh = min(70 * s, (r.bottom() - top - 58 * s) / max(1, len(tracks)))
+        area = QRectF(r.left(), r.top() + 48 * s, r.width(), r.bottom() - r.top() - 48 * s - 50 * s)
+        rh = 64 * s
+        self.song_track_scroll = max(0.0, min(self.song_track_scroll, len(tracks) * rh - area.height()))
+        p.save()
+        p.setClipRect(area)
         for j, tr in enumerate(tracks):
-            row = QRectF(r.left(), top + j * rh, r.width(), rh - 6 * s)
+            row = QRectF(area.left(), area.top() + j * rh - self.song_track_scroll, area.width(), rh - 6 * s)
+            if row.bottom() < area.top() or row.top() > area.bottom():
+                continue
             color = self.color(tr)
             self.box(p, row, PANEL, BORDER, 1.5, radius=8)
             self.box(p, QRectF(row.left() + 4 * s, row.top() + 10 * s, 4 * s, row.height() - 20 * s), color, None,
@@ -544,7 +558,12 @@ class Sequencer(Panel):
             pick = QRectF(row.left() + 74 * s, row.top() + 6 * s, row.width() - 82 * s, row.height() - 12 * s)
             pat = step.patterns.get(tr.number)
             self.button(p, pick, f"P{pat + 1}" if pat is not None else "— keep previous", None, sub="tap: pick")
-            self.on_press(pick, lambda n=n, number=tr.number: self.open_song_pick(n, number))
+            self.region(row.intersected(area), lambda pos: ScrollOrTap(  # the list scrolls, it does not squeeze
+                pos, lambda: self.song_track_scroll, lambda v: setattr(self, "song_track_scroll", v), lambda: None))
+            self.region(pick.intersected(area), lambda pos, n=n, number=tr.number: ScrollOrTap(
+                pos, lambda: self.song_track_scroll, lambda v: setattr(self, "song_track_scroll", v),
+                lambda: self.open_song_pick(n, number)))
+        p.restore()
         self.text(p, QRectF(r.left(), r.bottom() - 46 * s, r.width(), 20 * s),
                   "tap a step: play it from the next bar · tap bars/×repeats: change · hold ✕: delete", DIM, 11,
                   Qt.AlignLeft | Qt.AlignVCenter, elide=True)
