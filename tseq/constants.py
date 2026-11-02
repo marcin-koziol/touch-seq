@@ -24,7 +24,7 @@ STEPS_PER_BAR = 16
 BPM_MIN, BPM_MAX = 30, 300
 
 
-MAX_GATE, GATE_RES = 16.0, 0.125  # gate in steps: up to a bar long, stretched in 1/8-step increments
+MAX_GATE, GATE_RES = float(MAX_STEPS), 0.125  # gate in steps: up to the longest pattern, in 1/8-step steps
 
 
 MOUSE_ID = -1  # pseudo touch id for desktop testing with a mouse

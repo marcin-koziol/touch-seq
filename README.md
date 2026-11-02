@@ -35,8 +35,9 @@ while there is something unsaved (the time next to it is the last save of anythi
   are icons; a line, then the metronome's **CLICK**, the **COUNT**-in of 0/1/2 bars — the count-in plays its
   clicks first and the pattern starts on the downbeat after them — and the **BPM**, which opens the tempo)
 - **GRID** shows all tracks; **EDIT** opens the selected one:
-  - melody: a **polyphonic piano roll** with a velocity/gate lane; notes can be stretched over several steps;
-    rows outside the project's scale are dimmed
+  - melody: a **polyphonic piano roll** with a velocity/gate lane; notes can be stretched over several steps
+    (as long as the pattern — a 64-step pattern holds a four-bar pad) and are recorded as long as you hold
+    them; rows outside the project's scale are dimmed
   - drums: a voice × step matrix, voices in fixed colors (kick red, snare orange, hats yellow, …)
   - external MIDI: the same piano roll, but the track has **no plugins**: its notes, velocity, gate and the
     faders go straight out to the chosen hardware output (and nowhere else), and its header shows the port

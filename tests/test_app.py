@@ -1531,7 +1531,7 @@ time.sleep(0.5)  # ~20 steps: over the bar line, where the old code wrapped to 4
 phh.record_end(prh.tracks[0], take)
 step = prh.tracks[0].current.lanes[60][take[1]]
 print("held over the bar line:", round(step.gate, 3), "steps")
-assert step.gate == ts.MAX_GATE, step.gate  # a whole bar, not the remainder of the wrap
+assert step.gate == prh.tracks[0].current.length, step.gate  # the whole bar, not the remainder of the wrap
 ehh.stop(); phh.mode = None; phh.tick()
 print("long hold OK")
 
@@ -1828,3 +1828,40 @@ g2.release(QPointF(0, 0))
 assert [st.patterns[1] for st in prd2.song] == [order[0], order[2], order[1]], "and nothing moved"
 ed2.close()
 print("drag reorder OK")
+
+# --- a held note may last bars, up to the length of the pattern ---------------------------
+prg = ts.Project(bpm=600, tracks=[ts.Track("melody", 1, 1)])  # 600 bpm: a step is 25 ms
+trg = prg.tracks[0]
+trg.current.length = 64  # four bars
+egh = ts.Engine(prg, FakeOut()); sqg = ts.Sequencer(prg, egh); pg = ts.Performer(prg, egh, sqg)
+sqg.sel = trg
+pg.mode = "rec"
+egh.start(); pg.tick()
+time.sleep(0.2)
+take = pg.record_start(trg, [60], 100)
+time.sleep(64 * egh.step_len)  # hold it over four bars
+pg.record_end(trg, take)
+four = [st.gate for lane in trg.current.lanes.values() for st in lane if st.on]
+print("held four bars ->", four)
+assert four and four[0] >= 60, four  # the whole pattern, not one bar
+egh.stop(); pg.mode = None; pg.tick(); egh.close()
+# in a 16-step pattern the same hold is the whole pattern, not more
+prg.tracks[0].current.length = 16
+egh2 = ts.Engine(prg, FakeOut()); sqg2 = ts.Sequencer(prg, egh2); pg2 = ts.Performer(prg, egh2, sqg2)
+sqg2.sel = trg
+pg2.mode = "rec"
+egh2.start(); pg2.tick()
+time.sleep(0.1)
+take2 = pg2.record_start(trg, [62], 100)
+time.sleep(40 * egh2.step_len)
+pg2.record_end(trg, take2)
+short = [st.gate for lane in trg.current.lanes.values() for st in lane if st.on]
+assert short and short[-1] == 16, short
+egh2.stop(); pg2.mode = None; pg2.tick(); egh2.close()
+# and the roll lets a note grow to the end of the pattern (but not over the next note of its pitch)
+lane = trg.current.lane(70)
+lane[0].on = True
+assert sqg2.room(trg.current, lane, 0) == 16, sqg2.room(trg.current, lane, 0)
+lane[8].on = True
+assert sqg2.room(trg.current, lane, 0) == 8, "up to the next note of the same pitch"
+print("long notes OK")

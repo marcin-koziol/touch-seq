@@ -322,12 +322,12 @@ class Performer(Panel):
         pat, i, start, lanes = take
         pos = self.engine.beats()  # not the track's own position: that wraps with the pattern
         held = pos - start if pos is not None and start is not None else 1.0
-        gate = max(GATE_RES, min(MAX_GATE, round(held / GATE_RES) * GATE_RES))
+        gate = max(GATE_RES, min(MAX_GATE, pat.length, round(held / GATE_RES) * GATE_RES))  # never past the end
         for k in lanes:
             lane = pat.lane(k)
             lane[i].gate = gate
             if not tr.drum:
-                self.seq.fit(lane, i)
+                self.seq.fit(pat, lane, i)
             self.engine.rec_fresh.discard((k, i))  # the key is up: the pattern plays it from now on
         if self.engine.rec.get(tr) and not tr.drum:  # REC replaces the step played - only that step
             for k, lane in list(pat.lanes.items()):

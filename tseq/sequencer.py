@@ -71,7 +71,7 @@ class Roll(Gesture):
         if self.axis == "x":
             lane = self.pattern.lane(n)
             gate = self.gate0 + self.step_pos(pos) - self.step_pos(self.p0)
-            lane[i].gate = max(GATE_RES, min(self.ui.room(lane, i), round(gate / GATE_RES) * GATE_RES))
+            lane[i].gate = max(GATE_RES, min(self.ui.room(self.pattern, lane, i), round(gate / GATE_RES) * GATE_RES))
             st = lane[i]
             self.tr.last = copy.copy(st)
         elif self.pitch_at(pos) != n:
@@ -937,14 +937,15 @@ class Sequencer(Panel):
         self.roll_bases[tr] = max(0, min(128 - self.roll_rows, round(self.roll_base(tr) + delta)))
 
     @staticmethod
-    def room(lane, i):
-        """How long a note starting at step i may be: up to the next note of the same pitch."""
-        return next((j - i for j in range(i + 1, MAX_STEPS) if lane[j].on), MAX_GATE)
+    def room(pat, lane, i):
+        """How long a note starting at step i may be: up to the next note of the same pitch, and never longer
+        than the pattern itself (a 64-step pattern takes a 64-step note)."""
+        return min(pat.length, next((j - i for j in range(i + 1, MAX_STEPS) if lane[j].on), MAX_GATE))
 
-    def fit(self, lane, i):
+    def fit(self, pat, lane, i):
         """Notes of one pitch don't overlap: the note at step i ends where the next one starts, and an
         earlier note running into it ends at step i."""
-        lane[i].gate = min(lane[i].gate, self.room(lane, i))
+        lane[i].gate = min(lane[i].gate, self.room(pat, lane, i))
         prev = next((j for j in range(i - 1, -1, -1) if lane[j].on), None)
         if prev is not None and prev + lane[prev].gate > i:
             lane[prev].gate = i - prev
@@ -954,7 +955,7 @@ class Sequencer(Panel):
         lane = pat.lane(n)
         if not lane[i].on:
             self.set_step(tr, lane[i], True)
-            self.fit(lane, i)
+            self.fit(pat, lane, i)
             self.engine.preview(tr, n)
         tr.last_note = n
 
@@ -962,7 +963,7 @@ class Sequencer(Panel):
         src, lane = pat.lane(n)[i], pat.lane(to)
         lane[i].on, lane[i].vel, lane[i].gate = True, src.vel, src.gate
         src.on = False
-        self.fit(lane, i)
+        self.fit(pat, lane, i)
         tr.last_note = to
         self.engine.preview(tr, to)
 
@@ -977,6 +978,7 @@ class Sequencer(Panel):
         self.scroll_roll(tr, 0)  # clamp to the current number of rows
         base = self.roll_base(tr)
         cells = self.cells(grid)
+        page0 = self.page * 16
 
         def row_top(n):
             return roll.top() + (base + rows - 1 - n) * rh
@@ -1004,6 +1006,18 @@ class Sequencer(Panel):
             if n % 12 == 0:  # octave boundary
                 p.fillRect(QRectF(grid.left(), y + rh - 1, grid.width(), 1.5 * s), QColor("#3a4252"))
 
+        # a note that began on an earlier page and still runs through this one: its tail, from the left edge
+        for n, lane in pat.lanes.items():
+            if not base <= n < base + rows:
+                continue
+            j = next((j for j in range(page0 - 1, max(-1, page0 - int(MAX_GATE) - 1), -1)
+                      if lane[j].on and j + lane[j].gate > page0), None)
+            if j is None:
+                continue
+            end = self.step_x(cells, min(len(cells), j + lane[j].gate - page0), grid.right())
+            fill = QColor(color)
+            fill.setAlpha(round(110 + 145 * lane[j].vel / 127))
+            self.box(p, QRectF(grid.left(), row_top(n) + 1, end - grid.left(), rh - 2), fill, None, 2, radius=4)
         for k, c in enumerate(cells):
             i = self.page * 16 + k
             if i == head:
@@ -1028,7 +1042,6 @@ class Sequencer(Panel):
         self.region(keys, lambda pos: ScrollOrTap(pos, lambda: self.roll_base(tr),
                                                    lambda v: self.scroll_roll(tr, v - self.roll_base(tr)),
                                                    lambda: self.engine.preview(tr, pitch_at(pos)), -rh))
-        page0 = self.page * 16
 
         def note_at(i, n):
             """Step on this page where the note of pitch n sounding at step i starts (its head or tail)."""
