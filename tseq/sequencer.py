@@ -1122,8 +1122,9 @@ class Sequencer(Panel):
             r = QRectF(tabs.left() + j * (tw + 4 * s), tabs.top(), tw, tabs.height())
             self.button(p, r, text, lambda kind=kind, number=number: self.select_lane(kind, number),
                         on=self.param == kind and (kind != "cc" or self.cc_num == number))
-        plus = QRectF(tabs.left() + len(entries) * (tw + 4 * s), tabs.top(), 58 * s, tabs.height())
-        self.button(p, plus, "+ CC", self.open_cc_pick)
+        # apart from the lanes, in grey: it adds one, it is not one
+        plus = QRectF(tabs.left() + len(entries) * (tw + 4 * s) + 14 * s, tabs.top(), 58 * s, tabs.height())
+        self.button(p, plus, "+ CC", self.open_cc_pick, color="#98a2b3")
         # the roll up (when hidden) or down (to hide it): the lane gets the whole panel either way
         roll_b = QRectF(tabs.right() - 60 * s, tabs.top(), 56 * s, tabs.height())
         self.button(p, roll_b, "▼" if self.lane_only else "▲", lambda: setattr(self, "lane_only", not self.lane_only),
@@ -1199,6 +1200,14 @@ class Sequencer(Panel):
                                   bars.bottom() - 2 * s - (bars.height() - 4 * s) * (value / 127) - 3.5 * s,
                                   7 * s, 7 * s)
                     self.box(p, dots, "#ffffff", None, radius=3.5)
+            # the value coming into this page (from the bar before, or the end of the pattern): hollow, so it
+            # is not taken for a point placed here
+            if not any(abs(pos - self.page * 16) < 0.01 for pos in points):
+                value = pat.cc_at(number, self.page * 16)
+                if value is not None:
+                    y = bars.bottom() - 2 * s - (bars.height() - 4 * s) * (value / 127)
+                    self.box(p, QRectF(bars.left() + 1.5 * s, y - 3 * s, 6 * s, 6 * s), QColor(0, 0, 0, 0),
+                             "#98a2b3", 1.6, radius=3)
         self.region(bars, lambda pos: CcDraw(self, tr, bars, number, pos))
 
     COMMON_CCS = ((1, "mod"), (2, "breath"), (7, "volume"), (10, "pan"), (11, "expression"), (64, "sustain"),
