@@ -155,6 +155,9 @@ class Engine:
         self.rec = {}  # Track -> replace (bool): the tracks recording live playing into them
         self.rec_fresh = set()  # (lane, step) a held take is sounding: the pattern leaves it to the fingers
         self.rec_taken = set()  # (lane, step) recorded since recording started: REC doesn't erase them
+        self.song_step = None  # the song step playing (None: not started)
+        self.song_at = 0  # the bar that step began at
+        self.song_jump = None  # a step asked for: taken at the next bar
         self.clicker = Clicker()  # the metronome's tick (silent until it is switched on)
         self.click_tap = None  # the click plugin: (accent) -> None, inside the audio graph; None: the stream
         self.counting = False  # the count-in before the first bar
@@ -191,6 +194,8 @@ class Engine:
     def step(self, t):
         self.step_index = self.ticks // TICKS_PER_STEP
         if self.step_index % STEPS_PER_BAR == 0:
+            if self.project.song_on and self.project.song:
+                self.song_tick(self.step_index // STEPS_PER_BAR)  # the arrangement decides first
             self.apply_pending()
         step_len = TICKS_PER_STEP * 60 / (self.project.bpm * PPQN)
         self.step_time, self.step_len = t, step_len
@@ -266,6 +271,7 @@ class Engine:
     def begin(self, first=False):
         """The pattern itself: called by the count-in when its last beat is done (its last click is the
         downbeat), or straight from `start`."""
+        self.song_step, self.song_at, self.song_jump = None, 0, None  # a song starts at its first step
         self.playing, self.ticks, self.step_index = True, 0, -1
         self.pos.clear()
         self.playhead.clear()
@@ -314,6 +320,7 @@ class Engine:
                 self.clicker.flush()
                 return
             self.playing = False
+            self.song_step, self.song_at, self.song_jump = None, 0, None
             self.clicker.flush()  # a beat queued for a moment from now must not sound after a stop
             self.out.send_message([0xFC])
             for key in list(self.sounding):
@@ -363,6 +370,55 @@ class Engine:
     def preview(self, tr, note):
         with self.lock:
             self.note_on(tr, note, 100, time.perf_counter() + 0.15)
+
+    # --- the song ---------------------------------------------------------
+    def queue_song_step(self, i):
+        """Jump to a song step at the next bar (a tap on it while the song plays)."""
+        with self.lock:
+            self.song_jump = i
+
+    def song_position(self):
+        """(step index, bars into it) while the song plays, else (None, 0)."""
+        with self.lock:
+            if self.song_step is None or not self.playing:
+                return None, 0
+            return self.song_step, max(0, self.step_index // STEPS_PER_BAR - self.song_at)
+
+    def song_tick(self, bar):
+        """At every bar: move on when the step's bars are done, and hand the tracks their patterns for the step
+        that starts now. The song is a list of steps above the patterns - see SongStep."""
+        steps = self.project.song
+        if not steps:
+            self.song_step = None
+            return
+        jump, self.song_jump = self.song_jump, None
+        if jump is not None:
+            self.song_start(jump, bar)
+            return
+        if self.song_step is None or self.song_step >= len(steps):
+            self.song_start(0, bar)
+            return
+        if bar - self.song_at >= steps[self.song_step].span:
+            nxt = self.song_step + 1
+            if nxt >= len(steps):
+                if not self.project.song_loop:
+                    return  # the last step goes on until it is stopped
+                nxt = 0
+            self.song_start(nxt, bar)
+
+    def song_start(self, i, bar):
+        """Begin a song step: the tracks it names take its patterns, the others keep what they were playing."""
+        steps = self.project.song
+        if not steps:
+            return
+        i = max(0, min(len(steps) - 1, int(i)))
+        self.song_step, self.song_at = i, bar
+        for tr in self.project.tracks:
+            pat = steps[i].patterns.get(tr.number)
+            if pat is None or not 0 <= pat < len(tr.patterns):
+                continue  # "keep previous" (or a pattern that is not there any more)
+            self.pending.pop(tr, None)  # the song decides here, not a queued tap
+            self.set_pattern(tr, pat)
 
     def queue_pattern(self, tr, p):
         with self.lock:

@@ -62,6 +62,20 @@ def load_strip(d):
     return Strip([PluginRef(**r) if r else None for r in d["slots"]], d["volume"], d["mute"])
 
 
+@dataclass(eq=False)
+class SongStep:
+    """One step of a song: how long it lasts, and which pattern each track plays in it. A track left out keeps
+    the pattern it had, so a step can change just one part of the music."""
+    bars: int = 4  # 1..16 bars
+    repeats: int = 1  # 1..8: the whole step again
+    patterns: dict = field(default_factory=dict)  # track number -> pattern index
+
+    @property
+    def span(self):
+        """How many bars the step lasts, repeats and all."""
+        return max(1, self.bars) * max(1, self.repeats)
+
+
 @dataclass(eq=False)  # identity hash: tracks are dict keys in the engine
 class Track:
     kind: str = "melody"  # "melody", "drum", "external" (MIDI to hardware) or "audio" (an input port)
@@ -170,6 +184,9 @@ class Project:
     buses: list = field(default_factory=list)  # effects buses between the tracks and the master
     click: bool = False  # the metronome: a tick on every beat while playing
     count_in: int = 0  # bars of clicks before the pattern starts (0-2)
+    song: list = field(default_factory=list)  # SongStep list: the arrangement above the patterns
+    song_on: bool = False  # the transport follows the song instead of the patterns playing
+    song_loop: bool = True  # back to the first step at the end, or stay on the last
 
     def in_scale(self, note):
         return (note - self.key) % 12 in SCALES[self.scale]
@@ -195,7 +212,10 @@ def dump_project(pr):
         for t in pr.tracks], "controls": [astuple(c) for c in pr.controls],
         "master": dump_strip(pr.master),
         "buses": [{"number": b.number, "strip": dump_strip(b.strip)} for b in pr.buses],
-        **({"click": True} if pr.click else {}), **({"count_in": pr.count_in} if pr.count_in else {})},
+        **({"click": True} if pr.click else {}), **({"count_in": pr.count_in} if pr.count_in else {}),
+        **({"song": [{"bars": s.bars, "repeats": s.repeats, "patterns": s.patterns} for s in pr.song]}
+           if pr.song else {}),
+        **({"song_on": True} if pr.song_on else {}), **({"song_loop": False} if not pr.song_loop else {})},
         separators=(",", ":"))
 
 
@@ -251,7 +271,11 @@ def load_project(path):
     master = load_strip(d["master"]) if "master" in d else Strip()
     buses = [Bus(b.get("number", n), load_strip(b["strip"])) for n, b in enumerate(d.get("buses", []), 1)]
     return Project(d["bpm"], tracks, controls, master, d.get("key", 0), d.get("scale", "chromatic"), buses,
-                   d.get("click", False), d.get("count_in", 0))
+                   d.get("click", False), d.get("count_in", 0),
+                   [SongStep(bars=int(st.get("bars", 4)), repeats=int(st.get("repeats", 1)),
+                             patterns={int(k): int(v) for k, v in (st.get("patterns") or {}).items()})
+                    for st in d.get("song", [])],
+                   d.get("song_on", False), d.get("song_loop", True))
 
 
 def save_text(path, text):

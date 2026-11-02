@@ -23,6 +23,11 @@ screen; everything else keeps running.
   the kind, and for external the MIDI output it sends to, for audio the interface input it takes)
 - 16 patterns per track, 1–64 steps (polymetric tracks are fine), 8 **scenes**
 - pattern and scene changes are **quantized to the bar**: the current pattern plays to the end of the bar
+- **SONG** is the arrangement above the patterns: a list of steps, each lasting 1–16 bars (×1–8 repeats) and
+  saying which pattern every track plays in it — a track left as **—** keeps what it was playing, so a step
+  can change just one part. Tap a step to play it from the next bar, tap its bars or ×repeats to change them,
+  hold **✕** to delete, **+ STEP** appends one; the **SONG** button switches the transport between following
+  the song and playing the patterns you pick by hand
 - the top bar carries the transport's own settings, apart from the app's buttons (FILE, SETTINGS, PATCHBAY
   are icons; a line, then the metronome's **CLICK**, the **COUNT**-in of 0/1/2 bars — the count-in plays its
   clicks first and the pattern starts on the downbeat after them — and the **BPM**, which opens the tempo)
@@ -53,6 +58,7 @@ screen; everything else keeps running.
   drum tracks have fixed voices and don't offer it
 
 ![The metronome: CLICK and COUNT in the top bar, counting in before the pattern](docs/screenshots/metronome.png)
+![SONG: a list of steps, each with its bars, repeats and a pattern per track](docs/screenshots/song.png)
 ![Piano roll](docs/screenshots/piano-roll.png)
 ![Drum editor](docs/screenshots/drums.png)
 ![Adding a track: drum, melody, external MIDI or audio](docs/screenshots/new-track.png)
@@ -199,6 +205,7 @@ device is unplugged its notes are simply not sent, and they come back when it re
 | module rail | **⤢ / ⤡** | module full screen and back |
 | top bar | tap **BPM** | the tempo: drag the number, ±1/5/10, TAP it out |
 | sequencer | tap a track header twice | opens it in EDIT |
+| SONG | tap a step | plays it from the next bar; its bars / ×repeats change on a tap, ✕ deletes on a hold |
 | top bar | **CLICK** / **COUNT** | the metronome, and 0/1/2 bars of count-in before the pattern |
 | sequencer | drag a **pattern slot** onto another | copies the pattern there and switches to it (at the bar) |
 | sequencer | drag along a row | paints steps on/off |

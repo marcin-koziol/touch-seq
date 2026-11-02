@@ -9,7 +9,7 @@ from PySide6.QtGui import QColor, QPolygonF
 from .constants import (BG, BORDER, DIM, DRUM_COLORS, DRUM_KIT, GATE_RES, MAX_GATE, MAX_STEPS,
                         PALETTE, PANEL, PATTERNS, PLAY, SCENES, STEPS_PER_BAR, TEXT, WARN)
 from .gestures import Drag, Gesture, Hold, ScrollOrTap
-from .model import DEFAULT_STEP, Step
+from .model import DEFAULT_STEP, SongStep, Step
 from .music import note_name, transpose
 from .ui import Panel, glyph, split
 
@@ -130,6 +130,9 @@ class Sequencer(Panel):
         self.drum_param = "step"  # drum edit view: "step" paints on/off, "vel" drags velocity
         self.mode = None  # "copy" / "clear" act on pattern slots, "save" on scenes
         self.scroll = 0.0
+        self.song_sel = 0  # the song step the panel below shows
+        self.song_scroll = 0.0
+        self.song_pick = None  # (step, track number) while choosing a pattern for it
         self.master_fx = lambda: False  # the rack: is XYFX on the master (adds a MASTER row)
         self.master_focus = False  # the MASTER row is selected (PLAY-12 shows the XY pad)
         self.new_track = lambda: None  # the rack: the "+" dialog (drum, melody, external MIDI, audio)
@@ -275,12 +278,12 @@ class Sequencer(Panel):
         mid = QRectF(0, top.bottom(), w, bottom.top() - top.bottom())
         self.draw_top(p, top.adjusted(8 * s, 8 * s, -8 * s, -4 * s))
         self.draw_bottom(p, bottom.adjusted(8 * s, 4 * s, -8 * s, -8 * s))
-        (self.draw_grid if self.view == "grid" else self.draw_edit)(p, mid)
+        {"grid": self.draw_grid, "edit": self.draw_edit, "song": self.draw_song}[self.view](p, mid)
 
     def draw_top(self, p, r):
         s, e = self.s, self.engine
-        play, bar, grid, edit, _, *scenes, save = split(
-            r, [86 * s, 110 * s, 72 * s, 72 * s, 0] + [56 * s] * SCENES + [72 * s], 6 * s)
+        play, bar, grid, song, edit, _, *scenes, save = split(
+            r, [86 * s, 110 * s, 72 * s, 72 * s, 72 * s, 0] + [54 * s] * SCENES + [72 * s], 6 * s)
 
         active = e.playing or e.counting
         self.button(p, play, "", self.toggle_play, on=e.playing, color=PLAY, pending=e.counting)
@@ -308,6 +311,7 @@ class Sequencer(Panel):
             self.box(p, br, PLAY if b == beat else "#222734", None, radius=3)
 
         self.button(p, grid, "GRID", lambda: setattr(self, "view", "grid"), on=self.view == "grid")
+        self.button(p, song, "SONG", lambda: setattr(self, "view", "song"), on=self.view == "song")
         self.button(p, edit, "EDIT", lambda: setattr(self, "view", "edit"), on=self.view == "edit")
 
         save_mode = self.mode == "save"
@@ -384,6 +388,199 @@ class Sequencer(Panel):
         if j >= len(cells):
             return right
         return cells[j].left() + (e - j) * cells[j].width()
+
+    # --- song view: the arrangement above the patterns ---------------------
+    def toggle_song(self):
+        """The transport follows the song (or stops following it, back to the patterns playing)."""
+        pr = self.project
+        pr.song_on = not pr.song_on
+        if pr.song_on:
+            self.engine.song_jump = self.song_sel  # where it starts (also while stopped)
+
+    def add_song_step(self):
+        """A new step at the end: everything keeps playing what it plays, then you change what should change."""
+        pr = self.project
+        patterns = {tr.number: tr.pattern for tr in pr.tracks if not tr.audio}
+        pr.song.append(SongStep(bars=4, repeats=1, patterns=patterns))
+        self.song_sel = len(pr.song) - 1
+        self.song_scroll = 1e9  # clamped on paint: the new step shows up
+        if len(pr.song) == 1 and not pr.song_on:
+            pr.song_on = True  # the first step also switches the song on
+
+    def delete_song_step(self, n):
+        steps = self.project.song
+        if 0 <= n < len(steps):
+            steps.pop(n)
+            self.song_sel = max(0, min(self.song_sel, len(steps) - 1))
+            if not steps:
+                self.project.song_on = False
+
+    def cycle_song_bars(self, n):
+        step = self.project.song[n]
+        step.bars = {1: 2, 2: 4, 4: 8, 8: 16, 16: 1}.get(step.bars, 4)
+
+    def cycle_song_repeats(self, n):
+        step = self.project.song[n]
+        step.repeats = {1: 2, 2: 4, 4: 8, 8: 1}.get(step.repeats, 1)
+
+    def select_song_step(self, n):
+        """Tap a step: it is the one edited on the right, and the song jumps there at the next bar."""
+        self.song_sel = n
+        if self.project.song_on:
+            self.engine.queue_song_step(n)
+
+    def open_song_pick(self, n, number):
+        self.song_pick = (n, number)
+
+    def pick_song_pattern(self, k):
+        if not self.song_pick:
+            return
+        n, number = self.song_pick
+        if 0 <= n < len(self.project.song):
+            self.project.song[n].patterns[number] = k
+        self.song_pick = None
+
+    def clear_song_pattern(self):
+        """Leave the track out of the step: it keeps playing the pattern it had."""
+        if not self.song_pick:
+            return
+        n, number = self.song_pick
+        if 0 <= n < len(self.project.song):
+            self.project.song[n].patterns.pop(number, None)
+        self.song_pick = None
+
+    def draw_song(self, p, area):
+        s, pr, e = self.s, self.project, self.engine
+        if self.song_pick:
+            self.draw_song_picker(p, area)
+            return
+        steps = pr.song
+        left, right = split(area, [area.width() * 0.54, 0], 12 * s)
+        head = QRectF(left.left(), left.top(), left.width(), 44 * s)
+        on_b, loop_b, count = split(head, [124 * s, 104 * s, 0], 8 * s)
+        self.button(p, on_b, "SONG", self.toggle_song, on=pr.song_on, sub="the steps play")
+        self.button(p, loop_b, "LOOP", lambda: setattr(pr, "song_loop", not pr.song_loop), on=pr.song_loop,
+                    sub="at the end")
+        self.text(p, count, f"{len(steps)} step" + ("s" if len(steps) != 1 else "") if steps else "no steps yet", DIM, 12,
+                  Qt.AlignRight | Qt.AlignVCenter)
+        now, bar = e.song_position()
+        rows = QRectF(left.left(), head.bottom() + 6 * s, left.width(),
+                      left.bottom() - head.bottom() - 6 * s - 52 * s)
+        rh = 62 * s
+        self.song_scroll = max(0.0, min(self.song_scroll, len(steps) * rh - rows.height()))
+        p.save()
+        p.setClipRect(rows)
+        if not steps:
+            self.text(p, rows, "no steps yet: + STEP makes the first one", "#5b6577", 14)
+        first = int(self.song_scroll // rh)
+        for n in range(first, min(len(steps), first + int(rows.height() // rh) + 2)):
+            step = steps[n]
+            row = QRectF(rows.left(), rows.top() + n * rh - self.song_scroll, rows.width(), rh - 6 * s)
+            playing, chosen = now == n, n == self.song_sel
+            self.box(p, row, "#1b2130" if playing or chosen else PANEL,
+                     PLAY if playing else "#98a2b3" if chosen else BORDER, 2 if playing or chosen else 1.5,
+                     radius=8)
+            num, chips, bars_b, reps_b, close = split(row.adjusted(4 * s, 4 * s, -4 * s, -4 * s),
+                                                      [38 * s, 0, 86 * s, 50 * s, 30 * s], 6 * s)
+            self.text(p, num, str(n + 1), PLAY if playing else TEXT, 19, bold=True)
+            if playing:  # how far into the step the playhead is
+                done = bar / max(1, step.span)
+                self.box(p, QRectF(num.left() + 5 * s, num.bottom() - 8 * s, (num.width() - 10 * s) * done, 3 * s),
+                         PLAY, None, radius=2)
+            tracks = [t for t in pr.tracks if not t.audio]
+            shown = tracks[:5]
+            cw = chips.width() / max(1, len(shown))
+            for j, tr in enumerate(shown):
+                cell = QRectF(chips.left() + j * cw, chips.top(), cw - 4 * s, chips.height())
+                pat = step.patterns.get(tr.number)
+                self.box(p, cell, "#11141b", "#2a3040", 1, radius=5)
+                self.text(p, cell.adjusted(0, 1 * s, 0, -cell.height() * 0.42), f"T{tr.number}", self.color(tr), 9,
+                          Qt.AlignHCenter | Qt.AlignTop, bold=True)
+                self.text(p, cell.adjusted(0, cell.height() * 0.36, 0, 0),
+                          f"P{pat + 1}" if pat is not None else "—", TEXT if pat is not None else "#5b6577",
+                          13, bold=True)
+            if len(tracks) > len(shown):
+                self.text(p, QRectF(chips.right() - 30 * s, chips.top(), 26 * s, chips.height()), f"+{len(tracks) - len(shown)}",
+                          DIM, 10)
+            self.button(p, bars_b, f"{step.bars} bars", None)
+            self.button(p, reps_b, f"×{step.repeats}", None, on=step.repeats > 1)
+            self.button(p, close, "✕", None, color=WARN)
+            self.region(row.intersected(rows), lambda pos, n=n: ScrollOrTap(
+                pos, lambda: self.song_scroll, lambda v: setattr(self, "song_scroll", v),
+                lambda: self.select_song_step(n)))
+            self.on_press(bars_b.intersected(rows), lambda n=n: self.cycle_song_bars(n))
+            self.on_press(reps_b.intersected(rows), lambda n=n: self.cycle_song_repeats(n))
+            self.region(close.intersected(rows), lambda pos, n=n: Hold(lambda: self.delete_song_step(n),
+                                                                       key=("song", n)))
+        p.restore()
+        plus = QRectF(left.left(), left.bottom() - 44 * s, left.width(), 40 * s)
+        self.button(p, plus, "+ STEP", self.add_song_step, sub="append it at the end")
+        self.draw_song_step(p, right, steps)
+
+    def draw_song_step(self, p, r, steps):
+        """The tracks of the selected step: tap a pattern to change what that track plays in it."""
+        s, pr = self.s, self.project
+        n = min(self.song_sel, len(steps) - 1) if steps else 0
+        self.text(p, QRectF(r.left(), r.top(), r.width(), 44 * s),
+                  f"STEP {n + 1} · which pattern" if steps else "STEP", DIM, 12,
+                  Qt.AlignLeft | Qt.AlignVCenter, bold=True)
+        if not steps:
+            self.text(p, QRectF(r.left(), r.top() + 48 * s, r.width(), 60 * s),
+                      "add a step on the left, then pick the patterns here", "#5b6577", 13,
+                      Qt.AlignLeft | Qt.AlignTop, elide=True)
+            return
+        step = steps[n]
+        tracks = [t for t in pr.tracks if not t.audio]
+        top = r.top() + 48 * s
+        rh = min(70 * s, (r.bottom() - top - 58 * s) / max(1, len(tracks)))
+        for j, tr in enumerate(tracks):
+            row = QRectF(r.left(), top + j * rh, r.width(), rh - 6 * s)
+            color = self.color(tr)
+            self.box(p, row, PANEL, BORDER, 1.5, radius=8)
+            self.box(p, QRectF(row.left() + 4 * s, row.top() + 10 * s, 4 * s, row.height() - 20 * s), color, None,
+                     radius=2)
+            self.text(p, row.adjusted(18 * s, 0, 0, 0), f"T{tr.number}", color, 15,
+                      Qt.AlignLeft | Qt.AlignVCenter, bold=True)
+            pick = QRectF(row.left() + 74 * s, row.top() + 6 * s, row.width() - 82 * s, row.height() - 12 * s)
+            pat = step.patterns.get(tr.number)
+            self.button(p, pick, f"P{pat + 1}" if pat is not None else "— keep previous", None, sub="tap: pick")
+            self.on_press(pick, lambda n=n, number=tr.number: self.open_song_pick(n, number))
+        self.text(p, QRectF(r.left(), r.bottom() - 46 * s, r.width(), 20 * s),
+                  "tap a step: play it from the next bar · tap bars/×repeats: change · hold ✕: delete", DIM, 11,
+                  Qt.AlignLeft | Qt.AlignVCenter, elide=True)
+        self.text(p, QRectF(r.left(), r.bottom() - 26 * s, r.width(), 20 * s),
+                  "a pattern keeps its own length and loops inside the step", DIM, 11,
+                  Qt.AlignLeft | Qt.AlignVCenter, elide=True)
+
+    def draw_song_picker(self, p, area):
+        """Which of the track's patterns that step plays."""
+        s, pr = self.s, self.project
+        n, number = self.song_pick
+        step = pr.song[n] if 0 <= n < len(pr.song) else None
+        p.fillRect(area, QColor(0, 0, 0, 170))
+        self.on_press(area, lambda: setattr(self, "song_pick", None))  # tap outside closes
+        panel = QRectF(0, 0, min(area.width() - 24 * s, 760 * s), min(area.height() - 16 * s, 380 * s))
+        panel.moveCenter(area.center())
+        self.box(p, panel, "#11141b", "#38d6ff", 2, radius=14)
+        self.on_press(panel, lambda: None)
+        inner = panel.adjusted(18 * s, 12 * s, -18 * s, -14 * s)
+        self.text(p, QRectF(inner.left(), inner.top(), inner.width(), 26 * s),
+                  f"T{number} · pattern in step {n + 1}", TEXT, 16, Qt.AlignLeft | Qt.AlignVCenter, bold=True)
+        grid = QRectF(inner.left(), inner.top() + 30 * s, inner.width(), inner.height() - 30 * s - 50 * s)
+        halves = [split(QRectF(grid.left(), grid.top() + j * grid.height() / 2, grid.width(), grid.height() / 2),
+                        [0] * 8, 8 * s) for j in range(2)]
+        current = step.patterns.get(number) if step else None
+        for k in range(PATTERNS):
+            cell = halves[k // 8][k % 8]
+            used = not self.project.tracks and False
+            tr = next((t for t in pr.tracks if t.number == number), None)
+            used = bool(tr and not tr.patterns[k].empty())
+            self.button(p, cell, f"P{k + 1}", lambda k=k: self.pick_song_pattern(k), on=current == k,
+                        sub="·" if used else "")
+        foot = QRectF(inner.left(), grid.bottom() + 8 * s, inner.width(), 40 * s)
+        keep, cancel = split(foot, [0, 140 * s], 10 * s)
+        self.button(p, keep, "— keep previous", self.clear_song_pattern)
+        self.button(p, cancel, "CANCEL", lambda: setattr(self, "song_pick", None))
 
     def draw_grid(self, p, r):
         s, tracks = self.s, self.project.tracks

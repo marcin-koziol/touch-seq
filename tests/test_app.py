@@ -1718,3 +1718,75 @@ rkt.grab().save(str(OUT / "tempo.png"))
 rkt.close_dialog()
 ert3.close()
 print("tempo dialog OK")
+
+# --- song mode: the steps hand the tracks their patterns, bar by bar -----------------------
+prs = ts.Project(bpm=600, tracks=[ts.Track("melody", 1, 1), ts.Track("drum", 10, 2)])
+t_sm, t_sd = prs.tracks
+t_sm.patterns[0].lane(60)[0].on = True
+t_sm.patterns[1].lane(72)[0].on = True
+t_sd.patterns[0].lane(0)[0].on = True
+t_sd.patterns[1].lane(1)[0].on = True
+prs.song = [ts.SongStep(bars=1, repeats=1, patterns={1: 0, 2: 0}),
+            ts.SongStep(bars=1, repeats=1, patterns={1: 1})]  # the drum is left out: keep previous
+prs.song_on = True
+outs = FakeOut(); es_s = ts.Engine(prs, outs)
+es_s.start()
+time.sleep(0.15)
+assert es_s.song_position() == (0, 0), es_s.song_position()
+assert (t_sm.pattern, t_sd.pattern) == (0, 0), (t_sm.pattern, t_sd.pattern)
+for _ in range(400):
+    if es_s.song_position()[0] == 1:
+        break
+    time.sleep(0.005)
+assert es_s.song_position()[0] == 1, "the song moved to its second step"
+assert (t_sm.pattern, t_sd.pattern) == (1, 0), (t_sm.pattern, t_sd.pattern)
+for _ in range(800):
+    if es_s.song_position()[0] == 0:
+        break
+    time.sleep(0.005)
+assert es_s.song_position()[0] == 0, "and looped back to the first"
+es_s.queue_song_step(1)  # a tap on a step: taken at the next bar
+time.sleep(0.5)
+assert es_s.song_position()[0] == 1, es_s.song_position()
+es_s.stop()
+assert es_s.song_position() == (None, 0), "stopped: no step playing"
+# without LOOP the last step goes on
+prs.song_loop = False
+es_s.start()
+for _ in range(1200):
+    if es_s.song_position()[0] == 1:
+        break
+    time.sleep(0.005)
+time.sleep(0.5)
+assert es_s.song_position()[0] == 1, "without LOOP it stays on the last step"
+es_s.stop(); es_s.close()
+print("song playback OK")
+
+# --- the SONG view: a step per tap, patterns picked from a list ----------------------------
+prs2 = ts.Project(bpm=120, tracks=[ts.Track("melody", 1, 1), ts.Track("drum", 10, 2)])
+es_s2 = ts.Engine(prs2, FakeOut()); sq_s = ts.Sequencer(prs2, es_s2)
+assert not prs2.song
+sq_s.add_song_step()
+assert len(prs2.song) == 1 and prs2.song_on, "the first step also switches the song on"
+assert prs2.song[0].patterns == {1: 0, 2: 0}, prs2.song[0].patterns
+sq_s.cycle_song_bars(0); assert prs2.song[0].bars == 8, prs2.song[0].bars
+sq_s.cycle_song_repeats(0); assert prs2.song[0].repeats == 2, prs2.song[0].repeats
+for _ in range(3):  # 2 -> 4 -> 8 -> 1
+    sq_s.cycle_song_repeats(0)
+assert prs2.song[0].repeats == 1, "back round"
+sq_s.open_song_pick(0, 1); assert sq_s.song_pick == (0, 1)
+sq_s.pick_song_pattern(3); assert prs2.song[0].patterns[1] == 3, prs2.song[0].patterns
+assert sq_s.song_pick is None, "picking closes the list"
+sq_s.open_song_pick(0, 1); sq_s.clear_song_pattern()
+assert 1 not in prs2.song[0].patterns, "keep previous"
+sq_s.add_song_step(); assert len(prs2.song) == 2 and sq_s.song_sel == 1, sq_s.song_sel
+sq_s.delete_song_step(1); assert len(prs2.song) == 1
+img = QImage(1060, 530, QImage.Format_ARGB32); img.fill(0)
+q = QPainter(img); q.setRenderHint(QPainter.Antialiasing)
+sq_s.view = "song"
+sq_s.paint(q, 1060, 530); q.end()
+img.save(str(OUT / "song.png"))
+sq_s.open_song_pick(0, 2)
+img.fill(0); q = QPainter(img); q.setRenderHint(QPainter.Antialiasing); sq_s.paint(q, 1060, 530); q.end()
+es_s2.close()
+print("song view OK")
