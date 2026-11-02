@@ -187,12 +187,15 @@ def glyph(p, r, name, color, width=0.075, lit=None):
         p.drawPolyline(QPolygonF(list(body) + [body[0]]))
         p.drawLine(QPointF(cx, cy + 0.22 * s), QPointF(cx + 0.13 * s, cy - 0.20 * s))  # the arm
         p.drawLine(QPointF(cx - 0.36 * s, cy + 0.30 * s), QPointF(cx + 0.36 * s, cy + 0.30 * s))  # the base
-    elif name == "count":  # COUNT-IN: 1-2-3-4, four steps up (as many lit as bars will count in)
-        for j in range(4):
-            on = lit is None or j < lit
-            p.setPen(QPen(QColor(color if on else "#5b6577"), max(1.6, s * 0.13), Qt.SolidLine, Qt.RoundCap))
-            x = cx + (j - 1.5) * 0.19 * s
-            p.drawLine(QPointF(x, cy + 0.26 * s), QPointF(x, cy + 0.26 * s - (0.16 + j * 0.13) * s))
+    elif name == "sticks":  # COUNT-IN: the drummer's crossed sticks
+        sticks = ((QPointF(cx - 0.38 * s, cy + 0.30 * s), QPointF(cx + 0.30 * s, cy - 0.30 * s)),
+                  (QPointF(cx + 0.38 * s, cy + 0.30 * s), QPointF(cx - 0.30 * s, cy - 0.30 * s)))
+        for butt, tip in sticks:
+            p.drawLine(butt, tip)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(color))
+        for _, tip in sticks:
+            p.drawEllipse(tip, 0.085 * s + 0.7, 0.085 * s + 0.7)
     elif name == "din":  # a track's MIDI input: the five pins of the socket, in their arc
         rad = 0.40 * s
         dot = 0.085 * s + 0.7
@@ -468,8 +471,16 @@ class Window(QWidget):
         p.setFont(f)
         p.setPen(QColor("#e6e9ee"))
         if icon:
-            glyph(p, r.adjusted(r.width() * 0.18, r.height() * 0.16, -r.width() * 0.18, -r.height() * 0.16),
-                  icon, color if on else "#c8cdd6", lit=lit)
+            area = QRectF(r.left() + r.width() * 0.16, r.top() + r.height() * 0.10, r.width() * 0.68,
+                          r.height() * (0.62 if sub else 0.80))
+            glyph(p, area, icon, color if on else "#c8cdd6", lit=lit)
+            if sub:  # a badge under the icon (COUNT: how many bars will count in)
+                f.setPixelSize(round(max(10, size - 5) * k))
+                f.setBold(True)
+                p.setFont(f)
+                p.setPen(QColor(color if on else "#8a929e"))
+                p.drawText(QRectF(r.left(), r.top() + r.height() * 0.66, r.width(), r.height() * 0.34),
+                           Qt.AlignCenter, sub)
         elif sub:
             p.drawText(r.adjusted(0, 0, 0, -r.height() * 0.32), Qt.AlignCenter, label)
             f.setPixelSize(round(max(9, size - 6) * k))

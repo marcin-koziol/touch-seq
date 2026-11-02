@@ -128,8 +128,8 @@ class Rack(Window):
         self.rail_button(p, click, "CLICK", lambda: self.engine.set_click(not self.project.click),
                          icon="metronome", on=on, color="#4ade80")
         bars = self.project.count_in
-        self.rail_button(p, count, "COUNT", self.cycle_count_in, icon="count", on=bars > 0,
-                         lit=bars if bars else None)
+        self.rail_button(p, count, "COUNT", self.cycle_count_in, icon="sticks", on=bars > 0,
+                         sub=str(bars) if bars else None)
         self.draw_bpm(p, bpm)
         f.setPixelSize(round(22 * k))
         p.setFont(f)
