@@ -1930,9 +1930,11 @@ rect = QRectF(0, 0, 320, 40)
 g4 = ts.CcDraw(sk4, tk4, rect, 74, QPointF(10, 30))  # low at the start
 g4.move(QPointF(310, 4))                            # and high at the end: a sweep
 lane = tk4.current.cc[74]
-assert lane[0] < lane[15], lane
-assert all(0 <= lane[i] <= 127 for i in range(16)) and len(lane) >= 2, lane
-assert lane[0] < 40 and lane[15] > 100, lane
+assert lane[min(lane)] < 40 and lane[max(lane)] > 100, lane
+assert all(0 <= v <= 127 for v in lane.values()), lane
+assert all(abs(k * 4 - round(k * 4)) < 1e-9 for k in lane), f"points on quarter steps: {sorted(lane)}"
+assert len(lane) >= 8, f"a sweep fills the points it crossed, not just the steps: {sorted(lane)}"
+assert max(lane) < 16, f"nothing past the page: {sorted(lane)}"
 sk4.remove_cc_lane(74)
 assert 74 not in tk4.current.cc and sk4.param == "vel", (tk4.current.cc, sk4.param)
 img = QImage(1060, 530, QImage.Format_ARGB32); img.fill(0)
@@ -1974,3 +1976,44 @@ fb.browser_fmt = "builtin"
 fb._builtin = [fake_ref("Touch-Seq Space", "touchseq.space")]
 assert [r.name for r in ts.HostPanel.browser_items(fb)] == ["Touch-Seq EQ", "Touch-Seq Space", "Touch-Seq XYFX"]
 print("builtin browser OK")
+
+# --- a drawn sweep is sent between the steps, not only on them ----------------------------
+prv2 = ts.Project(bpm=240, tracks=[ts.Track("melody", 1, 1)])
+tv2 = prv2.tracks[0]
+tv2.current.length = 16
+tv2.current.cc[1] = {0.0: 0, 0.25: 32, 0.5: 64, 0.75: 96, 1.0: 127}  # a ramp over one step
+outv2 = FakeOut(); ev2 = ts.Engine(prv2, outv2)
+ev2.start()
+time.sleep(2.2 * ev2.step_len)
+ev2.stop(); ev2.close()
+sent = [m[2] for _, m in outv2.log if m[0] & 0xF0 == 0xB0]
+print("ramp sent:", sent[:8])
+assert sent[:5] == [0, 32, 64, 96, 127], sent[:8]  # every quarter-step point spoke, in order
+print("cc sub-step OK")
+
+# --- the M of a track header still mutes: the drag region stops before it ------------------
+prm3 = ts.Project(tracks=[ts.Track("melody", 1, 1), ts.Track("drum", 10, 2)])
+em3 = ts.Engine(prm3, FakeOut())
+wm3 = View(ts.Sequencer(prm3, em3))
+wm3.resize(1024, 600)
+wm3.grab()
+row0 = wm3.grid_rows[0]
+mute_at = QPointF(row0.right() - 28, row0.center().y())
+wm3.press(3, mute_at); wm3.release(3, mute_at)
+assert prm3.tracks[0].mute, "the M button mutes the track"
+wm3.press(4, mute_at); wm3.release(4, mute_at)
+assert not prm3.tracks[0].mute, "and unmutes it again"
+# the rest of the header still selects (and a second tap opens EDIT)
+row1 = wm3.grid_rows[1]
+head_at = QPointF(row1.left() + 40, row1.center().y())
+wm3.press(5, head_at); wm3.release(5, head_at)
+assert wm3.sel is prm3.tracks[1] and wm3.view == "grid", (wm3.sel, wm3.view)
+wm3.press(6, head_at); wm3.release(6, head_at)
+assert wm3.view == "edit", "a second tap opens it"
+# and the lane can be shown alone, without the roll
+wm3.lane_only = True
+img = QImage(1024, 600, QImage.Format_ARGB32); img.fill(0)
+q = QPainter(img); q.setRenderHint(QPainter.Antialiasing); wm3.paint(q, 1024, 600); q.end()
+img.save(str(OUT / "lane_only.png"))
+em3.close()
+print("mute + lane only OK")

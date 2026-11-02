@@ -40,10 +40,12 @@ while there is something unsaved (the time next to it is the last save of anythi
     them; rows outside the project's scale are dimmed
   - under the roll a **lane** edits what you point it at: **VEL** (velocity), **GATE** (length) or a
     **controller lane** — **+ CC** adds one (CC1 mod, CC7 volume, CC74 cutoff, … up to four per pattern).
-    Drag across it to draw; a quick drag fills the steps it passed, so a diagonal is a ramp. A value holds
-    until its next point and only changes are sent, so a filter sweep is a handful of CCs a bar. With REC/OVR
-    armed a controller from the track's MIDI keyboard — or a CTRL-10 fader on its channel — is written at the
-    step under the playhead (a lane is made for it when there is none), and the lanes play with the pattern
+    Drag across it to draw; a quick drag fills the points it crossed, so a diagonal is a ramp. Points are
+    **not stuck to the steps**: they sit as fine as a quarter of a step (1/64 with 1/16 steps) and the engine
+    sends the lane between its ticks, so a sweep moves smoothly; a value holds until its next point and only
+    changes are sent. **ROLL** hides the piano roll and gives the lane the whole panel for drawing. With
+    REC/OVR armed a controller from the track's MIDI keyboard — or a CTRL-10 fader on its channel — is written
+    under the playhead (a lane is made for it when there is none), and the lanes play with the pattern
   - drums: a voice × step matrix, voices in fixed colors (kick red, snare orange, hats yellow, …)
   - external MIDI: the same piano roll, but the track has **no plugins**: its notes, velocity, gate and the
     faders go straight out to the chosen hardware output (and nowhere else), and its header shows the port
@@ -71,6 +73,7 @@ while there is something unsaved (the time next to it is the last save of anythi
 ![SONG: a list of steps, each with its bars, repeats and a pattern per track](docs/screenshots/song.png)
 ![Piano roll](docs/screenshots/piano-roll.png)
 ![A controller lane under the roll: values hold until their next point](docs/screenshots/cc.png)
+![The same lane alone, with the roll hidden, for drawing a sweep](docs/screenshots/cc-only.png)
 ![Drum editor](docs/screenshots/drums.png)
 ![Adding a track: drum, melody, external MIDI or audio](docs/screenshots/new-track.png)
 ![An audio track: an interface input, panned, through the track's chain and into a bus](docs/screenshots/audio.png)
@@ -228,7 +231,7 @@ device is unplugged its notes are simply not sent, and they come back when it re
 | sequencer | tap a track header twice | opens it in EDIT |
 | SONG | tap a step | plays it from the next bar; its bars / ×repeats change on a tap, ✕ deletes on a hold |
 | GRID / SONG | hold a row, then drag | moves a track (GRID) or a step (SONG) to another place in the list |
-| EDIT | drag the lane under the roll | draws velocity, gate or a controller lane (a fast drag fills in the ramp) |
+| EDIT | drag the lane under the roll | draws velocity, gate or a controller lane (a fast drag fills in the ramp); **ROLL** hides the roll for more room |
 | top bar | **CLICK** / **COUNT** | the metronome, and 0/1/2 bars of count-in before the pattern |
 | sequencer | drag a **pattern slot** onto another | copies the pattern there and switches to it (at the bar) |
 | sequencer | drag along a row | paints steps on/off |

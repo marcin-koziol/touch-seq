@@ -5,7 +5,7 @@ import math
 import time
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QPolygonF
+from PySide6.QtGui import QColor, QPen, QPolygonF
 
 from .constants import (BG, BORDER, CC_LANES, DIM, DRUM_COLORS, DRUM_KIT, GATE_RES, MAX_GATE, MAX_STEPS,
                         PALETTE, PANEL, PATTERNS, PLAY, SCENES, STEPS_PER_BAR, TEXT, WARN)
@@ -161,8 +161,11 @@ class LaneDraw(Gesture):
 
 
 class CcDraw(Gesture):
-    """A controller lane: the finger's height sets the value at the step under it, and a quick drag across fills
-    the steps it jumped over, so a diagonal drag draws a ramp instead of a dotted line."""
+    """A controller lane: the finger's height sets the value at the point under it, and a quick drag fills the
+    points it crossed, so a diagonal is a ramp. Points go to a quarter of a step - 1/64 with 1/16 steps - which
+    is finer than the steps the notes are on, and the engine sends them between its ticks."""
+
+    RES = 0.25  # the finest a point is placed, in steps
 
     def __init__(self, ui, tr, lane, number, pos):
         self.ui, self.tr, self.lane, self.number, self.pattern = ui, tr, lane, number, tr.current
@@ -173,17 +176,23 @@ class CcDraw(Gesture):
         f = max(0.0, min(1.0, (self.lane.bottom() - pos.y()) / self.lane.height()))
         return round(f * 127)
 
+    def position_at(self, pos):
+        """Where the point goes: in steps from the pattern's start, to a quarter of a step, and inside the page."""
+        at = self.ui.page * 16 + self.ui.step_pos(self.lane, pos)
+        return round(min(at, (self.ui.page + 1) * 16 - self.RES) / self.RES) * self.RES
+
     def move(self, pos):
-        i = self.ui.cell_at(self.lane, pos)
+        at = self.position_at(pos)
         value = self.value_at(pos)
         lane = self.pattern.cc.setdefault(self.number, {})
-        if self.last is not None and abs(i - self.last[0]) > 1:  # a sweep: fill the steps between
-            j0, v0 = self.last
-            for j in range(min(j0, i), max(j0, i) + 1):
-                lane[j] = round(v0 + (value - v0) * (j - j0) / (i - j0))
+        if self.last is not None and abs(at - self.last[0]) > self.RES:  # a sweep: fill what it crossed
+            p0, v0 = self.last
+            steps = max(1, int(round(abs(at - p0) / self.RES)))
+            for j in range(1, steps + 1):
+                lane[round((p0 + (at - p0) * j / steps) / self.RES) * self.RES] = round(v0 + (value - v0) * j / steps)
         else:
-            lane[i] = value
-        self.last = (i, value)
+            lane[at] = value
+        self.last = (at, value)
 
 
 class Sequencer(Panel):
@@ -196,6 +205,7 @@ class Sequencer(Panel):
         self.param = "vel"  # melody edit view: the lane under the roll edits "vel", "gate" or a "cc" lane
         self.cc_num = 1  # the controller lane shown when param is "cc"
         self.cc_pick = None  # open while choosing a controller lane
+        self.lane_only = False  # the lane fills the edit view (no piano roll), for drawing automation
         self.roll_bases = {}  # Track -> lowest visible piano roll note
         self.roll_rows = 12
         self.drum_param = "step"  # drum edit view: "step" paints on/off, "vel" drags velocity
@@ -756,7 +766,9 @@ class Sequencer(Panel):
                 self.box(p, head, QColor(0, 0, 0, 0), "#38d6ff", 3, radius=8)
             elif moving and idx == moving.target:  # where it will land
                 self.box(p, QRectF(head.left(), head.top() - 4 * s, head.width(), 5 * s), "#38d6ff", None, radius=2)
-            self.region(head.intersected(r), lambda pos, idx=idx: Reorder(self, "grid", idx, pos))
+            # the row can be dragged to another place - but not from the M button, which stays a button
+            self.region(QRectF(head.left(), head.top(), head.width() - 56 * s, head.height()).intersected(r),
+                        lambda pos, idx=idx: Reorder(self, "grid", idx, pos))
             if tr.audio:  # no steps: the row shows the input it takes and where it goes
                 self.draw_audio_row(p, lane, tr)
                 continue
@@ -999,6 +1011,10 @@ class Sequencer(Panel):
 
     def draw_roll(self, p, area, tr, color):
         s, pat = self.s, tr.current
+        if self.lane_only:  # just the lane, as big as the panel allows
+            self.draw_lane_strip(p, QRectF(area.left() + 72 * s, area.top(), area.width() - 72 * s, area.height()),
+                                 tr, color, QRectF(area.left(), area.top(), 64 * s, area.height()))
+            return
         head = self.engine.playhead.get(tr)
         roll = QRectF(area.left(), area.top(), area.width(), area.height() - 96 * s)
         keys = QRectF(roll.left(), roll.top(), 64 * s, roll.height())
@@ -1084,14 +1100,22 @@ class Sequencer(Panel):
         self.region(grid, lambda pos: Roll(self, tr, lambda q: self.cell_at(grid, q),
                                            lambda q: self.step_pos(grid, q), pitch_at, note_at, pos))
 
-        # the lane under the roll: what it edits (tabs) and the lane itself
-        lane = QRectF(grid.left(), roll.bottom() + 12 * s, grid.width(), area.bottom() - roll.bottom() - 12 * s)
+        self.draw_lane_strip(p, QRectF(grid.left(), roll.bottom() + 12 * s, grid.width(),
+                                       area.bottom() - roll.bottom() - 12 * s), tr, color,
+                             QRectF(keys.left(), roll.bottom() + 12 * s, keys.width(),
+                                    area.bottom() - roll.bottom() - 12 * s))
+
+    def draw_lane_strip(self, p, lane, tr, color, label):
+        """The lane under the roll (or the whole view, when the roll is hidden): what it edits, and the bars of
+        velocity/gate or the line of a controller."""
+        s, pat = self.s, tr.current
+        head = self.engine.playhead.get(tr)
         tabs = QRectF(lane.left(), lane.top(), lane.width(), 26 * s)
         bars = QRectF(lane.left(), tabs.bottom() + 4 * s, lane.width(), lane.bottom() - tabs.bottom() - 4 * s)
-        label = QRectF(keys.left(), lane.top(), keys.width(), lane.height())
         self.box(p, label, PANEL, None, radius=5)
         name = ("VEL" if self.param == "vel" else "GATE" if self.param == "gate" else f"CC {self.cc_num}")
-        self.text(p, label, name, DIM, 11, bold=True)
+        self.text(p, label.adjusted(0, 0, 0, -label.height() * 0.45), name, DIM, 11, bold=True)
+        self.text(p, label.adjusted(0, label.height() * 0.45, 0, 0), "lane", "#3f4652", 9)
         entries = [("vel", "VEL", None), ("gate", "GATE", None)] + [("cc", f"CC {n}", n) for n in sorted(pat.cc)]
         tw = 68 * s
         for j, (kind, text, number) in enumerate(entries):
@@ -1100,42 +1124,57 @@ class Sequencer(Panel):
                         on=self.param == kind and (kind != "cc" or self.cc_num == number))
         plus = QRectF(tabs.left() + len(entries) * (tw + 4 * s), tabs.top(), 58 * s, tabs.height())
         self.button(p, plus, "+ CC", self.open_cc_pick)
+        roll_b = QRectF(tabs.right() - 78 * s, tabs.top(), 74 * s, tabs.height())  # the roll on, or the lane alone
+        self.button(p, roll_b, "ROLL", lambda: setattr(self, "lane_only", not self.lane_only), on=not self.lane_only)
         if self.param == "cc":
             self.draw_cc_lane(p, bars, tr, self.cc_num, color)
-        else:
-            for k, c in enumerate(self.cells(bars)):
-                i = self.page * 16 + k
-                self.box(p, c, "#10131a" if i >= pat.length else "#181c26", "#ffffff" if i == head else None, 1.5,
-                         radius=4)
-                notes = [st for _, st in pat.notes_at(i)]
-                if notes:  # a chord shows its highest value
-                    v = max(st.vel / 127 if self.param == "vel" else st.gate for st in notes)
-                    f = min(1.0, v)
-                    self.box(p, QRectF(c.left(), c.bottom() - c.height() * f, c.width(), c.height() * f), color,
-                             None, radius=4)
-                    if self.param == "gate" and v > 1:  # the lane draws 0-100%; longer notes say how long
-                        self.text(p, c, f"×{v:g}", BG, 12, bold=True)
-            self.region(bars, lambda pos: LaneDraw(self, tr, bars, self.param, pos))
-
-    def draw_cc_lane(self, p, bars, tr, number, color):
-        """A controller lane: one bar per step, as tall as the value in effect there (a value holds until its
-        next point); a white dot marks the steps that are points."""
-        s, pat = self.s, tr.current
-        points = pat.cc.get(number, {})
-        head = self.engine.playhead.get(tr)
+            return
         for k, c in enumerate(self.cells(bars)):
             i = self.page * 16 + k
             self.box(p, c, "#10131a" if i >= pat.length else "#181c26", "#ffffff" if i == head else None, 1.5,
                      radius=4)
-            if i >= pat.length:
-                continue
-            value = pat.cc_at(number, i)
-            if value is not None:
-                f = value / 127
-                self.box(p, QRectF(c.left(), c.bottom() - c.height() * f, c.width(), c.height() * f), color, None,
-                         radius=4)
-            if i in points:  # where the value is set
-                self.box(p, QRectF(c.left() + 3 * s, c.top() + 3 * s, 5 * s, 5 * s), "#ffffff", None, radius=2)
+            notes = [st for _, st in pat.notes_at(i)]
+            if notes:  # a chord shows its highest value
+                v = max(st.vel / 127 if self.param == "vel" else st.gate for st in notes)
+                f = min(1.0, v)
+                self.box(p, QRectF(c.left(), c.bottom() - c.height() * f, c.width(), c.height() * f), color,
+                         None, radius=4)
+                if self.param == "gate" and v > 1:  # the lane draws 0-100%; longer notes say how long
+                    self.text(p, c, f"×{v:g}", BG, 12, bold=True)
+        self.region(bars, lambda pos: LaneDraw(self, tr, bars, self.param, pos))
+
+    def draw_cc_lane(self, p, bars, tr, number, color):
+        """A controller lane as a line: the value holds between points, and the points can sit anywhere on the
+        line (a quarter of a step apart at the finest, and the engine sends between its ticks)."""
+        s, pat = self.s, tr.current
+        points = pat.cc.get(number, {})
+        cells = self.cells(bars)
+        head = self.engine.playhead.get(tr)
+        for k, c in enumerate(cells):
+            i = self.page * 16 + k
+            self.box(p, c, "#10131a" if i >= pat.length else "#181c26", "#ffffff" if i == head else None, 1.5,
+                     radius=4)
+        if points:
+            line = QPolygonF()  # sampled across, so a held value is flat and a ramp is a ramp
+            x, last = bars.left(), None
+            while x <= bars.right():
+                pos = self.page * 16 + self.step_pos(bars, QPointF(x, bars.center().y()))
+                value = pat.cc_at(number, pos)
+                if value is not None:
+                    last = bars.bottom() - 2 * s - (bars.height() - 4 * s) * (value / 127)
+                    line.append(QPointF(x, last))
+                x += 2 * s
+            if line:
+                p.setPen(QPen(QColor(color), 2.2 * s))
+                p.setBrush(Qt.NoBrush)
+                p.drawPolyline(line)
+            for pos, value in points.items():  # where the value is set
+                k = pos - self.page * 16
+                if 0 <= k < 16:
+                    dots = QRectF(self.step_x(cells, k, bars.right()) - 3.5 * s,
+                                  bars.bottom() - 2 * s - (bars.height() - 4 * s) * (value / 127) - 3.5 * s,
+                                  7 * s, 7 * s)
+                    self.box(p, dots, "#ffffff", None, radius=3.5)
         self.region(bars, lambda pos: CcDraw(self, tr, bars, number, pos))
 
     COMMON_CCS = ((1, "mod"), (2, "breath"), (7, "volume"), (10, "pan"), (11, "expression"), (64, "sustain"),

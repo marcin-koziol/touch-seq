@@ -189,6 +189,7 @@ class Engine:
         self.out.send_message([0xF8])
         if self.ticks % TICKS_PER_STEP == 0:
             self.step(self.next_tick)
+        self.automate()
         self.ticks += 1
         self.next_tick += 60 / (self.project.bpm * PPQN)
 
@@ -214,7 +215,6 @@ class Engine:
             lanes = list(pat.lanes.items())  # a copy: the UI thread may add a lane meanwhile
             if tr.mute:
                 continue
-            self.send_cc(tr, i)
             for k, lane in lanes:
                 s = lane[i]
                 if s.on:
@@ -375,14 +375,25 @@ class Engine:
         with self.lock:
             self.note_on(tr, note, 100, time.perf_counter() + 0.15)
 
-    def send_cc(self, tr, i):
+    def automate(self):
+        """The controller lanes, once a tick (24 to a beat): a sweep can move between the steps, which is what
+        lets a lane be drawn finely instead of one value per step."""
+        if not any(tr.current.cc for tr in self.project.tracks):
+            return
+        for tr in self.project.tracks:
+            if tr.mute:
+                continue
+            pos = self.playhead.get(tr, 0) + (self.ticks % TICKS_PER_STEP) / TICKS_PER_STEP
+            self.send_cc(tr, pos)
+
+    def send_cc(self, tr, pos):
         """The pattern's controller lanes: a value holds until its next point, and a CC goes out only when it
-        changes, so a lane is a few messages a bar and not one per step."""
+        changes - so a held value is quiet and a ramp speaks only as often as it has to."""
         points = tr.current.cc
         if not points:
             return
         for number in points:
-            value = tr.current.cc_at(number, i)
+            value = tr.current.cc_at(number, pos)
             key = (tr, number)
             if value is None or self.cc_sent.get(key) == value:
                 continue
