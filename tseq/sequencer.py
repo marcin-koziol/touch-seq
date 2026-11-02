@@ -282,7 +282,7 @@ class Sequencer(Panel):
 
     def draw_top(self, p, r):
         s, e = self.s, self.engine
-        play, bar, grid, song, edit, _, *scenes, save = split(
+        play, bar, song, grid, edit, _, *scenes, save = split(
             r, [86 * s, 110 * s, 72 * s, 72 * s, 72 * s, 0] + [54 * s] * SCENES + [72 * s], 6 * s)
 
         active = e.playing or e.counting
@@ -310,8 +310,8 @@ class Sequencer(Panel):
             br = QRectF(bar.left() + 44 * s + b * cell, bar.center().y() - 7 * s, cell - 6 * s, 14 * s)
             self.box(p, br, PLAY if b == beat else "#222734", None, radius=3)
 
-        self.button(p, grid, "GRID", lambda: setattr(self, "view", "grid"), on=self.view == "grid")
         self.button(p, song, "SONG", lambda: setattr(self, "view", "song"), on=self.view == "song")
+        self.button(p, grid, "GRID", lambda: setattr(self, "view", "grid"), on=self.view == "grid")
         self.button(p, edit, "EDIT", lambda: setattr(self, "view", "edit"), on=self.view == "edit")
 
         save_mode = self.mode == "save"
