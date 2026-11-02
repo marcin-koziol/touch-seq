@@ -1,10 +1,10 @@
 # Touch-Seq
 
 **A touchscreen live-performance front end for the [Carla](https://github.com/falkTX/Carla) plugin host.**
-Carla runs the plugins (LV2, VST3, CLAP); Touch-Seq is the instrument you play them with: a step sequencer,
-per-track plugin chains with a master bus, chord pads / keyboard / drum pads, an MPC-style XY effects pad
-and performance faders — laid out as modules in a modular-synth rack, made for fingers on a touchscreen
-(multi-touch; a mouse works too).
+Carla runs the plugins (LV2, VST3, CLAP); Touch-Seq is the instrument you play them with: a step sequencer
+with a **song mode**, per-track plugin chains with a master bus, a **MIDI keyboard** on any track, chord pads /
+keyboard / drum pads, an MPC-style XY effects pad, a metronome and the performance faders — laid out as modules
+in a modular-synth rack, made for fingers on a touchscreen (multi-touch; a mouse works too).
 
 ![Touch-Seq: faders, plugin host, sequencer and chord pads](docs/screenshots/overview.png)
 
@@ -12,10 +12,11 @@ Version 0.7.0 — early, but already played with.
 
 ## The rack
 
-The window is a 2×2 rack under a toolbar (**FILE**: projects, **SETTINGS**: key/scale and audio output,
-**PATCHBAY**: audio routing, **SAVE**: write now — it lights up while there is something unsaved, and the time
-next to it is the last save of anything, project or plugin). **⤢** on a module's rail blows it up to full
-screen; everything else keeps running.
+The window is a 2×2 rack under a toolbar of **icons**: the folder is **FILE** (projects), the sliders
+**SETTINGS** (key/scale and audio output), the cable **PATCHBAY** (audio routing); then, past a line, the
+metronome (**CLICK**), the drumsticks (**COUNT**-in) and the **BPM**; on the right **SAVE**, which lights up
+while there is something unsaved (the time next to it is the last save of anything, project or plugin).
+**⤢** on a module's rail blows it up to full screen; everything else keeps running.
 
 ### SEQ-64 — step sequencer
 
@@ -121,11 +122,11 @@ Plays the track selected in the sequencer:
 - drum tracks: 12 pads in the voices' colors
 - external MIDI tracks: like melody tracks (chords, keyboard), straight out to their output port
 - **REC** (replaces the steps you play over) or **OVR** (overdub: leaves them and adds) records what you play
-  into the pattern, quantized to 1/16, 1/8 or 1/4 — fingers on the pads and notes from a track's MIDI
-  keyboard alike. REC only touches the steps you play: a pass with nothing played leaves the pattern as it
-  was. What you record is
-  **heard at once**: while you hold it, the pattern leaves that step to your fingers, and when you lift them
-  it plays from there — a bar-long chord keeps ringing into the loop instead of waiting for the next pass
+  into the pattern, quantized to 1/16, 1/8 or 1/4 — fingers on the pads and notes from a track's MIDI keyboard
+  alike; REC only touches the steps you play, so a pass with nothing played leaves the pattern as it was. What
+  you record is **heard at once**: while you hold it the pattern leaves that step to your fingers, and when you
+  lift them it plays from there — a bar-long chord keeps ringing into the loop instead of waiting for the next
+  pass
 - **CLICK** and **COUNT** in the top bar: a tick on every beat (higher on the bar's first) while playing, and
   0/1/2 bars of them before the pattern starts, so you can come in on time
 - with **XYFX** on the master, a **MASTER** row appears in the sequencer; selecting it turns this module
