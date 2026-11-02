@@ -196,26 +196,7 @@ e4 = ts.Engine(ts.Project(bpm=240, tracks=[t4]), out4); e4.start(); time.sleep(0
 on_t = next(t for t, m in out4.log if m[0] == 0x92); off_t = next(t for t, m in out4.log if m[0] == 0x82)
 print("gate 3.0 length ms:", round((off_t - on_t) * 1000, 1), "(expect 187.5)"); assert abs(off_t - on_t - 0.1875) < 0.006
 print("save size bytes:", len(ts.dump_project(pr2)))
-# BPM popup
-w.resize(1024, 600); w.view = "grid"; w.sel = pr2.tracks[0]; w.grab()
-def tap(x, y):
-    w.press(5, QPointF(x, y)); w.release(5, QPointF(x, y)); w.grab()
-b0 = pr2.bpm
-tap(150, 30); assert w.popup == "bpm" and pr2.bpm == b0
-w.grab().save(str(OUT / "bpm_popup.png"))
-# find +10 button: steps row; use hit regions by label position: panel centered, buttons row y ~ 300+
-import touchseq
-tap(512 + 250, 300 - 190 + 18 + 26 + 120 + 16 + 35)  # rightmost (+10)
-print("after +10:", pr2.bpm); assert pr2.bpm == b0 + 10
-w.press(6, QPointF(512, 200)); w.move(6, QPointF(512, 190)); w.move(6, QPointF(512, 150)); w.release(6, QPointF(512, 150)); w.grab()
-print("after drag up 40px:", pr2.bpm); assert pr2.bpm == b0 + 20
-for t in (0, 0.5, 1.0, 1.5):
-    w.taps = [x - 0.5 for x in w.taps]  # simulate time
-w.taps = []
-import time as _t
-now = _t.monotonic(); w.taps = [now - 1.5, now - 1.0, now - 0.5]; w.tap_tempo(); print("tap tempo 120 ->", pr2.bpm); assert pr2.bpm == 120
-tap(5, 5); assert w.popup is None
-print("popup OK")
+# (the tempo moved to the top bar: see the tempo dialog test further down)
 # delete drum track T1 -> remaining keep their names/colors
 first = pr2.tracks[0]; second = pr2.tracks[1]
 c2 = w.color(second)
@@ -1712,3 +1693,28 @@ assert len(wb2.broken_paint) == 1, f"only the broken module failed: {wb2.broken_
 assert shot.width() == 900 and shot.height() == 600, "the window still painted"
 assert GoodPaint.drew == 1, f"the other module was still drawn ({GoodPaint.drew})"
 print("broken paint OK")
+
+# --- the tempo in the top bar: its dialog drags, nudges and taps --------------------------
+prt3 = ts.Project(bpm=100, tracks=[ts.Track("melody", 1, 1)])
+ert3 = ts.Engine(prt3, FakeOut())
+rkt = ts.Rack(prt3, ert3, OUT / "tempo.json", StubHost())
+rkt.resize(1920, 1080)
+rkt.grab()
+assert rkt.project.count_in == 0
+rkt.cycle_count_in(); assert rkt.project.count_in == 1
+rkt.cycle_count_in(); assert rkt.project.count_in == 2
+rkt.cycle_count_in(); assert rkt.project.count_in == 0, "off again"
+rkt.open_tempo()
+assert rkt.dialog and rkt.dialog[0] == "TEMPO", rkt.dialog
+tp = rkt.dialog[2]
+tp.set_bpm(110); assert prt3.bpm == 110
+tp.set_bpm(-5); assert prt3.bpm == ts.BPM_MIN, "clamped at the bottom"
+tp.set_bpm(9999); assert prt3.bpm == ts.BPM_MAX, "clamped at the top"
+now = time.monotonic()
+tp.taps = [now - 1.5, now - 1.0, now - 0.5]
+tp.tap_tempo()
+assert prt3.bpm == 120, prt3.bpm
+rkt.grab().save(str(OUT / "tempo.png"))
+rkt.close_dialog()
+ert3.close()
+print("tempo dialog OK")

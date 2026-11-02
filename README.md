@@ -23,8 +23,9 @@ screen; everything else keeps running.
   the kind, and for external the MIDI output it sends to, for audio the interface input it takes)
 - 16 patterns per track, 1–64 steps (polymetric tracks are fine), 8 **scenes**
 - pattern and scene changes are **quantized to the bar**: the current pattern plays to the end of the bar
-- the top bar has the **metronome** (**CLICK**) and a **COUNT**-in of 0/1/2 bars: the count-in plays its
-  clicks first and the pattern starts on the downbeat after them
+- the top bar carries the transport's own settings, apart from the app's buttons (FILE, SETTINGS, PATCHBAY
+  are icons; a line, then the metronome's **CLICK**, the **COUNT**-in of 0/1/2 bars — the count-in plays its
+  clicks first and the pattern starts on the downbeat after them — and the **BPM**, which opens the tempo)
 - **GRID** shows all tracks; **EDIT** opens the selected one:
   - melody: a **polyphonic piano roll** with a velocity/gate lane; notes can be stretched over several steps;
     rows outside the project's scale are dimmed
@@ -38,7 +39,8 @@ screen; everything else keeps running.
 - every MIDI track (melody, drum, external) can play and record from its **own MIDI keyboard**: the socket
   at the left of its EDIT header opens a dialog with the system's MIDI inputs and a channel (**ALL** or 1–16,
   so one keyboard can drive several tracks on different channels). The socket is **green with the channel**
-  once configured, **amber** when that device is away, dim when the track only plays its patterns. Incoming
+  once configured, **amber** when that device is away, dim when the track only plays its patterns (its row in
+  GRID shows the same socket, small, so you can see which tracks have a keyboard from there). Incoming
   notes play the track's instrument (or its hardware output), light its pads/keys in PLAY-12 and are recorded
   when REC/OVR is armed — quantized like the on-screen pads, into the track the keyboard is routed to (which
   need not be the selected one). Pitch bend and the mod wheel reach the instrument too. A note keeps the
@@ -195,7 +197,7 @@ device is unplugged its notes are simply not sent, and they come back when it re
 |---|---|---|
 | everywhere | **hold** (~1 s) on DELETE / REMOVE | destructive actions need a hold |
 | module rail | **⤢ / ⤡** | module full screen and back |
-| sequencer | tap **BPM** | tempo popup: drag the number, ±1/5/10, TAP tempo |
+| top bar | tap **BPM** | the tempo: drag the number, ±1/5/10, TAP it out |
 | sequencer | tap a track header twice | opens it in EDIT |
 | top bar | **CLICK** / **COUNT** | the metronome, and 0/1/2 bars of count-in before the pattern |
 | sequencer | drag a **pattern slot** onto another | copies the pattern there and switches to it (at the bar) |

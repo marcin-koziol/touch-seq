@@ -2,17 +2,16 @@
 tempo, and the step-painting gestures that belong to it."""
 import copy
 import math
-import time
 
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QPolygonF
 
-from .constants import (BG, BORDER, BPM_MAX, BPM_MIN, DIM, DRUM_COLORS, DRUM_KIT, GATE_RES, MAX_GATE, MAX_STEPS,
+from .constants import (BG, BORDER, DIM, DRUM_COLORS, DRUM_KIT, GATE_RES, MAX_GATE, MAX_STEPS,
                         PALETTE, PANEL, PATTERNS, PLAY, SCENES, STEPS_PER_BAR, TEXT, WARN)
 from .gestures import Drag, Gesture, Hold, ScrollOrTap
 from .model import DEFAULT_STEP, Step
 from .music import note_name, transpose
-from .ui import Panel, split
+from .ui import Panel, glyph, split
 
 
 class Paint(Gesture):
@@ -130,8 +129,6 @@ class Sequencer(Panel):
         self.roll_rows = 12
         self.drum_param = "step"  # drum edit view: "step" paints on/off, "vel" drags velocity
         self.mode = None  # "copy" / "clear" act on pattern slots, "save" on scenes
-        self.popup = None  # "bpm" while the tempo popup is open
-        self.taps = []  # tap-tempo times
         self.scroll = 0.0
         self.master_fx = lambda: False  # the rack: is XYFX on the master (adds a MASTER row)
         self.master_focus = False  # the MASTER row is selected (PLAY-12 shows the XY pad)
@@ -279,50 +276,11 @@ class Sequencer(Panel):
         self.draw_top(p, top.adjusted(8 * s, 8 * s, -8 * s, -4 * s))
         self.draw_bottom(p, bottom.adjusted(8 * s, 4 * s, -8 * s, -8 * s))
         (self.draw_grid if self.view == "grid" else self.draw_edit)(p, mid)
-        if self.popup == "bpm":
-            self.draw_bpm_popup(p)
-
-    def draw_bpm_popup(self, p):
-        s, pr = self.s, self.project
-        p.fillRect(self.rect(), QColor(0, 0, 0, 170))
-        self.on_press(self.rect(), lambda: setattr(self, "popup", None))  # tap outside closes
-        panel = QRectF(0, 0, 600 * s, 380 * s)
-        panel.moveCenter(self.rect().center())
-        self.box(p, panel, "#11141b", "#38d6ff", 2, radius=16)
-        self.on_press(panel, lambda: None)  # swallow taps on the panel background
-        inner = panel.adjusted(24 * s, 18 * s, -24 * s, -24 * s)
-
-        self.text(p, inner, "TEMPO", DIM, 14, Qt.AlignHCenter | Qt.AlignTop, bold=True)
-        big = QRectF(inner.left(), inner.top() + 26 * s, inner.width(), 120 * s)
-        self.box(p, big, PANEL, BORDER, radius=12)
-        self.text(p, big.adjusted(0, -8 * s, 0, 0), str(pr.bpm), TEXT, 78, bold=True)
-        self.text(p, big.adjusted(0, 0, 0, -10 * s), "drag ↕", "#5b6577", 11, Qt.AlignHCenter | Qt.AlignBottom)
-        self.region(big, lambda pos: Drag(pos, lambda: pr.bpm, self.set_bpm, BPM_MIN, BPM_MAX, 4 * s))
-
-        steps = QRectF(inner.left(), big.bottom() + 16 * s, inner.width(), 70 * s)
-        for d, r in zip((-10, -5, -1, 1, 5, 10), split(steps, [0] * 6, 10 * s)):
-            self.button(p, r, f"{d:+d}", lambda d=d: self.set_bpm(pr.bpm + d))
-
-        tap, done = split(QRectF(inner.left(), steps.bottom() + 16 * s, inner.width(), inner.bottom() - steps.bottom()
-                                 - 16 * s), [0, 160 * s], 10 * s)
-        self.button(p, tap, "TAP", self.tap_tempo, color=PLAY, pending=bool(self.taps) and time.monotonic() - self.taps[-1] < 2, sub="tap tempo")
-        self.button(p, done, "DONE", lambda: setattr(self, "popup", None), on=True)
-
-    def set_bpm(self, v):
-        self.project.bpm = int(max(BPM_MIN, min(BPM_MAX, v)))
-
-    def tap_tempo(self):
-        now = time.monotonic()
-        if self.taps and now - self.taps[-1] > 2:  # long pause starts a new measurement
-            self.taps = []
-        self.taps = (self.taps + [now])[-5:]
-        if len(self.taps) >= 2:
-            self.set_bpm(round(60 * (len(self.taps) - 1) / (self.taps[-1] - self.taps[0])))
 
     def draw_top(self, p, r):
         s, e = self.s, self.engine
-        play, bpm, bar, grid, edit, _, *scenes, save = split(
-            r, [86 * s, 96 * s, 110 * s, 72 * s, 72 * s, 0] + [50 * s] * SCENES + [72 * s], 6 * s)
+        play, bar, grid, edit, _, *scenes, save = split(
+            r, [86 * s, 110 * s, 72 * s, 72 * s, 0] + [56 * s] * SCENES + [72 * s], 6 * s)
 
         active = e.playing or e.counting
         self.button(p, play, "", self.toggle_play, on=e.playing, color=PLAY, pending=e.counting)
@@ -336,9 +294,6 @@ class Sequencer(Panel):
                                      QPointF(c.x() + k * 1.3, c.y())]))
 
         pr = self.project
-        self.value_box(p, bpm, "BPM", str(pr.bpm), lambda: pr.bpm, self.set_bpm, BPM_MIN, BPM_MAX, 6,
-                       on_tap=lambda: setattr(self, "popup", "bpm"))
-
         self.box(p, bar, PANEL)
         si, counting = e.step_index, e.counting
         if counting:  # the count-in: beats left, dots walking to the downbeat
@@ -481,7 +436,15 @@ class Sequencer(Panel):
         p.drawRoundedRect(QRectF(head.left() + 5 * s, head.top() + 8 * s, 5 * s, head.height() - 16 * s), 2, 2)
         info = head.adjusted(18 * s, 6 * s, -56 * s, -6 * s)
         self.text(p, info, f"T{tr.number}", TEXT, 19, Qt.AlignLeft | Qt.AlignTop, bold=True)
-        self.text(p, info, "MONO" if tr.audio else f"CH{tr.channel}", DIM, 12, Qt.AlignRight | Qt.AlignTop)
+        right = info
+        if tr.in_port:  # a MIDI keyboard is set for this track: a small socket says so (green when it is here)
+            ready = self.input_ok is None or self.input_ok(tr)
+            socket = QRectF(info.right() - 17 * s, info.top() - 2 * s, 17 * s, 17 * s)
+            self.box(p, socket, "#11141b", "#4ade80" if ready else "#ff8c42", 1.2, radius=4)
+            glyph(p, socket.adjusted(1.5 * s, 1.5 * s, -1.5 * s, -1.5 * s), "din",
+                  "#4ade80" if ready else "#ff8c42", width=0.12)
+            right = info.adjusted(0, 0, -20 * s, 0)
+        self.text(p, right, "MONO" if tr.audio else f"CH{tr.channel}", DIM, 12, Qt.AlignRight | Qt.AlignTop)
         if tr.drum:
             self.text(p, info, DRUM_KIT[tr.voice][0], color, 12, Qt.AlignRight | Qt.AlignBottom, bold=True)
         elif tr.audio:  # the input it takes and how it is panned, instead of a drum voice and a pattern
@@ -614,13 +577,7 @@ class Sequencer(Panel):
         on, ready = bool(tr.in_port), self.input_ok is None or self.input_ok(tr)
         color = "#4ade80" if on and ready else ("#ff8c42" if on else DIM)
         self.box(p, r, "#11141b", color, 1.6, radius=8)
-        cx, cy = r.center().x(), r.center().y() - 3 * s
-        rad = min(r.width(), r.height()) * 0.24
-        p.setPen(Qt.NoPen)
-        p.setBrush(QColor(color))
-        for deg in (200, 235, 270, 305, 340):  # the five pins of a DIN socket, in an arc
-            a = math.radians(deg)
-            p.drawEllipse(QPointF(cx + rad * math.cos(a), cy - rad * math.sin(a)), 1.7 * s, 1.7 * s)
+        glyph(p, QRectF(r.left(), r.top() + 1 * s, r.width(), r.height() - 20 * s), "din", color, width=0.095)
         label = ("ALL" if not tr.in_channel else f"CH{tr.in_channel}") if on else "IN"
         self.text(p, QRectF(r.left(), r.bottom() - 18 * s, r.width(), 15 * s), label, color, 9)
         self.on_press(r, lambda: self.choose_input(tr))

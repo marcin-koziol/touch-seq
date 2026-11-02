@@ -3,12 +3,12 @@ toolbar, autosave and project switching."""
 import shutil
 import time
 
-from PySide6.QtCore import QTimer
-from PySide6.QtGui import QColor, QFont, Qt
+from PySide6.QtCore import QPointF, QTimer
+from PySide6.QtGui import QColor, QFont, QPen, Qt
 
 from .constants import WARN
 from .controls import Controls
-from .dialogs import AudioSources, Chooser, MidiInputs, MidiPorts, NewTrack, Settings
+from .dialogs import AudioSources, Chooser, MidiInputs, MidiPorts, NewTrack, Settings, Tempo
 from .model import dump_project, free_project_path, save_text
 from .patchbay import Patchbay
 from .performer import Performer
@@ -103,8 +103,10 @@ class Rack(Window):
     def draw_toolbar(self, p, r):
         k = self.k
         inner = r.adjusted(14 * k, 7 * k, -14 * k, -7 * k)
-        logo, file_, settings, patch, click, count, name, info, save = split(
-            inner, [150 * k, 110 * k, 130 * k, 140 * k, 96 * k, 104 * k, 0, 300 * k, 120 * k], 12 * k)
+        logo, *cols = split(
+            inner, [150 * k, 50 * k, 50 * k, 50 * k, 14 * k, 54 * k, 54 * k, 14 * k, 96 * k, 0, 250 * k,
+                    108 * k], 10 * k)
+        file_, settings, patch, sep1, click, count, sep2, bpm, name, info, save = cols
         f = QFont("sans-serif")
         f.setPixelSize(round(19 * k))
         f.setBold(True)
@@ -112,17 +114,23 @@ class Rack(Window):
         p.setFont(f)
         p.setPen(QColor("#e6e9ee"))
         p.drawText(logo, Qt.AlignLeft | Qt.AlignVCenter, "TOUCH-SEQ")
-        self.rail_button(p, file_, "FILE", self.open_file, size=17, on=bool(self.dialog) and self.dialog[0] == "FILE")
-        self.rail_button(p, settings, "SETTINGS", self.open_settings, size=17,
+        self.rail_button(p, file_, "FILE", self.open_file, icon="folder",
+                         on=bool(self.dialog) and self.dialog[0] == "FILE")
+        self.rail_button(p, settings, "SETTINGS", self.open_settings, icon="sliders",
                          on=bool(self.dialog) and self.dialog[0] == "SETTINGS")
-        self.rail_button(p, patch, "PATCHBAY", self.open_patchbay, size=17,
+        self.rail_button(p, patch, "PATCHBAY", self.open_patchbay, icon="cables",
                          on=bool(self.dialog) and self.dialog[0] == "PATCHBAY")
+        for sep in (sep1, sep2):  # a line between the app's own buttons and the transport's
+            p.setPen(QPen(QColor("#4c535e"), 1.2 * k))
+            p.drawLine(QPointF(sep.center().x(), inner.top() + 2 * k),
+                       QPointF(sep.center().x(), inner.bottom() - 2 * k))
         on = self.project.click
-        self.rail_button(p, click, "CLICK", lambda: self.engine.set_click(not self.project.click), size=15,
-                         on=on, sub="on" if on else "off", color="#4ade80")
+        self.rail_button(p, click, "CLICK", lambda: self.engine.set_click(not self.project.click),
+                         icon="metronome", on=on, color="#4ade80")
         bars = self.project.count_in
-        self.rail_button(p, count, "COUNT", self.cycle_count_in, size=15, on=bars > 0,
-                         sub="off" if not bars else f"{bars} bar" + ("s" if bars > 1 else ""))
+        self.rail_button(p, count, "COUNT", self.cycle_count_in, icon="count", on=bars > 0,
+                         lit=bars if bars else None)
+        self.draw_bpm(p, bpm)
         f.setPixelSize(round(22 * k))
         p.setFont(f)
         p.drawText(name.adjusted(20 * k, 0, 0, 0), Qt.AlignLeft | Qt.AlignVCenter, self.path.stem)
@@ -136,6 +144,29 @@ class Rack(Window):
         state = "UNSAVED" if dirty else f"SAVED {time.strftime('%H:%M:%S', self.saved_at)}"
         p.drawText(info.adjusted(0, 0, -10 * k, 0), Qt.AlignRight | Qt.AlignVCenter,
                    f"{self.project.key_name.upper()}   ·   {state}")
+
+    def draw_bpm(self, p, r):
+        """The project's tempo, where the transport is: tap it for the tempo dialog (drag, nudge, tap it out)."""
+        k = self.k
+        p.setPen(QPen(QColor("#5a606b"), 1))
+        p.setBrush(QColor("#2a2e35"))
+        p.drawRoundedRect(r, 4 * k, 4 * k)
+        f = QFont("sans-serif")
+        f.setPixelSize(round(10 * k))
+        p.setFont(f)
+        p.setPen(QColor("#8a929e"))
+        p.drawText(r.adjusted(0, 1 * k, 0, -r.height() * 0.5), Qt.AlignCenter, "BPM")
+        f.setPixelSize(round(19 * k))
+        f.setBold(True)
+        p.setFont(f)
+        p.setPen(QColor("#e6e9ee"))
+        p.drawText(r.adjusted(0, r.height() * 0.3, 0, 0), Qt.AlignCenter, str(self.project.bpm))
+        self.rail_buttons.append((r.adjusted(-6 * k, -5 * k, 6 * k, 5 * k), self.open_tempo))
+
+    def open_tempo(self):
+        if self.dialog:
+            return self.close_dialog()
+        self.open_dialog("TEMPO", "drag · nudge · tap", Tempo(self.project, self.close_dialog))
 
     def cycle_count_in(self):
         """The count-in: off, one bar of clicks, two (saved with the project)."""
@@ -217,8 +248,6 @@ class Rack(Window):
     def keyPressEvent(self, e):
         if e.key() == Qt.Key_Escape and self.dialog:
             self.close_dialog()
-        elif e.key() == Qt.Key_Escape and self.seq.popup:
-            self.seq.popup = None
         elif e.key() == Qt.Key_Space:
             self.seq.toggle_play()
         else:

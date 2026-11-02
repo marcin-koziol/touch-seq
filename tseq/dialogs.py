@@ -10,10 +10,10 @@ from PySide6.QtGui import QColor
 
 import plugins
 
-from .constants import BG, BORDER, DIM, NOTE_NAMES, PANEL, TEXT, WARN
+from .constants import BG, BORDER, BPM_MAX, BPM_MIN, DIM, NOTE_NAMES, PANEL, PLAY, TEXT, WARN
 from .engine import midi_outputs
 from .midiin import midi_inputs
-from .gestures import Hold, ScrollOrTap
+from .gestures import Drag, Hold, ScrollOrTap
 from .model import dump_project, free_project_path, new_project, project_files, save_text
 from .music import SCALES
 from .ui import Panel, split
@@ -333,6 +333,49 @@ class MidiPorts(Panel):
         area = QRectF(g, head.bottom() + 12 * s, w - 2 * g, h - head.bottom() - 12 * s - g)
         draw_ports(self, p, area, self.ports, lambda: self.scroll,
                    lambda v: setattr(self, "scroll", v), self.choose, current=self.current)
+
+
+class Tempo(Panel):
+    """The project's tempo, opened from the top bar's BPM: drag the number, nudge it by 1/5/10, or tap it out."""
+
+    def __init__(self, project, done=lambda: None):
+        super().__init__()
+        self.project = project
+        self.done = done  # the rack: close this dialog
+        self.taps = []  # tap-tempo times
+
+    def set_bpm(self, v):
+        self.project.bpm = int(max(BPM_MIN, min(BPM_MAX, v)))
+
+    def tap_tempo(self):
+        now = time.monotonic()
+        if self.taps and now - self.taps[-1] > 2:  # a long pause starts a new measurement
+            self.taps = []
+        self.taps = (self.taps + [now])[-5:]
+        if len(self.taps) >= 2:
+            self.set_bpm(round(60 * (len(self.taps) - 1) / (self.taps[-1] - self.taps[0])))
+
+    def draw(self, p):
+        s, w, h = self.s, self.w, self.h
+        p.fillRect(self.rect(), QColor(BG))
+        col = QRectF(0, 0, min(620 * s, w - 40 * s), min(560 * s, h - 32 * s))
+        col.moveCenter(QRectF(0, 0, w, h).center())
+        self.text(p, QRectF(col.left(), col.top(), col.width(), 20 * s), "TEMPO", DIM, 13,
+                  Qt.AlignHCenter | Qt.AlignTop, bold=True)
+        big = QRectF(col.left(), col.top() + 26 * s, col.width(), 180 * s)
+        self.box(p, big, PANEL, BORDER, radius=14)
+        self.text(p, big.adjusted(0, -12 * s, 0, 0), str(self.project.bpm), TEXT, 76, bold=True)
+        self.text(p, big.adjusted(0, 0, 0, -12 * s), "drag ↕", "#5b6577", 12, Qt.AlignHCenter | Qt.AlignBottom)
+        self.region(big, lambda pos: Drag(pos, lambda: self.project.bpm, self.set_bpm, BPM_MIN, BPM_MAX, 4 * s))
+        steps = QRectF(col.left(), big.bottom() + 16 * s, col.width(), 78 * s)
+        for d, r in zip((-10, -5, -1, 1, 5, 10), split(steps, [0] * 6, 10 * s)):
+            self.button(p, r, f"{d:+d}", lambda d=d: self.set_bpm(self.project.bpm + d))
+        rest = QRectF(col.left(), steps.bottom() + 14 * s, col.width(),
+                      min(100 * s, col.bottom() - steps.bottom() - 14 * s))
+        tap, done = split(rest, [0, 170 * s], 12 * s)
+        self.button(p, tap, "TAP", self.tap_tempo, color=PLAY,
+                    pending=bool(self.taps) and time.monotonic() - self.taps[-1] < 2, sub="tap tempo")
+        self.button(p, done, "DONE", self.done, on=True)
 
 
 class MidiInputs(Panel):

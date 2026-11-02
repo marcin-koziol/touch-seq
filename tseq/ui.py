@@ -1,13 +1,15 @@
 """The drawing toolkit and the module window: `Panel` (immediate-mode drawing in its own coordinates, hit
 regions, one gesture per touch), the primitives every panel draws with, and `Window` (faceplates, modular
 layout, dialogs over the rack, the repaint clock)."""
+import math
 import re
 import sys
 import time
 import traceback
 
 from PySide6.QtCore import QPointF, QRectF, Qt, QTimer
-from PySide6.QtGui import QColor, QFont, QFontMetrics, QLinearGradient, QPainter, QPen, QRadialGradient
+from PySide6.QtGui import (QColor, QFont, QFontMetrics, QLinearGradient, QPainter, QPainterPath, QPen,
+                           QPolygonF, QRadialGradient)
 from PySide6.QtWidgets import QWidget
 
 from .constants import BG, BORDER, DIM, MIN_TEXT, MOUSE_ID, PANEL, PARAM_FAMILIES, TEXT, TOUCH_LOG
@@ -142,6 +144,63 @@ class Panel:
             return lambda: set_(max(lo, min(hi, get() + (unit if pos.y() < r.center().y() else -unit))))
 
         self.region(r, lambda pos: Drag(pos, get, set_, lo, hi, px * s, unit, on_tap or tap_step(pos)))
+
+
+def glyph(p, r, name, color, width=0.075, lit=None):
+    """Small line icons for the top bar and the track headers: the app carries no image files, and a drawn
+    glyph keeps its crispness at any scale."""
+    s = min(r.width(), r.height())
+    cx, cy = r.center().x(), r.center().y()
+    pen = QPen(QColor(color), max(1.1, s * width))
+    pen.setCapStyle(Qt.RoundCap)
+    pen.setJoinStyle(Qt.RoundJoin)
+    p.setPen(pen)
+    p.setBrush(Qt.NoBrush)
+    if name == "folder":  # FILE: a folder with its tab
+        body = QRectF(cx - 0.30 * s, cy - 0.20 * s, 0.60 * s, 0.42 * s)
+        p.drawRoundedRect(body, 0.08 * s, 0.08 * s)
+        tab = QPolygonF([QPointF(body.left() + 0.05 * s, body.top()),
+                         QPointF(body.left() + 0.20 * s, body.top()),
+                         QPointF(body.left() + 0.27 * s, body.top() - 0.12 * s),
+                         QPointF(body.left() + 0.50 * s, body.top() - 0.12 * s)])
+        p.drawPolyline(tab)
+    elif name == "sliders":  # SETTINGS: three sliders
+        for j, k in enumerate((0.30, 0.68, 0.46)):
+            y = cy + (j - 1) * 0.22 * s
+            p.drawLine(QPointF(cx - 0.30 * s, y), QPointF(cx + 0.30 * s, y))
+            p.setBrush(QColor(color))
+            p.drawEllipse(QPointF(cx + (k - 0.5) * 0.52 * s, y), 0.075 * s, 0.075 * s)
+            p.setBrush(Qt.NoBrush)
+    elif name == "cables":  # PATCHBAY: a jack cable, a plug at each end
+        cable = QPainterPath()
+        cable.moveTo(cx - 0.16 * s, cy + 0.20 * s)
+        cable.cubicTo(cx + 0.06 * s, cy + 0.26 * s, cx - 0.06 * s, cy - 0.26 * s, cx + 0.16 * s, cy - 0.20 * s)
+        p.drawPath(cable)
+        p.setBrush(QColor(color))
+        p.setPen(Qt.NoPen)
+        p.drawRoundedRect(QRectF(cx - 0.34 * s, cy + 0.13 * s, 0.18 * s, 0.15 * s), 0.04 * s, 0.04 * s)
+        p.drawRoundedRect(QRectF(cx + 0.16 * s, cy - 0.28 * s, 0.18 * s, 0.15 * s), 0.04 * s, 0.04 * s)
+        p.setBrush(Qt.NoBrush)
+    elif name == "metronome":  # CLICK
+        body = QPolygonF([QPointF(cx - 0.26 * s, cy + 0.28 * s), QPointF(cx + 0.26 * s, cy + 0.28 * s),
+                          QPointF(cx + 0.10 * s, cy - 0.28 * s), QPointF(cx - 0.10 * s, cy - 0.28 * s)])
+        p.drawPolyline(QPolygonF(list(body) + [body[0]]))
+        p.drawLine(QPointF(cx, cy + 0.22 * s), QPointF(cx + 0.13 * s, cy - 0.20 * s))  # the arm
+        p.drawLine(QPointF(cx - 0.36 * s, cy + 0.30 * s), QPointF(cx + 0.36 * s, cy + 0.30 * s))  # the base
+    elif name == "count":  # COUNT-IN: 1-2-3-4, four steps up (as many lit as bars will count in)
+        for j in range(4):
+            on = lit is None or j < lit
+            p.setPen(QPen(QColor(color if on else "#5b6577"), max(1.6, s * 0.13), Qt.SolidLine, Qt.RoundCap))
+            x = cx + (j - 1.5) * 0.19 * s
+            p.drawLine(QPointF(x, cy + 0.26 * s), QPointF(x, cy + 0.26 * s - (0.16 + j * 0.13) * s))
+    elif name == "din":  # a track's MIDI input: the five pins of the socket, in their arc
+        rad = 0.40 * s
+        dot = 0.085 * s + 0.7
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(color))
+        for deg in (200, 235, 270, 305, 340):
+            a = math.radians(deg)
+            p.drawEllipse(QPointF(cx + rad * math.cos(a), cy + rad * math.sin(a) + 0.16 * s), dot, dot)
 
 
 def param_color(name):
@@ -390,7 +449,8 @@ class Window(QWidget):
     def draw_toolbar(self, p, r):
         pass
 
-    def rail_button(self, p, r, label, action, size=24, on=False, frame=True, sub=None, color="#38d6ff"):
+    def rail_button(self, p, r, label, action, size=24, on=False, frame=True, sub=None, color="#38d6ff",
+                    icon=None, lit=None):
         """Button on metal; without a frame only thin bars at the sides mark it (for the module rails)."""
         k = self.k
         if frame:
@@ -407,7 +467,10 @@ class Window(QWidget):
         f.setLetterSpacing(QFont.AbsoluteSpacing, 1.5 * k)
         p.setFont(f)
         p.setPen(QColor("#e6e9ee"))
-        if sub:
+        if icon:
+            glyph(p, r.adjusted(r.width() * 0.18, r.height() * 0.16, -r.width() * 0.18, -r.height() * 0.16),
+                  icon, color if on else "#c8cdd6", lit=lit)
+        elif sub:
             p.drawText(r.adjusted(0, 0, 0, -r.height() * 0.32), Qt.AlignCenter, label)
             f.setPixelSize(round(max(9, size - 6) * k))
             f.setBold(False)
