@@ -23,6 +23,8 @@ screen; everything else keeps running.
   the kind, and for external the MIDI output it sends to, for audio the interface input it takes)
 - 16 patterns per track, 1–64 steps (polymetric tracks are fine), 8 **scenes**
 - pattern and scene changes are **quantized to the bar**: the current pattern plays to the end of the bar
+- rows are **yours to order**: hold a track's header for a moment, then drag it up or down — the track keeps its
+  number and colour, and the same works for the steps of a song (hold a step, drag it in the list)
 - **SONG** is the arrangement above the patterns: a list of steps, each lasting 1–16 bars (×1–8 repeats) and
   saying which pattern every track plays in it — a track left as **—** keeps what it was playing, so a step
   can change just one part. Tap a step to play it from the next bar, tap its bars or ×repeats to change them,
@@ -206,6 +208,7 @@ device is unplugged its notes are simply not sent, and they come back when it re
 | top bar | tap **BPM** | the tempo: drag the number, ±1/5/10, TAP it out |
 | sequencer | tap a track header twice | opens it in EDIT |
 | SONG | tap a step | plays it from the next bar; its bars / ×repeats change on a tap, ✕ deletes on a hold |
+| GRID / SONG | hold a row, then drag | moves a track (GRID) or a step (SONG) to another place in the list |
 | top bar | **CLICK** / **COUNT** | the metronome, and 0/1/2 bars of count-in before the pattern |
 | sequencer | drag a **pattern slot** onto another | copies the pattern there and switches to it (at the bar) |
 | sequencer | drag along a row | paints steps on/off |

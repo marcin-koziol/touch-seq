@@ -1790,3 +1790,41 @@ sq_s.open_song_pick(0, 2)
 img.fill(0); q = QPainter(img); q.setRenderHint(QPainter.Antialiasing); sq_s.paint(q, 1060, 530); q.end()
 es_s2.close()
 print("song view OK")
+
+# --- drag & drop: tracks in GRID, steps in SONG -------------------------------------------
+prd2 = ts.Project(bpm=120, tracks=[ts.Track("melody", 1, 1), ts.Track("drum", 10, 2), ts.Track("melody", 3, 3)])
+ed2 = ts.Engine(prd2, FakeOut()); sqd = ts.Sequencer(prd2, ed2)
+before = [t.number for t in prd2.tracks]
+sqd.drop_row("grid", 0, 2)
+assert [t.number for t in prd2.tracks] == [before[1], before[2], before[0]], [t.number for t in prd2.tracks]
+sqd.drop_row("grid", 2, 0)
+assert [t.number for t in prd2.tracks] == before, "and back"
+prd2.song = [ts.SongStep(4, 1, {1: 0}), ts.SongStep(4, 1, {1: 1}), ts.SongStep(4, 1, {1: 2})]
+prd2.song_on = True
+ed2.song_step = 0
+sqd.drop_row("song", 0, 2)
+assert [st.patterns[1] for st in prd2.song] == [1, 2, 0], [st.patterns[1] for st in prd2.song]
+assert ed2.song_step == 2, "the step playing moved with the song"
+assert sqd.song_sel == 2, sqd.song_sel
+# a held row is lifted, then the drag moves it; a plain drag scrolls instead
+sqd.view = "song"; sqd.grab() if hasattr(sqd, "grab") else None
+img = QImage(1060, 530, QImage.Format_ARGB32); img.fill(0)
+q = QPainter(img); q.setRenderHint(QPainter.Antialiasing); sqd.paint(q, 1060, 530); q.end()
+row1 = sqd.song_rows[1]
+g = ts.Reorder(sqd, "song", 1, row1.center())
+g.t0 -= 0.5
+g.tick()
+assert g.lifted, "a held row is picked up"
+g.move(QPointF(row1.center().x(), sqd.song_rows[2].center().y()))
+assert g.target == 2, g.target
+order = [st.patterns[1] for st in prd2.song]
+g.release(QPointF(0, 0))
+assert [st.patterns[1] for st in prd2.song] == [order[0], order[2], order[1]], "dropped in its new place"
+# a quick drag is a scroll, not a move
+g2 = ts.Reorder(sqd, "song", 0, sqd.song_rows[0].center())
+g2.move(QPointF(0, sqd.song_rows[0].center().y() + 60))
+assert g2.scrolling and not g2.lifted, "a drag scrolls the list"
+g2.release(QPointF(0, 0))
+assert [st.patterns[1] for st in prd2.song] == [order[0], order[2], order[1]], "and nothing moved"
+ed2.close()
+print("drag reorder OK")

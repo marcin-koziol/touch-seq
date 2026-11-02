@@ -2,6 +2,7 @@
 tempo, and the step-painting gestures that belong to it."""
 import copy
 import math
+import time
 
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QPolygonF
@@ -100,6 +101,48 @@ class SlotDrag(Gesture):
             self.ui.drag_pattern(self.src, target)
 
 
+class Reorder(Gesture):
+    """A row of a list: a drag scrolls the list (as before), a tap picks the row, and holding it for a moment
+    lifts it so that a drag then moves it - to another place in the same list."""
+
+    HOLD = 0.35  # s: a short hold picks the row up (a plain drag before that still scrolls)
+    THRESHOLD = 12.0  # px of movement that means "this is a scroll, not a hold"
+
+    def __init__(self, ui, kind, index, pos):
+        self.ui, self.kind, self.index = ui, kind, index
+        self.y0, self.scroll0 = pos.y(), ui.list_scroll(kind)
+        self.scrolling = self.lifted = False
+        self.target = index
+        self.t0 = time.monotonic()
+
+    def tick(self):
+        if not (self.lifted or self.scrolling) and time.monotonic() - self.t0 >= self.HOLD:
+            self.lifted = True
+            self.ui.invalidate()
+
+    def move(self, pos):
+        if self.lifted:
+            target = self.ui.row_at(self.kind, pos)
+            if target is not None and target != self.target:
+                self.target = target
+                self.ui.invalidate()
+            return
+        dy = pos.y() - self.y0
+        if not self.scrolling and abs(dy) > self.THRESHOLD:
+            self.scrolling = True
+        if self.scrolling:
+            self.ui.set_list_scroll(self.kind, self.scroll0 - dy)
+
+    def release(self, pos):
+        if self.lifted:
+            self.ui.drop_row(self.kind, self.index, self.target)
+        elif not self.scrolling:
+            self.ui.tap_row(self.kind, self.index)
+
+    def cancel(self):
+        pass
+
+
 class LaneDraw(Gesture):
     """Velocity/gate lane: the finger's height sets the value of the notes starting at the step under it."""
 
@@ -134,6 +177,8 @@ class Sequencer(Panel):
         self.song_scroll = 0.0
         self.song_track_scroll = 0.0  # the step's tracks: they scroll, they never squeeze
         self.song_pick = None  # (step, track number) while choosing a pattern for it
+        self.grid_rows = {}  # index -> row rect, from the last paint (where a dragged row lands)
+        self.song_rows = {}
         self.master_fx = lambda: False  # the rack: is XYFX on the master (adds a MASTER row)
         self.master_focus = False  # the MASTER row is selected (PLAY-12 shows the XY pad)
         self.new_track = lambda: None  # the rack: the "+" dialog (drum, melody, external MIDI, audio)
@@ -391,6 +436,53 @@ class Sequencer(Panel):
         return cells[j].left() + (e - j) * cells[j].width()
 
     # --- song view: the arrangement above the patterns ---------------------
+    def moving(self, kind):
+        """The row being dragged in that list, if any."""
+        return next((g for g in self.gestures.values() if isinstance(g, Reorder) and g.lifted and g.kind == kind),
+                    None)
+
+    def list_scroll(self, kind):
+        return self.scroll if kind == "grid" else self.song_scroll
+
+    def set_list_scroll(self, kind, value):
+        if kind == "grid":
+            self.scroll = value
+        else:
+            self.song_scroll = value
+
+    def row_at(self, kind, pos):
+        """Which row is under the finger, from the rows drawn last (the dragged row's landing place)."""
+        rows = self.grid_rows if kind == "grid" else self.song_rows
+        return next((i for i, rect in rows.items() if rect.top() <= pos.y() <= rect.bottom()), None)
+
+    def tap_row(self, kind, index):
+        if kind == "grid" and 0 <= index < len(self.project.tracks):
+            self.select(self.project.tracks[index])
+        elif kind == "song":
+            self.select_song_step(index)
+
+    def drop_row(self, kind, src, dst):
+        """Move a row: a track in GRID, a step in SONG. The engine reads both lists, so the move holds its lock;
+        a moved track keeps its number and its colour."""
+        if src == dst:
+            return
+        engine = self.engine
+        with engine.lock:
+            items = self.project.tracks if kind == "grid" else self.project.song
+            if not (0 <= src < len(items) and 0 <= dst < len(items)):
+                return
+            items.insert(dst, items.pop(src))
+            if kind == "song" and engine.song_step is not None:  # the step playing is the one moved
+                if engine.song_step == src:
+                    engine.song_step = dst
+                elif src < engine.song_step <= dst:
+                    engine.song_step -= 1
+                elif dst <= engine.song_step < src:
+                    engine.song_step += 1
+        if kind == "song":
+            self.song_sel = dst
+        self.invalidate()
+
     def toggle_song(self):
         """The transport follows the song (or stops following it, back to the patterns playing)."""
         pr = self.project
@@ -465,6 +557,8 @@ class Sequencer(Panel):
         self.text(p, count, f"{len(steps)} step" + ("s" if len(steps) != 1 else "") if steps else "no steps yet", DIM, 12,
                   Qt.AlignRight | Qt.AlignVCenter)
         now, bar = e.song_position()
+        self.song_rows = {}
+        moving = self.moving("song")
         rows = QRectF(left.left(), head.bottom() + 6 * s, left.width(),
                       left.bottom() - head.bottom() - 6 * s - 52 * s)
         rh = 62 * s
@@ -514,9 +608,12 @@ class Sequencer(Panel):
                 p.setClipRect(QRectF(close.left(), close.top(), close.width() * held.progress(), close.height()))
                 self.box(p, close, QColor(255, 93, 93, 150), None, radius=6)
                 p.restore()
-            self.region(row.intersected(rows), lambda pos, n=n: ScrollOrTap(
-                pos, lambda: self.song_scroll, lambda v: setattr(self, "song_scroll", v),
-                lambda: self.select_song_step(n)))
+            self.song_rows[n] = row
+            if moving and n == moving.index:
+                self.box(p, row, QColor(0, 0, 0, 0), "#38d6ff", 3, radius=8)
+            elif moving and n == moving.target:
+                self.box(p, QRectF(row.left(), row.top() - 4 * s, row.width(), 5 * s), "#38d6ff", None, radius=2)
+            self.region(row.intersected(rows), lambda pos, n=n: Reorder(self, "song", n, pos))
             self.on_press(bars_b.intersected(rows), lambda n=n: self.cycle_song_bars(n))
             self.on_press(reps_b.intersected(rows), lambda n=n: self.cycle_song_repeats(n))
             self.region(close.intersected(rows), lambda pos, n=n: Hold(lambda: self.delete_song_step(n),
@@ -565,10 +662,10 @@ class Sequencer(Panel):
                 lambda: self.open_song_pick(n, number)))
         p.restore()
         self.text(p, QRectF(r.left(), r.bottom() - 46 * s, r.width(), 20 * s),
-                  "tap a step: play it from the next bar · tap bars/×repeats: change · hold ✕: delete", DIM, 11,
+                  "tap a step: play it from the next bar · hold ✕: delete it", DIM, 11,
                   Qt.AlignLeft | Qt.AlignVCenter, elide=True)
         self.text(p, QRectF(r.left(), r.bottom() - 26 * s, r.width(), 20 * s),
-                  "a pattern keeps its own length and loops inside the step", DIM, 11,
+                  "hold a step and drag: move it in the list · tap bars/×repeats: change them", DIM, 11,
                   Qt.AlignLeft | Qt.AlignVCenter, elide=True)
 
     def draw_song_picker(self, p, area):
@@ -608,6 +705,8 @@ class Sequencer(Panel):
         self.master_focus = self.master_focus and master
         rows = tracks + (["master"] if master else []) + [None]
         self.scroll = max(0.0, min(self.scroll, len(rows) * rh + g - r.height()))
+        self.grid_rows = {}
+        moving = self.moving("grid")
         p.save()
         p.setClipRect(r)
         for idx, tr in enumerate(rows):
@@ -624,6 +723,12 @@ class Sequencer(Panel):
                 continue
             lane = QRectF(head.right() + 10 * s, y, r.right() - head.right() - 18 * s, rh - g)
             self.draw_header(p, head, r, tr)
+            self.grid_rows[idx] = head
+            if moving and idx == moving.index:  # picked up: this is the row being moved
+                self.box(p, head, QColor(0, 0, 0, 0), "#38d6ff", 3, radius=8)
+            elif moving and idx == moving.target:  # where it will land
+                self.box(p, QRectF(head.left(), head.top() - 4 * s, head.width(), 5 * s), "#38d6ff", None, radius=2)
+            self.region(head.intersected(r), lambda pos, idx=idx: Reorder(self, "grid", idx, pos))
             if tr.audio:  # no steps: the row shows the input it takes and where it goes
                 self.draw_audio_row(p, lane, tr)
                 continue
