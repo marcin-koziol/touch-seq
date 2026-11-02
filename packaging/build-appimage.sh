@@ -48,6 +48,12 @@ monitor-build/monitor-test
 install -Dm755 monitor-build/bin/touchseq-monitor.clap AppDir/usr/lib/clap/touchseq-monitor.clap
 
 echo "== EQ"
+cmake -B space-build -S "$ROOT/space" -DCMAKE_BUILD_TYPE=Release >/dev/null
+cmake --build space-build -j"$(nproc)" >/dev/null
+space-build/space-test
+install -Dm755 space-build/bin/touchseq-space.clap AppDir/usr/lib/clap/touchseq-space.clap
+cp -r space-build/bin/touchseq-space.lv2 AppDir/usr/lib/lv2/
+
 cmake -B click-build -S "$ROOT/click" -DCMAKE_BUILD_TYPE=Release >/dev/null
 cmake --build click-build -j"$(nproc)" >/dev/null
 click-build/click-test

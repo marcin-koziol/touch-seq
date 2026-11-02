@@ -367,6 +367,26 @@ def find_click():
     return None
 
 
+BUILTIN_FILES = ("touchseq-xyfx", "touchseq-monitor", "touchseq-eq", "touchseq-click", "touchseq-space")
+_builtin_cache = None
+
+
+def builtin_refs():
+    """The plugins that ship with the app, looked for on disk (once): a catalog scanned before one of them was
+    installed must not hide it, and a RESCAN then finds it too."""
+    global _builtin_cache
+    if _builtin_cache is not None:
+        return _builtin_cache
+    refs = []
+    for folder in SEARCH["clap"]:
+        for stem in BUILTIN_FILES:
+            path = folder / f"{stem}.clap"
+            if path.is_file():
+                refs += run_discovery("clap", str(path))  # the file reports its own name, ids and kind
+    _builtin_cache = refs
+    return refs
+
+
 def audio_input_choices():
     """The inputs of audio_inputs() as (port, "device · channel"), the shape the picker dialogs take."""
     return [(port, f"{label} · {name}") for port, label, name in audio_inputs()]

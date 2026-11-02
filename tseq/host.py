@@ -14,8 +14,8 @@ from PySide6.QtGui import QColor, QLinearGradient, QPen
 import plugins
 
 from .model import Bus
-from .constants import (BG, BORDER, CLICK_ACCENT, CLICK_BEAT, CLICK_LABELS, DIM, EQ_LABELS, MONITOR_LABELS,
-                        PALETTE, PANEL, SLOTS, TEXT, WARN, XYFX_LABELS)
+from .constants import (BG, BORDER, BUILTIN_LABELS, CLICK_ACCENT, CLICK_BEAT, CLICK_LABELS, DIM, EQ_LABELS,
+                        MONITOR_LABELS, PALETTE, PANEL, SLOTS, TEXT, WARN, XYFX_LABELS)
 from .eq import EqEditor
 from .gestures import Drag, Hold, ScrollOrTap, Slide
 from .ui import Panel, param_color, split
@@ -66,6 +66,7 @@ class HostPanel(Panel):
         self.click_plugin = None  # the metronome node between the master and the output
         self.click_out = None  # the MIDI port that plays it
         self.click_note = None  # (accent) -> None: one beat of the metronome, None without the plugin
+        self._builtin = None  # our own plugins, found on disk once (a stale catalog must not hide them)
         self.eq = EqEditor(self)  # the EQ's own editor, drawn in the parameter area
         if self.buffer:
             plugins.set_quantum(self.buffer)  # before the engine starts, so the plugins see that size
@@ -1011,10 +1012,31 @@ class HostPanel(Panel):
     def open_browser(self, strip, k):
         self.browser, self.browser_scroll = (strip, k), 0.0
 
+    def builtin_plugins(self):
+        """The plugins that ship with the app, found on disk the first time this is asked."""
+        if self._builtin is None:
+            self._builtin = plugins.builtin_refs()
+        return self._builtin
+
     def browser_items(self):
+        """The plugins the browser lists: by format, or only the ones that ship with the app (BUILTIN), which
+        come first in the full list so they are found without hunting."""
         instrument = self.instrument_slot(*self.browser)
-        return [r for r in self.catalog.plugins
-                if (r.instrument if instrument else r.effect) and self.browser_fmt in (None, r.fmt)]
+
+        def shown(ref):
+            if self.browser_fmt == "builtin":
+                return ref.label in BUILTIN_LABELS
+            return self.browser_fmt in (None, ref.fmt)
+
+        def kind(ref):
+            return ref.instrument if instrument else ref.effect
+
+        items = [r for r in self.catalog.plugins if kind(r) and shown(r)]
+        have = {str(r.path) for r in self.catalog.plugins}
+        items += [r for r in self.builtin_plugins() if kind(r) and str(r.path) not in have]  # not in the catalog
+        items.sort(key=lambda r: (r.label not in BUILTIN_LABELS, r.name.lower()) if self.browser_fmt in (None, "builtin")
+                   else r.name.lower())
+        return items
 
     def choose(self, ref):
         strip, k = self.browser
@@ -1027,16 +1049,16 @@ class HostPanel(Panel):
         strip, k = self.browser
         tr = self.track_of(strip)
         header = QRectF(g, g, self.w - 2 * g, 48 * s)
-        title, rescan, *fmts, close = split(header, [0, 96 * s] + [70 * s] * 4 + [60 * s], 6 * s)
+        title, rescan, *fmts, close = split(header, [0, 96 * s] + [74 * s] * 5 + [60 * s], 6 * s)
         kind = "instrument" if self.instrument_slot(strip, k) else "effect"
         self.text(p, title.adjusted(6 * s, 0, 0, 0), f"{f'T{tr.number}' if tr else 'MASTER'} · choose {kind}", TEXT, 16,
                   Qt.AlignLeft | Qt.AlignVCenter, bold=True)
         cat = self.catalog
         self.button(p, rescan, "RESCAN", cat.rescan, pending=cat.scanning,
                     sub=cat.progress if cat.scanning else "new plugins")
-        for rect, fmt in zip(fmts, (None, "clap", "lv2", "vst3")):
-            self.button(p, rect, (fmt or "all").upper(), lambda fmt=fmt: self.set_browser_fmt(fmt),
-                        on=self.browser_fmt == fmt)
+        for rect, fmt, label in zip(fmts, (None, "builtin", "clap", "lv2", "vst3"),
+                                    ("ALL", "BUILTIN", "CLAP", "LV2", "VST3")):
+            self.button(p, rect, label, lambda fmt=fmt: self.set_browser_fmt(fmt), on=self.browser_fmt == fmt)
         self.button(p, close, "✕", lambda: setattr(self, "browser", None))
         area = QRectF(g, header.bottom() + 8 * s, self.w - 2 * g, self.h - header.bottom() - 8 * s - g)
         if not cat.ready:

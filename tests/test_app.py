@@ -3,6 +3,7 @@ Usage: QT_QPA_PLATFORM=offscreen python tests/test_app.py [output dir for screen
 import sys
 import tempfile
 import time
+import types
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -1944,3 +1945,25 @@ img.fill(0); q = QPainter(img); q.setRenderHint(QPainter.Antialiasing); sk4.pain
 sk4.cc_pick = None
 ek4.close()
 print("cc lane UI OK")
+
+# --- the browser's BUILTIN list: our own plugins only, and first in the full list -----------
+def fake_ref(name, label, fmt="clap", instrument=False, effect=True):
+    return types.SimpleNamespace(name=name, label=label, fmt=fmt, instrument=instrument, effect=effect,
+                                 path=f"/x/{label}.clap", maker="m")
+
+fb = types.SimpleNamespace(
+    catalog=types.SimpleNamespace(plugins=[fake_ref("Zyn", "zyn"), fake_ref("Touch-Seq EQ", "touchseq.eq"),
+                                           fake_ref("Reaverb", "rev", fmt="lv2")]),
+    browser=("strip", 0), browser_fmt="builtin", _builtin=[], instrument_slot=lambda strip, k: False)
+fb.builtin_plugins = lambda: fb._builtin  # the real one caches what it finds on disk
+items = ts.HostPanel.browser_items(fb)
+assert [r.name for r in items] == ["Touch-Seq EQ"], [r.name for r in items]
+fb.browser_fmt = None
+assert [r.name for r in ts.HostPanel.browser_items(fb)] == ["Touch-Seq EQ", "Reaverb", "Zyn"]
+fb.browser_fmt = "lv2"
+assert [r.name for r in ts.HostPanel.browser_items(fb)] == ["Reaverb"]
+# one of ours that a stale catalog does not know about is still offered
+fb.browser_fmt = "builtin"
+fb._builtin = [fake_ref("Touch-Seq Space", "touchseq.space")]
+assert [r.name for r in ts.HostPanel.browser_items(fb)] == ["Touch-Seq EQ", "Touch-Seq Space"]
+print("builtin browser OK")

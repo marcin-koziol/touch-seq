@@ -105,6 +105,11 @@ the first free name (*Touch-Seq 2*, …) and says so in HOST-4's status line: bo
   level to meter and a fader to set; remove it and the input is a plain patch again (no meter, no fader).
   The **metronome** is the same idea the other way round: `click/` sits between the master and the output and
   plays a click for every beat note the sequencer sends it
+- **Space** is our delay-and-reverb in one (`space/`): a stereo delay with a lowpass in its loop and a
+  ping-pong cross-feed, into a reverb (eight damped combs, four allpasses a side), with Mix, Reverb, Size,
+  Damp, Delay, Time, Feedback and Tone as knobs — the two effects a live set always needs, without hunting
+  for a plugin. Our own plugins (XYFX, Monitor, EQ, Click, Space) are also the browser's **BUILTIN** list, and
+  come first in **ALL**
 - **effects buses**: a track's chain can go into a bus instead of straight into the master — **→ MASTER** under
   the chain cycles through the buses, **+ BUS** makes a new one. A bus has its own 3 slots and its own level,
   so one reverb can process just the two of five tracks you route into it; buses are their own columns in the
@@ -192,7 +197,7 @@ chmod +x Touch-Seq-0.7.1-x86_64.AppImage
 ./Touch-Seq-0.7.1-x86_64.AppImage
 ```
 
-It contains Python, Qt (PySide6), Carla and Touch-Seq's own plugins (XYFX, Monitor, EQ and Click). The machine needs:
+It contains Python, Qt (PySide6), Carla and Touch-Seq's own plugins (XYFX, Monitor, EQ, Click and Space). The machine needs:
 
 - Linux, x86_64 or aarch64 (e.g. Raspberry Pi 4/5 with a 64-bit OS), glibc 2.35 or newer
   (Ubuntu 22.04+, Debian 12+, Fedora 36+, Arch, Raspberry Pi OS bookworm)
@@ -305,7 +310,7 @@ QT_QPA_PLATFORM=offscreen python tests/test_app.py   # sequencer, UI, projects, 
 QT_QPA_PLATFORM=offscreen python tests/test_host.py  # plugin host with real Carla + PipeWire (local only)
 QT_QPA_PLATFORM=offscreen python tests/test_xyfx.py  # XYFX + XY pad with real Carla (local only)
 packaging/build-appimage.sh                           # dist/Touch-Seq-<version>-<arch>.AppImage
-xyfx/install.sh monitor/install.sh eq/install.sh click/install.sh   # our plugins into ~/.clap and ~/.lv2
+xyfx/install.sh monitor/install.sh eq/install.sh click/install.sh space/install.sh   # into ~/.clap and ~/.lv2
 ```
 
 CI runs the app tests and the XYFX build and DSP test on every push; a `v*` tag builds AppImages for x86_64

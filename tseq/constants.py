@@ -84,3 +84,7 @@ EQ_LABELS = {"touchseq.eq", "urn:touch-seq:eq"}
 CLICK_LABELS = {"touchseq.click", "urn:touch-seq:click"}  # CLAP id, LV2 URI (click/ in this repo)
 CLICK_BEAT, CLICK_ACCENT = 77, 76  # the metronome plugin's notes: a beat, and the first beat of the bar
 CC_LANES = 4  # a pattern takes this many controller lanes at most
+# a delay into a reverb, the two effects a live set always needs (space/ in this repo)
+SPACE_LABELS = {"touchseq.space", "urn:touch-seq:space"}
+# the plugins that ship with the app, whatever their format: the browser's BUILTIN list
+BUILTIN_LABELS = XYFX_LABELS | MONITOR_LABELS | EQ_LABELS | CLICK_LABELS | SPACE_LABELS
