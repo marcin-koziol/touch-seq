@@ -35,6 +35,7 @@ class Rack(Window):
         self.seq.reroute = host.rewire
         host.choose_port = self.open_port_choice
         self.perf = Performer(project, engine, self.seq, host)  # owns the tracks' MIDI inputs
+        self.controls.record_cc = self.perf.record_cc_channel  # faders write into the pattern when armed
         self.seq.input_ok = self.perf.input_ok  # its socket says when a keyboard is away
         super().__init__([(0, 0, "CTRL-10", "performance controls", self.controls),
                           (0, 1, "SEQ-64", "step sequencer", self.seq),

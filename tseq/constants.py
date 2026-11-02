@@ -83,3 +83,4 @@ MONITOR_LABELS = {"touchseq.monitor", "urn:touch-seq:monitor"}
 EQ_LABELS = {"touchseq.eq", "urn:touch-seq:eq"}
 CLICK_LABELS = {"touchseq.click", "urn:touch-seq:click"}  # CLAP id, LV2 URI (click/ in this repo)
 CLICK_BEAT, CLICK_ACCENT = 77, 76  # the metronome plugin's notes: a beat, and the first beat of the bar
+CC_LANES = 4  # a pattern takes this many controller lanes at most

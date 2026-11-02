@@ -139,7 +139,7 @@ assert [on_notes(i) for i in range(4)] == [[top - 1]] * 4, [on_notes(i) for i in
 tap(cx(5), y_top); tap(cx(5), y_top + 2 * rh); assert on_notes(5) == [top - 2, top], on_notes(5)
 w.press(13, QPointF(cx(7), y_top)); w.move(13, QPointF(cx(7), y_top + rh)); w.move(13, QPointF(cx(7), y_top + 3 * rh)); w.release(13, QPointF(cx(7), y_top + 3 * rh))
 assert on_notes(7) == [top - 3], ("placing + vertical drag moves the note", on_notes(7))
-w.press(9, QPointF(cx(1), 441)); w.release(9, QPointF(cx(1), 441))
+w.press(9, QPointF(cx(1), 470)); w.release(9, QPointF(cx(1), 470))  # the lane's bars (tabs above them)
 print("lane vel:", pat0.lane(top - 1)[1].vel); assert pat0.lane(top - 1)[1].vel > 120
 w.press(10, QPointF(30, 300)); w.move(10, QPointF(30, 315)); w.move(10, QPointF(30, 300 + 3 * rh)); w.release(10, QPointF(30, 400))
 print("roll base after keyboard drag down 3 rows:", base, "->", w.roll_base(tr0)); assert w.roll_base(tr0) == base + 3
@@ -1865,3 +1865,82 @@ assert sqg2.room(trg.current, lane, 0) == 16, sqg2.room(trg.current, lane, 0)
 lane[8].on = True
 assert sqg2.room(trg.current, lane, 0) == 8, "up to the next note of the same pitch"
 print("long notes OK")
+
+# --- controller lanes: a value holds until its next point, and only changes go out ---------
+prj = ts.Project(bpm=600, tracks=[ts.Track("melody", 1, 1)])  # 600 bpm: a step is 25 ms
+tj = prj.tracks[0]
+tj.current.cc[1] = {0: 20, 4: 100}
+outj = FakeOut(); ej = ts.Engine(prj, outj)
+ej.start()
+time.sleep(16 * ej.step_len * 1.25)  # a bar and a bit
+ccs = [(m[1], m[2]) for _, m in outj.log if m[0] & 0xF0 == 0xB0]
+print("controllers sent:", ccs[:6])
+assert ccs[:2] == [(1, 20), (1, 100)], ccs  # 20 at step 0, 100 at step 4, nothing in between
+ej.stop()
+outj.log.clear()
+ej.start()
+time.sleep(3 * ej.step_len)
+assert (1, 20) in [(m[1], m[2]) for _, m in outj.log if m[0] & 0xF0 == 0xB0], "a start says it again"
+ej.stop(); ej.close()
+# what a lane is worth at a step: the last point at or before it, and the end wraps into the start
+pat_j = prj.tracks[0].patterns[0]
+pat_j.cc[74] = {8: 60}
+assert pat_j.cc_at(74, 0) == 60, "a lane that starts later still has a value at the start (the end wraps)"
+assert pat_j.cc_at(1, 3) == 20 and pat_j.cc_at(1, 5) == 100 and pat_j.cc_at(74, 9) == 60
+_f = OUT / "cc.json"
+_f.write_text(ts.dump_project(prj))
+back = ts.load_project(_f)
+assert back.tracks[0].patterns[0].cc == {1: {0: 20, 4: 100}, 74: {8: 60}}, back.tracks[0].patterns[0].cc
+print("cc lanes OK")
+
+# --- a controller from the keyboard lands at the step under the playhead while armed -------
+prk3 = ts.Project(bpm=600, tracks=[ts.Track("melody", 1, 1)])
+tk3 = prk3.tracks[0]; tk3.in_port = "keys"
+outk3 = FakeOut(); ek3 = ts.Engine(prk3, outk3); sk3 = ts.Sequencer(prk3, ek3); pk3 = ts.Performer(prk3, ek3, sk3)
+sk3.sel = tk3
+pk3.inputs = FakeInputs()
+pk3.mode = "rec"
+ek3.start(); pk3.tick()
+time.sleep(0.15)
+step_at = int(ek3.position(tk3)) % 16
+pk3.inputs.msgs.append(("Arturia KeyStep MIDI 1", [0xB1, 74, 90])); pk3.tick()
+lane = tk3.current.cc.get(74)
+assert lane, "a lane was made for the controller"
+assert lane.get(step_at) == 90 or lane.get((step_at + 1) % 16) == 90, (step_at, lane)
+assert [0xB1, 74, 90] in [m for _, m in outk3.log], "and it still reached the instrument"
+for n in (1, 2, 3, 4):  # the lane limit holds
+    pk3.inputs.msgs.append(("Arturia KeyStep MIDI 1", [0xB1, n, 10])); pk3.tick()
+assert len(tk3.current.cc) <= 4, tk3.current.cc
+# a fader on the track's channel also writes down
+tk3.current.cc.clear()
+pk3.record_cc_channel(tk3.channel, 7, 55)
+assert tk3.current.cc.get(7), "a fader on the channel lands in the pattern too"
+ek3.stop(); pk3.mode = None; pk3.tick(); ek3.close()
+print("cc recording OK")
+
+# --- the lane under the roll: tabs, drawing, removal --------------------------------------
+prk4 = ts.Project(bpm=120, tracks=[ts.Track("melody", 1, 1)])
+ek4 = ts.Engine(prk4, FakeOut()); sk4 = ts.Sequencer(prk4, ek4)
+tk4 = prk4.tracks[0]; sk4.sel = tk4
+assert sk4.param == "vel"
+sk4.add_cc_lane(74)
+assert 74 in tk4.current.cc and sk4.param == "cc" and sk4.cc_num == 74, (sk4.param, sk4.cc_num)
+rect = QRectF(0, 0, 320, 40)
+g4 = ts.CcDraw(sk4, tk4, rect, 74, QPointF(10, 30))  # low at the start
+g4.move(QPointF(310, 4))                            # and high at the end: a sweep
+lane = tk4.current.cc[74]
+assert lane[0] < lane[15], lane
+assert all(0 <= lane[i] <= 127 for i in range(16)) and len(lane) >= 2, lane
+assert lane[0] < 40 and lane[15] > 100, lane
+sk4.remove_cc_lane(74)
+assert 74 not in tk4.current.cc and sk4.param == "vel", (tk4.current.cc, sk4.param)
+img = QImage(1060, 530, QImage.Format_ARGB32); img.fill(0)
+q = QPainter(img); q.setRenderHint(QPainter.Antialiasing)
+sk4.add_cc_lane(1); tk4.current.cc[1] = {0: 20, 8: 100}
+sk4.view = "edit"; sk4.paint(q, 1060, 530); q.end()
+img.save(str(OUT / "cc_lane.png"))
+sk4.open_cc_pick()
+img.fill(0); q = QPainter(img); q.setRenderHint(QPainter.Antialiasing); sk4.paint(q, 1060, 530); q.end()
+sk4.cc_pick = None
+ek4.close()
+print("cc lane UI OK")

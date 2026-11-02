@@ -32,6 +32,7 @@ class Pattern:
     first use, so any number of notes can sound on one step."""
     length: int = 16
     lanes: dict = field(default_factory=dict)
+    cc: dict = field(default_factory=dict)  # cc number -> {step: value}: a value holds until the next point
 
     def lane(self, k):
         if k not in self.lanes:
@@ -42,7 +43,16 @@ class Pattern:
         return [(k, lane[i]) for k, lane in self.lanes.items() if lane[i].on]
 
     def empty(self):
-        return not any(s.on for lane in self.lanes.values() for s in lane)
+        return not self.cc and not any(s.on for lane in self.lanes.values() for s in lane)
+
+    def cc_at(self, number, i):
+        """The value in effect at step i: the last point at or before it, and the end of the pattern wraps
+        round to the beginning (so a lane that starts later still has a value from the start)."""
+        points = self.cc.get(number)
+        if not points:
+            return None
+        before = [step for step in points if step <= i]
+        return points[max(before)] if before else points[max(points)]
 
 
 @dataclass(eq=False)  # identity hash: chains are keys in the plugin host
@@ -199,8 +209,11 @@ class Project:
 def dump_project(pr):
     """Compact JSON: a pattern stores only the steps that differ from the default."""
     def pattern(p):
-        return {"length": p.length, "steps": [[k, i, *astuple(s)] for k, lane in p.lanes.items()
-                                              for i, s in enumerate(lane) if s != DEFAULT_STEP]}
+        d = {"length": p.length, "steps": [[k, i, *astuple(s)] for k, lane in p.lanes.items()
+                                          for i, s in enumerate(lane) if s != DEFAULT_STEP]}
+        if p.cc:  # only the points: a lane is a handful of them, not 64 values
+            d["cc"] = {str(n): sorted([i, v] for i, v in points.items()) for n, points in p.cc.items()}
+        return d
 
     return json.dumps({"bpm": pr.bpm, "key": pr.key, "scale": pr.scale, "tracks": [
         {"kind": t.kind, "channel": t.channel, "number": t.number, "pattern": t.pattern, "scenes": t.scenes, "mute": t.mute,
@@ -254,6 +267,8 @@ def load_project(path):
                    strip=load_strip(t["strip"]) if "strip" in t else Strip())
         for p, pd in zip(tr.patterns, t["patterns"]):
             p.length = pd["length"]
+            for n, points in (pd.get("cc") or {}).items():
+                p.cc[int(n)] = {int(i): int(v) for i, v in points}
             for row in pd["steps"]:
                 if len(row) == 6:  # older files: [lane, step, on, note, vel, gate]; a melody's lane is its note
                     k, i, on, note, vel, gate = row

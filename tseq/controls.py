@@ -41,6 +41,7 @@ class Controls(Panel):
     def __init__(self, project, engine, host=None):
         super().__init__()
         self.project, self.engine, self.host = project, engine, host
+        self.record_cc = lambda channel, number, value: None  # the rack: a performer writes faders down
         self.selected = lambda: project.tracks[0]  # the rack: the sequencer's selected track
         self.values = [0.5 if c.centered else 0.0 for c in project.controls]
         self.held = set()  # faders under a finger
@@ -79,6 +80,8 @@ class Controls(Panel):
                 for m in msgs:
                     self.engine.send(m, tr)
             self.sent[i] = msgs
+            if c.kind != "pb" and not c.fine:  # a plain CC: recorded into the pattern while REC/OVR is armed
+                self.record_cc(channel, c.cc, v)
 
     def tick(self):
         super().tick()

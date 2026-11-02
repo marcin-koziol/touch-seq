@@ -6,8 +6,8 @@ import time
 from PySide6.QtCore import QPointF, QRectF, Qt, QTimer
 from PySide6.QtGui import QColor, QLinearGradient, QPen
 
-from .constants import (BG, BORDER, BPM_MAX, BPM_MIN, DIM, DRUM_COLORS, DRUM_KIT, GATE_RES, MAX_GATE, PANEL,
-                        TEXT, WARN)
+from .constants import (BG, BORDER, BPM_MAX, BPM_MIN, CC_LANES, DIM, DRUM_COLORS, DRUM_KIT, GATE_RES, MAX_GATE,
+                        PANEL, TEXT, WARN)
 from .gestures import Gesture
 from .midiin import Inputs
 from .music import (BORROWED, CHORD_SCALE, SCALES, XYFX_MODES, chord_name, note_name, roman, stack, xyfx_filter,
@@ -219,6 +219,33 @@ class Performer(Panel):
     def close(self):
         self.inputs.close()
 
+    # --- controller lanes ------------------------------------------------------
+    def record_cc(self, tracks, number, value):
+        """A controller from a keyboard: written into the pattern at the step under the playhead while REC/OVR
+        is armed. A lane is added for it when there is none yet (up to CC_LANES), like a DAW that learns it."""
+        if not self.mode:
+            return
+        for tr in tracks:
+            self.write_cc(tr, number, value)
+
+    def record_cc_channel(self, channel, number, value):
+        """A CTRL-10 fader on a channel: the selected track on that channel writes it down when it is armed."""
+        tr = self.seq.sel
+        if tr is not None and not tr.audio and tr.channel == channel:
+            self.record_cc([tr], number, value)
+
+    def write_cc(self, tr, number, value):
+        pos = self.engine.position(tr)
+        if not self.mode or pos is None:
+            return
+        pat = tr.current
+        lane = pat.cc.get(number)
+        if lane is None:
+            if len(pat.cc) >= CC_LANES:
+                return
+            lane = pat.cc[number] = {}
+        lane[int(pos) % pat.length] = max(0, min(127, int(value)))
+
     # --- MIDI input ------------------------------------------------------------
     def input_ok(self, tr):
         """Whether the track's input is actually open (its icon says so when the device is away)."""
@@ -299,6 +326,8 @@ class Performer(Panel):
                     held.release()
             return
         if status < 0xF0:  # pitch bend, mod wheel, aftertouch: the instrument
+            if kind == 0xB0 and len(msg) >= 3:  # a controller: heard live, and written down when armed
+                self.record_cc(tracks, msg[1], msg[2])
             for tr in tracks:
                 self.engine.send(msg, tr)
 

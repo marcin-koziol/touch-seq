@@ -7,7 +7,7 @@ import time
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QPolygonF
 
-from .constants import (BG, BORDER, DIM, DRUM_COLORS, DRUM_KIT, GATE_RES, MAX_GATE, MAX_STEPS,
+from .constants import (BG, BORDER, CC_LANES, DIM, DRUM_COLORS, DRUM_KIT, GATE_RES, MAX_GATE, MAX_STEPS,
                         PALETTE, PANEL, PATTERNS, PLAY, SCENES, STEPS_PER_BAR, TEXT, WARN)
 from .gestures import Drag, Gesture, Hold, ScrollOrTap
 from .model import DEFAULT_STEP, SongStep, Step
@@ -160,6 +160,32 @@ class LaneDraw(Gesture):
             self.tr.last = copy.copy(st)
 
 
+class CcDraw(Gesture):
+    """A controller lane: the finger's height sets the value at the step under it, and a quick drag across fills
+    the steps it jumped over, so a diagonal drag draws a ramp instead of a dotted line."""
+
+    def __init__(self, ui, tr, lane, number, pos):
+        self.ui, self.tr, self.lane, self.number, self.pattern = ui, tr, lane, number, tr.current
+        self.last = None
+        self.move(pos)
+
+    def value_at(self, pos):
+        f = max(0.0, min(1.0, (self.lane.bottom() - pos.y()) / self.lane.height()))
+        return round(f * 127)
+
+    def move(self, pos):
+        i = self.ui.cell_at(self.lane, pos)
+        value = self.value_at(pos)
+        lane = self.pattern.cc.setdefault(self.number, {})
+        if self.last is not None and abs(i - self.last[0]) > 1:  # a sweep: fill the steps between
+            j0, v0 = self.last
+            for j in range(min(j0, i), max(j0, i) + 1):
+                lane[j] = round(v0 + (value - v0) * (j - j0) / (i - j0))
+        else:
+            lane[i] = value
+        self.last = (i, value)
+
+
 class Sequencer(Panel):
     def __init__(self, project, engine):
         super().__init__()
@@ -167,7 +193,9 @@ class Sequencer(Panel):
         self.sel = project.tracks[0]
         self.view = "grid"
         self.page = 0
-        self.param = "vel"  # melody edit view: what the lane under the piano roll edits ("vel" / "gate")
+        self.param = "vel"  # melody edit view: the lane under the roll edits "vel", "gate" or a "cc" lane
+        self.cc_num = 1  # the controller lane shown when param is "cc"
+        self.cc_pick = None  # open while choosing a controller lane
         self.roll_bases = {}  # Track -> lowest visible piano roll note
         self.roll_rows = 12
         self.drum_param = "step"  # drum edit view: "step" paints on/off, "vel" drags velocity
@@ -832,7 +860,7 @@ class Sequencer(Panel):
         pat, color = tr.current, self.color(tr)
         g = 8 * s
         ctrl = QRectF(r.left() + g, r.top() + g, r.width() - 2 * g, 58 * s)
-        params = () if tr.audio else ("step", "vel") if tr.drum else ("vel", "gate")
+        params = ("step", "vel") if tr.drum else ()  # a melody's lanes are chosen under the roll
         octaves = [] if tr.drum or tr.audio else [68 * s, 68 * s]
         shifts = [] if tr.drum or tr.audio else [64 * s, 64 * s]  # transpose; drums and inputs have no pitch
         cols = split(ctrl, ([46 * s] if not tr.audio else []) + [100 * s, 80 * s, 80 * s, 72 * s, 0]
@@ -890,6 +918,8 @@ class Sequencer(Panel):
             self.draw_audio_edit(p, area, tr, color)
         else:
             (self.draw_drum_matrix if tr.drum else self.draw_roll)(p, area, tr, color)
+            if self.cc_pick:
+                self.draw_cc_picker(p, area)
 
     def draw_input(self, p, r, tr):
         """The track's MIDI input as a DIN socket: lit green with its channel once a keyboard is chosen,
@@ -1054,24 +1084,123 @@ class Sequencer(Panel):
         self.region(grid, lambda pos: Roll(self, tr, lambda q: self.cell_at(grid, q),
                                            lambda q: self.step_pos(grid, q), pitch_at, note_at, pos))
 
-        # velocity / gate lane
+        # the lane under the roll: what it edits (tabs) and the lane itself
         lane = QRectF(grid.left(), roll.bottom() + 12 * s, grid.width(), area.bottom() - roll.bottom() - 12 * s)
+        tabs = QRectF(lane.left(), lane.top(), lane.width(), 26 * s)
+        bars = QRectF(lane.left(), tabs.bottom() + 4 * s, lane.width(), lane.bottom() - tabs.bottom() - 4 * s)
         label = QRectF(keys.left(), lane.top(), keys.width(), lane.height())
         self.box(p, label, PANEL, None, radius=5)
-        self.text(p, label, self.param.upper(), DIM, 12, bold=True)
-        for k, c in enumerate(self.cells(lane)):
+        name = ("VEL" if self.param == "vel" else "GATE" if self.param == "gate" else f"CC {self.cc_num}")
+        self.text(p, label, name, DIM, 11, bold=True)
+        entries = [("vel", "VEL", None), ("gate", "GATE", None)] + [("cc", f"CC {n}", n) for n in sorted(pat.cc)]
+        tw = 68 * s
+        for j, (kind, text, number) in enumerate(entries):
+            r = QRectF(tabs.left() + j * (tw + 4 * s), tabs.top(), tw, tabs.height())
+            self.button(p, r, text, lambda kind=kind, number=number: self.select_lane(kind, number),
+                        on=self.param == kind and (kind != "cc" or self.cc_num == number))
+        plus = QRectF(tabs.left() + len(entries) * (tw + 4 * s), tabs.top(), 58 * s, tabs.height())
+        self.button(p, plus, "+ CC", self.open_cc_pick)
+        if self.param == "cc":
+            self.draw_cc_lane(p, bars, tr, self.cc_num, color)
+        else:
+            for k, c in enumerate(self.cells(bars)):
+                i = self.page * 16 + k
+                self.box(p, c, "#10131a" if i >= pat.length else "#181c26", "#ffffff" if i == head else None, 1.5,
+                         radius=4)
+                notes = [st for _, st in pat.notes_at(i)]
+                if notes:  # a chord shows its highest value
+                    v = max(st.vel / 127 if self.param == "vel" else st.gate for st in notes)
+                    f = min(1.0, v)
+                    self.box(p, QRectF(c.left(), c.bottom() - c.height() * f, c.width(), c.height() * f), color,
+                             None, radius=4)
+                    if self.param == "gate" and v > 1:  # the lane draws 0-100%; longer notes say how long
+                        self.text(p, c, f"×{v:g}", BG, 12, bold=True)
+            self.region(bars, lambda pos: LaneDraw(self, tr, bars, self.param, pos))
+
+    def draw_cc_lane(self, p, bars, tr, number, color):
+        """A controller lane: one bar per step, as tall as the value in effect there (a value holds until its
+        next point); a white dot marks the steps that are points."""
+        s, pat = self.s, tr.current
+        points = pat.cc.get(number, {})
+        head = self.engine.playhead.get(tr)
+        for k, c in enumerate(self.cells(bars)):
             i = self.page * 16 + k
             self.box(p, c, "#10131a" if i >= pat.length else "#181c26", "#ffffff" if i == head else None, 1.5,
                      radius=4)
-            notes = [st for _, st in pat.notes_at(i)]
-            if notes:  # a chord shows its highest value
-                v = max(st.vel / 127 if self.param == "vel" else st.gate for st in notes)
-                f = min(1.0, v)
+            if i >= pat.length:
+                continue
+            value = pat.cc_at(number, i)
+            if value is not None:
+                f = value / 127
                 self.box(p, QRectF(c.left(), c.bottom() - c.height() * f, c.width(), c.height() * f), color, None,
                          radius=4)
-                if self.param == "gate" and v > 1:  # the lane draws 0-100%; longer notes say how long
-                    self.text(p, c, f"×{v:g}", BG, 12, bold=True)
-        self.region(lane, lambda pos: LaneDraw(self, tr, lane, self.param, pos))
+            if i in points:  # where the value is set
+                self.box(p, QRectF(c.left() + 3 * s, c.top() + 3 * s, 5 * s, 5 * s), "#ffffff", None, radius=2)
+        self.region(bars, lambda pos: CcDraw(self, tr, bars, number, pos))
+
+    COMMON_CCS = ((1, "mod"), (2, "breath"), (7, "volume"), (10, "pan"), (11, "expression"), (64, "sustain"),
+                  (71, "resonance"), (72, "release"), (73, "attack"), (74, "cutoff"), (91, "reverb"), (93, "chorus"))
+
+    def select_lane(self, kind, number=None):
+        """Which lane the strip under the roll edits: velocity, gate, or a controller's values."""
+        self.param = kind
+        if number is not None:
+            self.cc_num = number
+
+    def open_cc_pick(self):
+        self.cc_pick = True
+
+    def add_cc_lane(self, number):
+        """A controller lane in the playing pattern (up to CC_LANES), shown and ready to draw."""
+        pat = self.sel.current
+        if number not in pat.cc and len(pat.cc) >= CC_LANES:
+            return  # full: remove one first
+        pat.cc.setdefault(number, {})
+        self.select_lane("cc", number)
+        self.cc_pick = None
+
+    def remove_cc_lane(self, number):
+        self.sel.current.cc.pop(number, None)
+        if self.param == "cc" and self.cc_num == number:
+            self.param = "vel"
+        self.cc_pick = None
+
+    def draw_cc_picker(self, p, area):
+        """Which controller the lane under the roll shows, and which lanes the pattern has."""
+        s, pat = self.s, self.sel.current
+        p.fillRect(area, QColor(0, 0, 0, 170))
+        self.on_press(area, lambda: setattr(self, "cc_pick", None))  # tap outside closes
+        panel = QRectF(0, 0, min(area.width() - 20 * s, 820 * s), min(area.height() - 14 * s, 320 * s))
+        panel.moveCenter(area.center())
+        self.box(p, panel, "#11141b", "#38d6ff", 2, radius=14)
+        self.on_press(panel, lambda: None)
+        inner = panel.adjusted(18 * s, 12 * s, -18 * s, -14 * s)
+        self.text(p, QRectF(inner.left(), inner.top(), inner.width(), 24 * s), "CONTROLLER LANE", TEXT, 15,
+                  Qt.AlignLeft | Qt.AlignVCenter, bold=True)
+        rows = 2
+        grid = QRectF(inner.left(), inner.top() + 28 * s, inner.width(), rows * 46 * s)
+        for j, (number, name) in enumerate(self.COMMON_CCS):
+            row = QRectF(grid.left(), grid.top() + (j // 6) * 46 * s, grid.width(), 42 * s)
+            r = split(row, [0] * 6, 8 * s)[j % 6]
+            self.button(p, r, f"CC {number}", lambda number=number: self.add_cc_lane(number),
+                        on=number in pat.cc, sub=name)
+        lanes = sorted(pat.cc)
+        y = grid.bottom() + 6 * s
+        self.text(p, QRectF(inner.left(), y, inner.width(), 18 * s), "LANES IN THIS PATTERN", DIM, 11,
+                  Qt.AlignLeft | Qt.AlignVCenter, bold=True)
+        if lanes:
+            for j, number in enumerate(lanes[:CC_LANES]):
+                r = split(QRectF(inner.left(), y + 18 * s, inner.width(), 34 * s), [0] * CC_LANES, 8 * s)[j]
+                self.button(p, r, f"CC {number}", lambda number=number: self.select_lane("cc", number),
+                            on=self.param == "cc" and self.cc_num == number)
+                close = QRectF(r.right() - 32 * s, r.top(), 30 * s, r.height())
+                self.button(p, close, "✕", lambda number=number: self.remove_cc_lane(number), color=WARN)
+        else:
+            self.text(p, QRectF(inner.left(), y + 18 * s, inner.width(), 34 * s),
+                      "none yet: pick one above, then draw it under the roll", "#5b6577", 12,
+                      Qt.AlignLeft | Qt.AlignVCenter, elide=True)
+        self.button(p, QRectF(inner.right() - 130 * s, inner.bottom() - 38 * s, 130 * s, 38 * s), "CANCEL",
+                    lambda: setattr(self, "cc_pick", None))
 
     def draw_drum_matrix(self, p, area, tr, _):
         """One row per kit voice, each in its own fixed color; the name is a pad that selects the voice

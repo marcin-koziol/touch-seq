@@ -155,6 +155,7 @@ class Engine:
         self.rec = {}  # Track -> replace (bool): the tracks recording live playing into them
         self.rec_fresh = set()  # (lane, step) a held take is sounding: the pattern leaves it to the fingers
         self.rec_taken = set()  # (lane, step) recorded since recording started: REC doesn't erase them
+        self.cc_sent = {}  # (track, cc) -> the value last sent, so a lane only talks when it changes
         self.song_step = None  # the song step playing (None: not started)
         self.song_at = 0  # the bar that step began at
         self.song_jump = None  # a step asked for: taken at the next bar
@@ -213,6 +214,7 @@ class Engine:
             lanes = list(pat.lanes.items())  # a copy: the UI thread may add a lane meanwhile
             if tr.mute:
                 continue
+            self.send_cc(tr, i)
             for k, lane in lanes:
                 s = lane[i]
                 if s.on:
@@ -272,6 +274,7 @@ class Engine:
         """The pattern itself: called by the count-in when its last beat is done (its last click is the
         downbeat), or straight from `start`."""
         self.song_step, self.song_at, self.song_jump = None, 0, None  # a song starts at its first step
+        self.cc_sent.clear()  # the lanes talk again from the top
         self.playing, self.ticks, self.step_index = True, 0, -1
         self.pos.clear()
         self.playhead.clear()
@@ -321,6 +324,7 @@ class Engine:
                 return
             self.playing = False
             self.song_step, self.song_at, self.song_jump = None, 0, None
+            self.cc_sent.clear()
             self.clicker.flush()  # a beat queued for a moment from now must not sound after a stop
             self.out.send_message([0xFC])
             for key in list(self.sounding):
@@ -370,6 +374,20 @@ class Engine:
     def preview(self, tr, note):
         with self.lock:
             self.note_on(tr, note, 100, time.perf_counter() + 0.15)
+
+    def send_cc(self, tr, i):
+        """The pattern's controller lanes: a value holds until its next point, and a CC goes out only when it
+        changes, so a lane is a few messages a bar and not one per step."""
+        points = tr.current.cc
+        if not points:
+            return
+        for number in points:
+            value = tr.current.cc_at(number, i)
+            key = (tr, number)
+            if value is None or self.cc_sent.get(key) == value:
+                continue
+            self.cc_sent[key] = value
+            self.out.send_message([0xB0 | (tr.channel - 1), number, value], tr)
 
     # --- the song ---------------------------------------------------------
     def queue_song_step(self, i):
