@@ -1124,8 +1124,10 @@ class Sequencer(Panel):
                         on=self.param == kind and (kind != "cc" or self.cc_num == number))
         plus = QRectF(tabs.left() + len(entries) * (tw + 4 * s), tabs.top(), 58 * s, tabs.height())
         self.button(p, plus, "+ CC", self.open_cc_pick)
-        roll_b = QRectF(tabs.right() - 78 * s, tabs.top(), 74 * s, tabs.height())  # the roll on, or the lane alone
-        self.button(p, roll_b, "ROLL", lambda: setattr(self, "lane_only", not self.lane_only), on=not self.lane_only)
+        # the roll up (when hidden) or down (to hide it): the lane gets the whole panel either way
+        roll_b = QRectF(tabs.right() - 60 * s, tabs.top(), 56 * s, tabs.height())
+        self.button(p, roll_b, "▲" if self.lane_only else "▼", lambda: setattr(self, "lane_only", not self.lane_only),
+                    on=self.lane_only)
         if self.param == "cc":
             self.draw_cc_lane(p, bars, tr, self.cc_num, color)
             return
@@ -1143,6 +1145,26 @@ class Sequencer(Panel):
                     self.text(p, c, f"×{v:g}", BG, 12, bold=True)
         self.region(bars, lambda pos: LaneDraw(self, tr, bars, self.param, pos))
 
+    def draw_note_ghost(self, p, bars, tr, color):
+        """The page's notes as a faint background: with the roll hidden they are what the automation is drawn
+        against, at their own pitch (highest at the top) rather than at the lane's value."""
+        s, pat = self.s, tr.current
+        cells = self.cells(bars)
+        page0 = self.page * 16
+        notes = [(n, i, st) for i in range(16) for n, st in pat.notes_at(page0 + i) if i < pat.length]
+        if not notes:
+            return
+        low, high = min(n for n, _, _ in notes), max(n for n, _, _ in notes)
+        span = max(1, high - low)
+        h = max(8 * s, bars.height() * 0.06)
+        for n, i, st in notes:
+            top = bars.top() + 6 * s + (high - n) / span * (bars.height() - 12 * s - h)
+            x0 = cells[i].left()
+            x1 = self.step_x(cells, min(16, i + st.gate), bars.right())
+            fill = QColor("#98a2b3")  # grey: a background, not the lane's own colour
+            fill.setAlpha(60 + round(50 * st.vel / 127))
+            self.box(p, QRectF(x0, top, max(cells[i].width(), x1 - x0), h), fill, None, radius=3)
+
     def draw_cc_lane(self, p, bars, tr, number, color):
         """A controller lane as a line: the value holds between points, and the points can sit anywhere on the
         line (a quarter of a step apart at the finest, and the engine sends between its ticks)."""
@@ -1154,6 +1176,8 @@ class Sequencer(Panel):
             i = self.page * 16 + k
             self.box(p, c, "#10131a" if i >= pat.length else "#181c26", "#ffffff" if i == head else None, 1.5,
                      radius=4)
+        if self.lane_only:  # the notes, faint, behind the lane: something to draw the sweep against
+            self.draw_note_ghost(p, bars, tr, color)
         if points:
             line = QPolygonF()  # sampled across, so a held value is flat and a ramp is a ramp
             x, last = bars.left(), None
