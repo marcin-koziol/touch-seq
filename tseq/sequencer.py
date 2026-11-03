@@ -915,19 +915,21 @@ class Sequencer(Panel):
         info = head.adjusted(18 * s, 6 * s, -68 * s, -6 * s)
         self.text(p, info, f"T{tr.number}", TEXT, 19, Qt.AlignLeft | Qt.AlignTop, bold=True)
         self.text(p, info, "MONO" if tr.audio else f"CH{tr.channel}", DIM, 12, Qt.AlignRight | Qt.AlignTop)
-        if tr.in_port:  # a MIDI keyboard is set for this track: a small socket says so, under the channel
+        bottom = info
+        if tr.in_port:  # a MIDI keyboard is set for this track: a small socket says so, at the foot of the column
             ready = self.input_ok is None or self.input_ok(tr)
-            socket = QRectF(info.right() - 15 * s, info.top() + 15 * s, 15 * s, 15 * s)
+            socket = QRectF(info.right() - 15 * s, info.bottom() - 15 * s, 15 * s, 15 * s)
             self.box(p, socket, "#11141b", "#4ade80" if ready else "#ff8c42", 1.2, radius=4)
             glyph(p, socket.adjusted(1.5 * s, 1.5 * s, -1.5 * s, -1.5 * s), "din",
                   "#4ade80" if ready else "#ff8c42", width=0.12)
+            bottom = info.adjusted(0, 0, -18 * s, 0)  # the text leaves the socket its corner
         if tr.drum:
-            self.text(p, info, DRUM_KIT[tr.voice][0], color, 12, Qt.AlignRight | Qt.AlignBottom, bold=True)
+            self.text(p, bottom, DRUM_KIT[tr.voice][0], color, 12, Qt.AlignRight | Qt.AlignBottom, bold=True)
         elif tr.audio:  # the input it takes and how it is panned, instead of a drum voice and a pattern
-            self.text(p, info, f"{self.source_name(tr) or 'no input'} · {tr.pan.upper()}",
+            self.text(p, bottom, f"{self.source_name(tr) or 'no input'} · {tr.pan.upper()}",
                       TEXT if tr.source else WARN, 12, Qt.AlignRight | Qt.AlignBottom, bold=True, elide=True)
         elif tr.external:  # where its notes go, instead of the drum voice
-            self.text(p, info, tr.port or "no MIDI out", TEXT if tr.port else WARN, 12,
+            self.text(p, bottom, tr.port or "no MIDI out", TEXT if tr.port else WARN, 12,
                       Qt.AlignRight | Qt.AlignBottom, bold=True, elide=True)
         if not tr.audio:  # an input has no patterns
             nxt = e.next_pattern(tr)
