@@ -54,16 +54,19 @@ cursor, and change the arrangement **on the bar** instead of on the downbeat of 
 
 ![The whole rack, as it comes up: performance controls, the plugin host, the sequencer and the live pads](docs/screenshots/overview.png)
 
-## New in 0.10
+## New in 0.11
 
-- **ARP** — every track gets an arpeggiator: rate (1/32 … 1/4, triplets), up / down / up-down / random /
-  as played, 1–3 octaves, gate and latch. It plays on the transport's grid, free-runs when the transport is
-  stopped, and is **non-destructive** — the pattern keeps its chords.
-- **A tidier HOST-4** — the monitor and the click stay out of the plugin browser (the app puts them in
-  place), a plugin installed as both CLAP and LV2 is one row, and `CHN` fits the sequencer's channel box.
-- 0.9 brought the dense CC automation (points every ¼ step, sent between the engine's ticks), the
-  lane-only view with the notes as a ghost, **Space**, and **BUILTIN** in the browser — see the
-  [release notes](https://github.com/marcin-koziol/touch-seq/releases/tag/v0.9.0).
+- **LAUNCH** — every track's patterns as pads on one screen: tap one and that track plays it at the next
+  bar, with a progress line on the playing pad. **FILL** turns patterns into **transitions**: they play
+  their bars once and the track goes back to what it was playing (chaining, cancelling and SONG included).
+- the progress line is smooth and only moves forward; a transition's line is amber and drains over the
+  bars it has left.
+
+0.10 brought the **arpeggiator** — per track, on the transport's grid, non-destructive — the click kept
+out of the plugin browser, and `CHN` in the sequencer. 0.9 brought the dense CC automation (points every
+¼ step, sent between the engine's ticks), the lane-only view with the notes as a ghost, **Space**, and
+**BUILTIN** in the browser. The [release notes](https://github.com/marcin-koziol/touch-seq/releases) have
+every version.
 
 ## The manual
 
@@ -281,8 +284,8 @@ Download the AppImage for your machine from [Releases](https://github.com/marcin
 then:
 
 ```sh
-chmod +x Touch-Seq-0.10.0-x86_64.AppImage
-./Touch-Seq-0.10.0-x86_64.AppImage
+chmod +x Touch-Seq-0.11.0-x86_64.AppImage
+./Touch-Seq-0.11.0-x86_64.AppImage
 ```
 
 It contains Python, Qt (PySide6), Carla and Touch-Seq's own plugins (XYFX, Monitor, EQ, Click and Space).
