@@ -2225,3 +2225,26 @@ q = QPainter(img); q.setRenderHint(QPainter.Antialiasing); sq.paint(q, 1600, 900
 img.save(str(OUT / "launch.png"))
 sq.engine.close()
 print("launch view OK")
+
+# the playing pad shows progress: the pattern's loop, or the bars a transition has left
+class FlatEngine:
+    playing = False
+    playhead = {}
+    ticks = 0
+    step_index = 0
+    fill_until = {}
+
+
+prp, tp = launch_project()
+flat = FlatEngine()
+sp = ts.Sequencer(prp, flat)
+assert sp.launch_progress(tp) == 0.0, "nothing playing, no progress"
+flat.playing, flat.step_index, flat.ticks = True, 56, 3
+flat.playhead[tp] = 8
+assert abs(sp.launch_progress(tp) - (8 + 0.5) / 16) < 0.001, sp.launch_progress(tp)
+tp.pattern = 3  # a 32-step transition: two bars
+flat.fill_until[tp] = 4
+assert abs(sp.launch_progress(tp) - (3 + 8.5 / 16 - 2) / 2) < 0.001, "a transition drains over its bars"
+flat.playing = False
+assert sp.launch_progress(tp) == 0.0
+print("launch progress OK")

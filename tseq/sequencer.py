@@ -8,7 +8,7 @@ from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QPen, QPolygonF
 
 from .constants import (BG, BORDER, CC_LANES, DIM, DRUM_COLORS, DRUM_KIT, GATE_RES, MAX_GATE, MAX_STEPS,
-                        PALETTE, PANEL, PATTERNS, PLAY, SCENES, STEPS_PER_BAR, TEXT, WARN)
+                        PALETTE, PANEL, PATTERNS, PLAY, SCENES, STEPS_PER_BAR, TEXT, TICKS_PER_STEP, WARN)
 from .gestures import Drag, Gesture, Hold, ScrollOrTap
 from .model import DEFAULT_STEP, SongStep, Step
 from .music import note_name, transpose
@@ -509,6 +509,21 @@ class Sequencer(Panel):
             self.draw_launch_row(p, lane, tr)
         p.restore()
 
+    def launch_progress(self, tr):
+        """How far through the playing pattern a track is (0..1): its loop, or for a transition the bars it has
+        left, so the pad drains once over the fill instead of looping under it."""
+        e = self.engine
+        if not e.playing or tr not in e.playhead:
+            return 0.0
+        n = max(1, tr.patterns[tr.pattern].length)
+        frac = (e.ticks % TICKS_PER_STEP) / TICKS_PER_STEP
+        if tr in e.fill_until:
+            bars = max(1, -(-n // STEPS_PER_BAR))
+            start = e.fill_until[tr] - bars
+            now = e.step_index // STEPS_PER_BAR + ((e.step_index % STEPS_PER_BAR) + frac) / STEPS_PER_BAR
+            return max(0.0, min(1.0, (now - start) / bars))
+        return max(0.0, min(1.0, (e.playhead[tr] + frac) / n))
+
     def draw_launch_row(self, p, lane, tr):
         s, e, color = self.s, self.engine, self.color(tr)
         now, nxt, back = tr.pattern, e.next_pattern(tr), e.fill_back.get(tr)
@@ -534,6 +549,12 @@ class Sequencer(Panel):
             if back is not None and i == back and not playing:  # where the transition will come back to
                 self.text(p, c.adjusted(5 * s, 0, 0, 0), "↩", "#facc15", 11,
                           Qt.AlignLeft | Qt.AlignBottom)
+            if playing:  # how far into the pattern, or into the transition, the track is
+                done = self.launch_progress(tr)
+                bar = QRectF(c.left() + 6 * s, c.bottom() - 8 * s, c.width() - 12 * s, 4 * s)
+                self.box(p, bar, QColor(0, 0, 0, 80), None, radius=2)
+                self.box(p, QRectF(bar.left(), bar.top(), bar.width() * done, bar.height()),
+                         "#facc15" if tr in e.fill_until else BG, None, radius=2)
             self.region(c.intersected(lane), lambda pos, tr=tr, i=i: ScrollOrTap(
                 pos, lambda: self.scroll, lambda v: setattr(self, "scroll", v), lambda: self.press_pad(tr, i)))
 

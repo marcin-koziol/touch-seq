@@ -137,7 +137,9 @@ while there is something unsaved (the time next to it is the last save of anythi
 
 A pad per pattern and track, all of them on one screen: tap one and that track plays it at the next bar
 (tapping a pad also picks the track, so PLAY-12 follows). The playing pad is filled with the track's
-colour, a queued one blinks, and an empty pattern is a rest you can launch.
+colour, a queued one blinks, and an empty pattern is a rest you can launch. The playing pad also carries a
+thin progress line — how far through its pattern the track is; a transition's line is amber and drains over
+the bars it has left.
 
 **FILL** marks the amber **→** patterns: transitions. Launched live, a transition plays its own length in
 whole bars (a 16-step pattern is one bar, a 32-step one two) and then the track returns to what it was
