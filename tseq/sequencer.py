@@ -269,9 +269,9 @@ class Sequencer(Panel):
             if self.mode == "copy":
                 tr.patterns[i] = copy.deepcopy(tr.current)
             elif self.mode == "clear":
-                length = tr.patterns[i].length  # clearing takes the notes out, not the length you set
+                length, fill = tr.patterns[i].length, tr.patterns[i].fill  # clearing takes the notes out
                 tr.patterns[i] = tr.new_pattern()
-                tr.patterns[i].length = length
+                tr.patterns[i].length, tr.patterns[i].fill = length, fill
             else:
                 self.engine.queue_pattern(tr, i)
         self.mode = None
@@ -362,12 +362,13 @@ class Sequencer(Panel):
         mid = QRectF(0, top.bottom(), w, bottom.top() - top.bottom())
         self.draw_top(p, top.adjusted(8 * s, 8 * s, -8 * s, -4 * s))
         self.draw_bottom(p, bottom.adjusted(8 * s, 4 * s, -8 * s, -8 * s))
-        {"grid": self.draw_grid, "edit": self.draw_edit, "song": self.draw_song}[self.view](p, mid)
+        {"grid": self.draw_grid, "edit": self.draw_edit, "song": self.draw_song,
+         "launch": self.draw_launch}[self.view](p, mid)
 
     def draw_top(self, p, r):
         s, e = self.s, self.engine
-        play, bar, song, grid, edit, _, *scenes, save = split(
-            r, [86 * s, 110 * s, 72 * s, 72 * s, 72 * s, 0] + [54 * s] * SCENES + [72 * s], 6 * s)
+        play, bar, song, grid, edit, launch, _, *scenes, save = split(
+            r, [86 * s, 110 * s, 72 * s, 72 * s, 72 * s, 80 * s, 0] + [46 * s] * SCENES + [72 * s], 6 * s)
 
         active = e.playing or e.counting
         self.button(p, play, "", self.toggle_play, on=e.playing, color=PLAY, pending=e.counting)
@@ -394,9 +395,10 @@ class Sequencer(Panel):
             br = QRectF(bar.left() + 44 * s + b * cell, bar.center().y() - 7 * s, cell - 6 * s, 14 * s)
             self.box(p, br, PLAY if b == beat else "#222734", None, radius=3)
 
-        self.button(p, song, "SONG", lambda: setattr(self, "view", "song"), on=self.view == "song")
-        self.button(p, grid, "GRID", lambda: setattr(self, "view", "grid"), on=self.view == "grid")
-        self.button(p, edit, "EDIT", lambda: setattr(self, "view", "edit"), on=self.view == "edit")
+        self.button(p, song, "SONG", lambda: self.show("song"), on=self.view == "song")
+        self.button(p, grid, "GRID", lambda: self.show("grid"), on=self.view == "grid")
+        self.button(p, edit, "EDIT", lambda: self.show("edit"), on=self.view == "edit")
+        self.button(p, launch, "LAUNCH", lambda: self.show("launch"), on=self.view == "launch")
 
         save_mode = self.mode == "save"
         for i, r_ in enumerate(scenes):
@@ -408,6 +410,9 @@ class Sequencer(Panel):
 
     def draw_bottom(self, p, r):
         s, tr, e = self.s, self.sel, self.engine
+        if self.view == "launch":
+            self.draw_launch_bar(p, r)
+            return
         if tr.audio:  # an input has no patterns to switch or copy
             self.text(p, r, "an audio track has no patterns: EDIT picks its input, HOST-4 its effects", DIM, 14,
                       Qt.AlignLeft | Qt.AlignVCenter, elide=True)
@@ -442,6 +447,95 @@ class Sequencer(Panel):
         self.button(p, copy_r, "COPY", lambda: self.toggle_mode("copy"), on=self.mode == "copy", sub="to slot")
         self.button(p, clear_r, "CLR", lambda: self.toggle_mode("clear"), on=self.mode == "clear", color=WARN,
                     sub="slot")
+
+    # --- launch view: a pad per pattern, all tracks ---------------------------------
+    def show(self, view):
+        if view != "launch" and self.mode == "fill":  # the FILL button lives in that view only
+            self.mode = None
+        self.view = view
+
+    def press_pad(self, tr, i):
+        """LAUNCH: a pattern pad queues that pattern at the next bar and picks the track; in FILL mode it
+        marks the pattern as a transition instead."""
+        if self.mode == "fill":
+            tr.patterns[i].fill = not tr.patterns[i].fill
+        else:
+            self.sel, self.master_focus = tr, False
+            if i != tr.pattern and self.engine.next_pattern(tr) != i:
+                self.engine.queue_pattern(tr, i)
+        self.invalidate()
+
+    def draw_launch_bar(self, p, r):
+        """The hint under the launch grid, and FILL: mark patterns as transitions (tap the pads, then FILL
+        again to stop)."""
+        s, song = self.s, self.project.song_on and bool(self.project.song)
+        fill = QRectF(r.right() - 150 * s, r.top(), 150 * s, r.height())
+        text = ("tap a pattern: it plays at the next bar   ·   the amber → ones play once, then the track goes "
+                "back" + ("   ·   SONG decides on its bars" if song else ""))
+        self.text(p, QRectF(r.left(), r.top(), fill.left() - r.left() - 12 * s, r.height()), text, DIM, 14,
+                  Qt.AlignLeft | Qt.AlignVCenter, elide=True)
+        self.button(p, fill, "FILL", lambda: self.toggle_mode("fill"), on=self.mode == "fill", color="#facc15",
+                    sub="tap pads" if self.mode == "fill" else "mark →")
+
+    def draw_launch(self, p, r):
+        """Every track at once, a pad per pattern: tap one to play it at the next bar. Amber arrows are
+        transitions - they play their bars once and the track goes back to what it was playing."""
+        s, tracks = self.s, self.project.tracks
+        g, hw, small = 6 * s, 150 * s, 54 * s  # an audio track has no patterns: it gets a short row
+        inputs = sum(1 for t in tracks if t.audio)
+        heights = [small if t.audio else
+                   min(110 * s, max(64 * s, (r.height() - g - inputs * small) /
+                                     max(1, len(tracks) - inputs))) for t in tracks]  # fewer tracks: bigger pads
+        self.scroll = max(0.0, min(self.scroll, max(0.0, sum(heights) + g - r.height())))
+        p.save()
+        p.setClipRect(r)
+        if not tracks:
+            self.text(p, r, "no tracks yet: + in GRID adds one", "#5b6577", 14)
+        y = r.top() + g - self.scroll
+        for tr, h in zip(tracks, heights):
+            if y + h < r.top() or y > r.bottom():
+                y += h
+                continue
+            head = QRectF(r.left() + 8 * s, y, hw, h - g)
+            lane = QRectF(head.right() + 8 * s, y, r.right() - head.right() - 16 * s, h - g)
+            y += h
+            if tr.audio:
+                self.box(p, head, PANEL, BORDER, 1.5)
+                self.text(p, head.adjusted(14 * s, 0, 0, 0), f"T{tr.number}", self.color(tr), 17,
+                          Qt.AlignLeft | Qt.AlignVCenter, bold=True)
+                self.text(p, lane, "an input has no patterns", "#5b6577", 13, Qt.AlignLeft | Qt.AlignVCenter)
+                continue
+            self.draw_header(p, head, r, tr)
+            self.draw_launch_row(p, lane, tr)
+        p.restore()
+
+    def draw_launch_row(self, p, lane, tr):
+        s, e, color = self.s, self.engine, self.color(tr)
+        now, nxt, back = tr.pattern, e.next_pattern(tr), e.fill_back.get(tr)
+        for i, c in enumerate(self.cells(lane)):
+            pat = tr.patterns[i]
+            used = not pat.empty()
+            playing, queued = i == now, i == nxt and i != now
+            if playing:
+                bg, border, fg, width = color, "#ffffff", BG, 2.5
+            elif queued:
+                bg, border, fg, width = PANEL, color, color, 2.5 if self.blink() else 1.0
+            elif pat.fill:
+                bg, border, fg, width = "#1b1710", "#facc15", TEXT if used else DIM, 2
+            else:
+                bg, border, fg, width = (PANEL if used else "#10131a"), BORDER, TEXT if used else "#3a4252", 1.5
+            self.box(p, c, bg, border, width, radius=6)
+            self.text(p, c.adjusted(0, 0, 0, -c.height() * 0.16), str(i + 1), fg, 17, bold=True)
+            self.text(p, c.adjusted(0, c.height() * 0.4, 0, 0), "●" if used else "·",
+                      BG if playing else (color if queued else DIM), 10)
+            if pat.fill:  # a transition: one pass, then back
+                self.text(p, c.adjusted(0, 2 * s, -5 * s, 0), "→", "#facc15", 11,
+                          Qt.AlignRight | Qt.AlignTop, bold=True)
+            if back is not None and i == back and not playing:  # where the transition will come back to
+                self.text(p, c.adjusted(5 * s, 0, 0, 0), "↩", "#facc15", 11,
+                          Qt.AlignLeft | Qt.AlignBottom)
+            self.region(c.intersected(lane), lambda pos, tr=tr, i=i: ScrollOrTap(
+                pos, lambda: self.scroll, lambda v: setattr(self, "scroll", v), lambda: self.press_pad(tr, i)))
 
     # --- grid view: all tracks, one page ---------------------------------
     def cells(self, lane):

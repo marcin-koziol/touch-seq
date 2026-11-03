@@ -2117,3 +2117,111 @@ _f = OUT / "arp.json"
 _f.write_text(ts.dump_project(prd))
 assert ts.load_project(_f).tracks[0].arp == prd.tracks[0].arp, "the arp is saved with the project"
 print("arp settings OK")
+
+# --- LAUNCH: a pad per pattern for every track, and transitions that go back ---------------
+def launch_project():
+    prj = ts.Project(bpm=600, tracks=[ts.Track("melody", 1, 1)])  # 600 bpm: a bar is 0.4 s
+    track = prj.tracks[0]
+    for n in range(4):
+        track.patterns[n].lane(60)[0].on = True
+    track.patterns[1].fill = True
+    track.patterns[2].fill = True
+    track.patterns[3].length = 32  # a transition of two bars
+    track.patterns[3].fill = True
+    return prj, track
+
+
+def until(fn, limit=1.6):
+    t0 = time.time()
+    while time.time() - t0 < limit:
+        if fn():
+            return True
+        time.sleep(0.002)
+    return False
+
+
+prl, tl = launch_project()
+el = ts.Engine(prl, FakeOut())
+el.start(); time.sleep(0.1)
+el.queue_pattern(tl, 1)  # a one-bar transition
+assert until(lambda: tl.pattern == 1), "the transition plays"
+assert until(lambda: tl.pattern == 0), "and the track goes back to what it was playing"
+assert not el.fill_back and not el.fill_until
+# an ordinary pattern is an explicit choice: it cancels the return
+el.queue_pattern(tl, 1)
+assert until(lambda: tl.pattern == 1)
+el.queue_pattern(tl, 0)
+assert until(lambda: tl.pattern == 0), "a queued pattern wins over the transition's return"
+time.sleep(0.5)
+assert tl.pattern == 0, "and the return does not fire later"
+# a transition lasts its own length in whole bars: 32 steps = two bars = 0.8 s here
+el.queue_pattern(tl, 3)
+assert until(lambda: tl.pattern == 3)
+t0 = time.time()
+assert until(lambda: tl.pattern == 0)
+span = time.time() - t0
+assert 0.6 < span < 1.3, span
+el.stop(); el.close()
+print("launch transitions OK")
+
+# a transition chained on another keeps the original way back
+prl, tl = launch_project()
+el = ts.Engine(prl, FakeOut())
+el.start(); time.sleep(0.1)
+el.queue_pattern(tl, 1)
+assert until(lambda: tl.pattern == 1)
+el.queue_pattern(tl, 2)
+assert until(lambda: tl.pattern == 2)
+assert until(lambda: tl.pattern == 0), "back to the first pattern, not to the first transition"
+el.stop(); el.close()
+print("launch chain OK")
+
+# the song is what plays after a transition (it decides on its own bars)
+prl, tl = launch_project()
+prl.song = [ts.SongStep(4, 1, {1: 0})]
+prl.song_on = True
+el = ts.Engine(prl, FakeOut())
+el.start(); time.sleep(0.1)
+el.queue_pattern(tl, 1)
+assert until(lambda: tl.pattern == 1), "a transition still plays while the song runs"
+assert until(lambda: tl.pattern == 0), "and the song's pattern comes back"
+el.stop(); el.close()
+print("launch + song OK")
+
+# a stop does not leave a transition in place
+prl, tl = launch_project()
+el = ts.Engine(prl, FakeOut())
+el.start(); time.sleep(0.1)
+el.queue_pattern(tl, 1)
+assert until(lambda: tl.pattern == 1)
+el.stop()
+assert tl.pattern == 0, "a stop puts the pattern before the transition back"
+el.close()
+print("launch stop OK")
+
+# the view: pads queue a pattern, FILL marks without launching, leaving drops the mode
+prl, tl = launch_project()
+sq = ts.Sequencer(prl, ts.Engine(prl, FakeOut()))
+sq.sel, sq.view = tl, "launch"
+_img = QImage(1600, 900, QImage.Format_ARGB32); _img.fill(0)
+_q = QPainter(_img); sq.paint(_q, 1600, 900); _q.end()
+sq.press_pad(tl, 2)
+assert tl.pattern == 2 and sq.sel is tl, "a pad queues its pattern (and picks the track)"
+sq.press_pad(tl, 2)  # the playing one: nothing to queue
+sq.mode = "fill"
+sq.press_pad(tl, 0)
+assert tl.patterns[0].fill and tl.pattern == 2, "FILL marks the pattern, it does not launch it"
+sq.show("grid")
+assert sq.mode is None, "leaving LAUNCH drops FILL mode"
+_f = OUT / "launch.json"
+_f.write_text(ts.dump_project(prl))
+_loaded = ts.load_project(_f).tracks[0]
+assert all(_loaded.patterns[i].fill for i in range(4)) and not _loaded.patterns[5].fill, \
+    "transitions are saved with the project"
+sq.view, sq.mode = "launch", None
+sq.engine.fill_back[tl] = 0
+img = QImage(1600, 900, QImage.Format_ARGB32); img.fill(0)
+q = QPainter(img); q.setRenderHint(QPainter.Antialiasing); sq.paint(q, 1600, 900); q.end()
+img.save(str(OUT / "launch.png"))
+sq.engine.close()
+print("launch view OK")

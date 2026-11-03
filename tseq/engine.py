@@ -148,6 +148,8 @@ class Engine:
         self.pos = {}  # Track -> next step
         self.playhead = {}  # Track -> step last played
         self.pending = {}  # Track -> pattern queued for the next bar
+        self.fill_back = {}  # Track -> the pattern a transition goes back to
+        self.fill_until = {}  # Track -> the bar its transition ends at
         self.pending_scene = None
         self.scene = None  # last launched scene
         self.sounding = {}  # (channel, note) -> (note-off time, track)
@@ -205,8 +207,10 @@ class Engine:
     def step(self, t):
         self.step_index = self.ticks // TICKS_PER_STEP
         if self.step_index % STEPS_PER_BAR == 0:
+            bar = self.step_index // STEPS_PER_BAR
             if self.project.song_on and self.project.song:
-                self.song_tick(self.step_index // STEPS_PER_BAR)  # the arrangement decides first
+                self.song_tick(bar)  # the arrangement decides first
+            self.end_fills(bar)
             self.apply_pending()
         step_len = TICKS_PER_STEP * 60 / (self.project.bpm * PPQN)
         self.step_time, self.step_len = t, step_len
@@ -355,14 +359,50 @@ class Engine:
         self.out.send_message([0x80 | (channel - 1), note, 0], self.sounding.pop(key)[1])
 
     def apply_pending(self):
+        bar = self.step_index // STEPS_PER_BAR if self.playing else None
         if self.pending_scene is not None:
             for tr in self.project.tracks:
                 if tr.scenes[self.pending_scene] is not None:
-                    self.set_pattern(tr, tr.scenes[self.pending_scene])
+                    self.launch(tr, tr.scenes[self.pending_scene])  # a scene is a place, not a transition
             self.scene, self.pending_scene = self.pending_scene, None
         for tr, p in self.pending.items():
-            self.set_pattern(tr, p)
+            self.launch(tr, p, bar)
         self.pending.clear()
+
+    def launch(self, tr, p, bar=None):
+        """Give the track pattern p at a bar line. A pattern marked as a transition also arranges its own
+        return: it plays its length (whole bars) and then the track goes back to what it was playing. A scene
+        or a song step (bar=None) is a place, not a transition."""
+        previous = tr.pattern
+        self.set_pattern(tr, p)
+        if bar is None or not 0 <= p < len(tr.patterns):
+            self.end_fill(tr)
+            return
+        pat = tr.patterns[p]
+        if not pat.fill:
+            self.end_fill(tr)  # an ordinary pattern: an explicit choice, so no coming back
+            return
+        if tr not in self.fill_back:  # a second transition in a row keeps the original way back
+            self.fill_back[tr] = previous
+        self.fill_until[tr] = bar + max(1, -(-pat.length // STEPS_PER_BAR))
+
+    def end_fill(self, tr):
+        """Forget any transition: the track keeps the pattern it is on."""
+        self.fill_back.pop(tr, None)
+        self.fill_until.pop(tr, None)
+
+    def end_fills(self, bar):
+        """At a bar line: a transition that has had its bars goes back - unless something is queued for the
+        track (that is launched right after and decides) or the song has just chosen another pattern."""
+        for tr, until in list(self.fill_until.items()):
+            if until > bar or tr in self.pending:
+                continue
+            if self.pending_scene is not None and tr.scenes[self.pending_scene] is not None:
+                continue
+            back = self.fill_back.pop(tr, None)
+            self.fill_until.pop(tr, None)
+            if back is not None:
+                self.set_pattern(tr, back)
 
     def set_pattern(self, tr, p):
         tr.pattern = p
@@ -388,6 +428,8 @@ class Engine:
         self.song_step, self.song_at, self.song_jump = None, 0, None  # a song starts at its first step
         self.cc_sent.clear()  # the lanes talk again from the top
         self.arp_reset()
+        self.fill_back.clear()
+        self.fill_until.clear()
         self.playing, self.ticks, self.step_index = True, 0, -1
         self.pos.clear()
         self.playhead.clear()
@@ -439,6 +481,11 @@ class Engine:
             self.song_step, self.song_at, self.song_jump = None, 0, None
             self.cc_sent.clear()
             self.arp_reset()
+            for tr, back in list(self.fill_back.items()):  # a stop does not leave a transition in place
+                if back is not None:
+                    self.set_pattern(tr, back)
+            self.fill_back.clear()
+            self.fill_until.clear()
             self.clicker.flush()  # a beat queued for a moment from now must not sound after a stop
             self.out.send_message([0xFC])
             for key in list(self.sounding):
@@ -569,6 +616,7 @@ class Engine:
                 continue  # "keep previous" (or a pattern that is not there any more)
             self.pending.pop(tr, None)  # the song decides here, not a queued tap
             self.set_pattern(tr, pat)
+            self.end_fill(tr)  # ...and its pattern wins over a transition's return
 
     def queue_pattern(self, tr, p):
         with self.lock:
@@ -611,7 +659,7 @@ class Engine:
     def remove_track(self, tr):
         with self.lock:
             self.project.tracks.remove(tr)
-            for d in (self.pos, self.playhead, self.pending):
+            for d in (self.pos, self.playhead, self.pending, self.fill_back, self.fill_until):
                 d.pop(tr, None)
 
     def close(self):

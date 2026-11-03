@@ -45,6 +45,7 @@ cursor, and change the arrangement **on the bar** instead of on the downbeat of 
 |---|---|
 | **[SEQ-64](#seq-64--step-sequencer)** | 64 steps, 16 patterns, 8 scenes, four track kinds, a polyphonic piano roll and controller lanes finer than the steps |
 | **[SONG](#seq-64--step-sequencer)** | the arrangement: a list of steps with bars × repeats and a pattern per track, switched on the bar |
+| **[LAUNCH](#launch--every-pattern-at-once)** | every track's patterns as pads, and transitions that play once and go back |
 | **[PLAY-12](#play-12--live-play)** | chord pads with voice leading, a keyboard, drum pads, REC/OVR and a per-track arpeggiator |
 | **[HOST-4](#host-4--plugins-carla)** | Carla in the app: chains, buses, the mixer, plugin GUIs and the built-in EQ, Space and XYFX |
 | **[CTRL-10](#ctrl-10--performance-faders)** | pitch, mod and 8 faders aimed at a track, a channel or a plugin parameter |
@@ -131,6 +132,20 @@ while there is something unsaved (the time next to it is the last save of anythi
 | ![The same lane alone, with the roll hidden: the notes stay as a faint ghost](docs/screenshots/cc-only.png) | ![Drum editor](docs/screenshots/drums.png) |
 | ![Adding a track: drum, melody, external MIDI or audio](docs/screenshots/new-track.png) | ![An audio track: an interface input, panned, through the track's chain and into a bus](docs/screenshots/audio.png) |
 | ![A track's MIDI keyboard: the socket in EDIT and the dialog with the inputs and the channel](docs/screenshots/midi-in.png) | |
+
+### LAUNCH — every pattern at once
+
+A pad per pattern and track, all of them on one screen: tap one and that track plays it at the next bar
+(tapping a pad also picks the track, so PLAY-12 follows). The playing pad is filled with the track's
+colour, a queued one blinks, and an empty pattern is a rest you can launch.
+
+**FILL** marks the amber **→** patterns: transitions. Launched live, a transition plays its own length in
+whole bars (a 16-step pattern is one bar, a 32-step one two) and then the track returns to what it was
+playing — a fill for the drums, a turnaround for the keys. Chaining two transitions keeps the original way
+back; tapping any other pattern cancels it. With **SONG** on nothing is blocked: a step's pattern wins over
+a transition's return, and a track the step leaves as **—** gets its transition back after its bars.
+
+![LAUNCH: a pad per pattern, the amber arrows are transitions](docs/screenshots/launch.png)
 
 ### EQ — eight bands, drawn in the app
 

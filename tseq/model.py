@@ -34,6 +34,7 @@ class Pattern:
     length: int = 16
     lanes: dict = field(default_factory=dict)
     cc: dict = field(default_factory=dict)  # cc number -> {step: value}: a value holds until the next point
+    fill: bool = False  # a transition: launched live, it plays its length once and the track goes back
 
     def lane(self, k):
         if k not in self.lanes:
@@ -242,6 +243,8 @@ def dump_project(pr):
                                           for i, s in enumerate(lane) if s != DEFAULT_STEP]}
         if p.cc:  # only the points: a lane is a handful of them, not 64 values
             d["cc"] = {str(n): sorted([i, v] for i, v in points.items()) for n, points in p.cc.items()}
+        if p.fill:
+            d["fill"] = True
         return d
 
     return json.dumps({"bpm": pr.bpm, "key": pr.key, "scale": pr.scale, "tracks": [
@@ -298,6 +301,7 @@ def load_project(path):
                    strip=load_strip(t["strip"]) if "strip" in t else Strip())
         for p, pd in zip(tr.patterns, t["patterns"]):
             p.length = pd["length"]
+            p.fill = pd.get("fill", False)
             for n, points in (pd.get("cc") or {}).items():
                 p.cc[int(n)] = {int(i): int(v) for i, v in points}
             for row in pd["steps"]:
