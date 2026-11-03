@@ -2255,17 +2255,55 @@ print("launch progress OK")
 # --- plugin knobs are paged by whole sections: an ADSR never splits across pages -------------
 assert ts.param_family("Amp Attack") == "envelope" and ts.param_family("Filter Cutoff") == "filter"
 assert ts.param_family("Reverb Mix") == "effect" and ts.param_family("Frequency") == ""
-assert ts.param_section("Amp Attack") == "amp" and ts.param_section("Filter Env Attack") == "filter env"
-assert ts.param_section("OSC 1 Detune") == "osc 1", "a keyword inside a word is still the same kind"
-assert ts.param_section("Attack") == "" and ts.param_section("Amp Level") == "amp"
+assert ts.param_section("Amp Attack") == "amp" and ts.param_section("Filter Env Attack") == "filter"
+assert ts.param_section("OscFineTune") == "osc", "a camel-case name is split into words"
+assert ts.param_section("OSC 1 Detune") == "osc 1" and ts.param_section("SubOscVol") == "sub"
+assert ts.param_section("Attack") == "" and ts.param_group("Attack") == "envelope"
+assert ts.param_group("Cutoff") == "filter" and ts.param_group("Kick Punch Decay") == "kick punch"
 fake = lambda n: types.SimpleNamespace(name=n)
-names = ["OSC 1 Wave", "OSC 1 Octave", "OSC 1 Detune", "OSC 2 Wave", "OSC 2 Octave",
-         "Filter Cutoff", "Filter Resonance", "Filter Env Attack", "Filter Env Sustain",
-         "Amp Attack", "Amp Decay", "Amp Sustain", "Amp Release", "LFO Rate", "LFO Depth", "Master Volume"]
-pages = ts.param_pages([fake(n) for n in names], 10)
-assert [[p.name for p in pg] for pg in pages] == [names[:9], names[9:]], pages
-assert [p.name for p in pages[1]][:4] == names[9:13], "Attack..Release stay on one page"
-assert ts.param_pages([], 10) == [[]]
-big = ts.param_pages([fake(n) for n in ["Attack", "Decay", "Sustain", "Release"] + names], 10)
-assert all(len(pg) <= 10 for pg in big), "a page never holds more than it can"
+names = ["OscWave", "OscFineTune", "OscTune", "OscVol", "SubOscVol", "Attack", "Decay", "Sustain", "Release",
+         "Cutoff", "Resonance", "MonoPoly", "Glide", "DelayTime", "DelayFeedback", "DelayWet", "DelaySync",
+         "Bits", "SampleRate", "LFORate", "LFOWave", "LFODest", "LFOAmt", "LFOSync", "Bypass", "StepperRate",
+         "FilterMode", "Pitch Attack", "Pitch Decay", "Pitch Sustain", "Pitch Release", "Pitch Amount",
+         "SubOscTune"]
+
+
+def page_rows(pg, cols=5):
+    lines = []
+    for sec in pg:
+        width, height = min(len(sec), cols), max(1, -(-len(sec) // cols))
+        if lines and lines[-1][0] + width <= cols:
+            lines[-1][0] += width
+            lines[-1][1] = max(lines[-1][1], height)
+        else:
+            lines.append([width, height])
+    return sum(rows for _, rows in lines)
+
+
+pages = ts.param_pages([fake(n) for n in names], 5, 3)
+assert all(page_rows(pg) <= 3 for pg in pages), [page_rows(pg) for pg in pages]
+envelope = next(sec for pg in pages for sec in pg if ts.section_name(sec) == "ENVELOPE")
+assert [p.name for p in envelope] == names[5:9], "the ADSR is one whole box, on one page"
+assert ts.section_name([fake("OscFineTune")]) == "OSC" and ts.section_name([fake("Cutoff")]) == "FILTER"
+assert ts.section_name([fake("MonoPoly")]) == "GENERAL"
+# sections share a line: small ones are not one full-width box each
+assert [len(pg) for pg in pages] == [5, 4, 5], [len(pg) for pg in pages]
+assert ts.param_pages([], 5, 3) == [[]]
 print("knob groups OK")
+
+# --- a chain with nothing chosen opens on its first plugin (no extra tap) -------------------
+hp = object.__new__(ts.HostPanel)
+strip = ts.Strip()
+strip.slots[0] = types.SimpleNamespace(name="First", label="first", fmt="clap")
+strip.slots[2] = types.SimpleNamespace(name="Third", label="third", fmt="clap")
+hp.sel, hp.page = None, 2
+hp.focus_first(strip)
+assert hp.sel == (strip, 0) and hp.page == 0, "the first plugin of the chain gets the focus"
+hp.sel, hp.page = (strip, 2), 1
+hp.focus_first(strip)
+assert hp.sel == (strip, 2) and hp.page == 1, "an explicit choice stays"
+empty = ts.Strip()
+hp.sel = None
+hp.focus_first(empty)
+assert hp.sel is None, "a chain with no plugins has nothing to focus"
+print("host focus OK")

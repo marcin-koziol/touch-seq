@@ -217,25 +217,37 @@ def param_family(name):
     return ""
 
 
+def _name_words(name):
+    """A parameter name as lowercase words, split where the name is not one: "OscFineTune" -> osc/fine/tune,
+    "Pitch Attack" -> pitch/attack, "OSC1Wave" -> osc/1/wave."""
+    words = []
+    for token in re.finditer(r"[A-Za-z0-9]+", name):
+        for word in re.finditer(r"[A-Z]+(?![a-z])|[A-Z][a-z0-9]*|[a-z0-9]+", token.group(0)):
+            words.append(word.group(0).lower())
+    return words
+
+
+def _is_kind(word):
+    """Does this word name what a parameter is (an envelope's attack, a filter's cutoff, an LFO...)? """
+    return any(word in whole or any(part in word for part in parts) for _, _, parts, whole in PARAM_FAMILIES)
+
+
 def param_section(name):
-    """The section a parameter's name puts it in: the words before its kind ("Amp" in "Amp Attack", "Filter"
-    in "Filter Cutoff"), so an amp envelope and a filter envelope do not end up as one run. Empty when the
-    name starts with the kind itself (plain "Attack", "Cutoff"...)."""
-    low = name.lower()
-    words = [(m.start(), m.group(0)) for m in re.finditer(r"[a-z0-9]+", low)]
-    for _, _, parts, whole in PARAM_FAMILIES:
-        hits = [(i, i + len(p)) for p in parts for i in [low.find(p)] if i >= 0]
-        hits += [(i, i + len(w)) for i, w in words if w in whole]
-        if not hits:
+    """The section a parameter's name puts it in: "Osc" in "OscWave", "Filter" in "Filter Cutoff", "Amp" in
+    "Amp Attack", "Sub" in "SubOscVol", "OSC 1" in "OSC 1 Wave". Empty for a bare parameter ("Attack",
+    "Cutoff"): it belongs to the section its kind names (an envelope, a filter)."""
+    words = _name_words(name)
+    for i, word in enumerate(words):
+        if not _is_kind(word):
             continue
-        hits.sort()
-        spans = [list(hits[0])]  # "tune" inside "detune": one word, one kind
-        for a, b in hits[1:]:
-            if a <= spans[-1][1]:
-                spans[-1][1] = max(spans[-1][1], b)
-            else:
-                spans.append([a, b])
-        return re.sub(r"[^a-z0-9]+", " ", low[:spans[-1][0]]).strip()
+        if i:
+            return " ".join(words[:i])
+        section = [word]  # the name starts with its kind: the kind names the section, numbers and all
+        for word in words[1:]:
+            if not word.isdigit():
+                break
+            section.append(word)
+        return " ".join(section) if len(words) > 1 else ""
     return ""
 
 

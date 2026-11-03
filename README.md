@@ -195,9 +195,10 @@ the first free name (*Touch-Seq 2*, …) and says so in HOST-4's status line: bo
   MIXER and boxes in the PATCHBAY (`BUS 1 · Reverb`), so an interface's input can be patched through one too
 - **TRACK** view: the chain of the track selected in the sequencer (or of the bus you tapped in the mixer) and
   the plugin's parameters as knobs, colored by what they are (filter, envelope, LFO, oscillator, level, effect).
-  The knobs are paged by **section**, not by count: an envelope's attack, decay, sustain and release stay on
+  The knobs are paged by **section**, not by count, and each section is a **box of its own** with its name on
+  it (OSC, ENVELOPE, FILTER, DELAY, …): an envelope's attack, decay, sustain and release stay in one box on
   one page, a filter's cutoff and resonance stay together, an oscillator's shapes too — even when that leaves
-  a page with fewer knobs than it could hold
+  a page with fewer knobs than it could hold. Small sections share a line, so a page still holds a good few
 - **MIXER** view: a column per plugin track, one per bus, plus the master, each with a **stereo peak meter**
   (Carla's own data, taken after the chain's fader; an **audio track's shows its input** instead) whose peak
   line holds for a moment and then falls.
@@ -209,6 +210,7 @@ the first free name (*Touch-Seq 2*, …) and says so in HOST-4's status line: bo
 |---|---|
 | ![Space: the delay and reverb in one, its knobs in HOST-4](docs/screenshots/space.png) | ![Mixer](docs/screenshots/mixer.png) |
 | ![The plugin browser on BUILTIN: our own plugins first](docs/screenshots/builtin.png) | |
+| ![Plugin knobs grouped by section: OSC, ENVELOPE, FILTER, DELAY, each in its own box](docs/screenshots/knobs.png) | |
 
 ### PLAY-12 — live play
 

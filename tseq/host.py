@@ -24,36 +24,64 @@ from .ui import Panel, param_color, param_family, param_section, split
 
 
 
-def param_pages(params, per_page):
-    """A plugin's knobs in pages that keep their sections whole. A section is a run of parameters of the same
-    kind (an envelope's attack/decay/sustain/release, a filter's cutoff and resonance, an LFO...), and a page
-    takes as many whole sections as fit - so Attack is never on one page with Decay/Sustain/Release on the
-    next, even if that leaves a page with fewer knobs than it could hold."""
-    def section(prm):
-        return param_section(prm.name), param_family(prm.name)
+def param_group(name):
+    """What parameters of this name belong together: the name's section, or for a bare name ("Attack",
+    "Cutoff") its kind, so a plain ADSR is one group and a plain cutoff/resonance another."""
+    return param_section(name) or param_family(name)
 
+
+def _page_rows(page, cols):
+    """Knob rows a page takes: a section's box is as wide as its knobs need, and boxes share a line while
+    they fit, so a page of small sections is not one full-width bar each."""
+    lines = []  # [columns used, rows]
+    for sec in page:
+        width = min(len(sec), cols)
+        height = max(1, -(-len(sec) // cols))
+        if lines and lines[-1][0] + width <= cols:
+            lines[-1][0] += width
+            lines[-1][1] = max(lines[-1][1], height)
+        else:
+            lines.append([width, height])
+    return sum(rows for _, rows in lines)
+
+
+def param_pages(params, cols, rows):
+    """A plugin's knobs in pages of whole sections, each section a box of its own. A page takes as many
+    whole boxes as fit, so Attack is never on one page with Decay/Sustain/Release on the next. Returns
+    pages of sections (each a list of parameters)."""
     groups, start = [], 0
     for i in range(1, len(params)):
-        if section(params[i]) != section(params[i - 1]):
+        if param_group(params[i].name) != param_group(params[i - 1].name):
             groups.append(params[start:i])
             start = i
     if params:
         groups.append(params[start:])
     pages, page = [], []
     for group in groups:
-        if len(group) > per_page:  # a section bigger than a page has to split somewhere
+        if max(1, -(-len(group) // cols)) > rows:  # a section taller than a page has to split somewhere
             if page:
                 pages.append(page)
                 page = []
-            pages.extend(group[j:j + per_page] for j in range(0, len(group), per_page))
-        elif len(page) + len(group) > per_page:
+            step = cols * rows
+            pages.extend([group[j:j + step]] for j in range(0, len(group), step))
+            continue
+        if page and _page_rows(page + [group], cols) > rows:
             pages.append(page)
-            page = list(group)
-        else:
-            page = page + group
+            page = []
+        page.append(group)
     if page or not pages:
         pages.append(page)
     return pages
+
+
+def section_name(group):
+    """A section's name for its box: what the parameters call themselves ("AMP", "FILTER ENV", "OSC 1"),
+    else their kind, else GENERAL."""
+    section = param_section(group[0].name)
+    if section:
+        return section.upper()
+    family = param_family(group[0].name)
+    return family.upper() if family else "GENERAL"
 
 
 class HostPanel(Panel):
@@ -912,6 +940,14 @@ class HostPanel(Panel):
         self.draw_fader(p, QRectF(col.left() + 8 * s, y + 4 * s, col.width() - 16 * s, col.bottom() - y - 14 * s),
                         strip)
 
+    def focus_first(self, strip):
+        """Choose the first plugin of a chain when nothing on it is chosen yet (the track just changed)."""
+        if self.sel and self.sel[0] is strip:
+            return
+        first = next((k for k, ref in enumerate(strip.slots) if ref), None)
+        if first is not None:
+            self.sel, self.page = (strip, first), 0
+
     def focus_on(self, strip):
         """Show a bus' chain in the TRACK view (any tab tap goes back to the selected track)."""
         self.view, self.focus, self.page = "track", strip, 0
@@ -930,6 +966,9 @@ class HostPanel(Panel):
     def draw_params(self, p, r, strip):
         s = self.s
         sel = self.sel if self.sel and self.sel[0] is strip else None
+        if sel is None:  # the track (or bus) just changed: edit the first plugin it has, not an empty panel
+            self.focus_first(strip)
+            sel = self.sel if self.sel and self.sel[0] is strip else None
         plugin = self.loaded.get(sel) if sel else None
         self.box(p, r, "#11141b", "#2a3040", 1.5)
         if not plugin or plugin.ref.label not in EQ_LABELS:
@@ -964,8 +1003,7 @@ class HostPanel(Panel):
                                    inner.bottom() - title.bottom() - 8 * s), plugin)
             return
 
-        per_page = self.KNOB_COLS * self.KNOB_ROWS
-        pages = param_pages(plugin.params, per_page)  # whole sections per page (an ADSR never splits)
+        pages = param_pages(plugin.params, self.KNOB_COLS, self.KNOB_ROWS)  # whole sections per page
         self.page = min(self.page, len(pages) - 1)
         nav = QRectF(inner.left(), inner.bottom() - 40 * s, inner.width(), 40 * s)
         prev, label, nxt = split(nav, [70 * s, 0, 70 * s], 6 * s)
@@ -976,10 +1014,38 @@ class HostPanel(Panel):
         self.button(p, nxt, "▶", lambda: setattr(self, "page", min(len(pages) - 1, self.page + 1)),
                     enabled=self.page < len(pages) - 1)
         grid = QRectF(inner.left(), title.bottom() + 8 * s, inner.width(), nav.top() - title.bottom() - 16 * s)
-        kw, kh = grid.width() / self.KNOB_COLS, grid.height() / self.KNOB_ROWS
-        for n, prm in enumerate(pages[self.page]):
-            cell = QRectF(grid.left() + (n % self.KNOB_COLS) * kw, grid.top() + (n // self.KNOB_COLS) * kh, kw, kh)
-            self.draw_knob(p, cell.adjusted(3 * s, 3 * s, -3 * s, -3 * s), plugin, prm)
+        page = pages[self.page]
+        gap, pad = 8 * s, 22 * s  # between boxes/lines, and the room for a box's name
+        lines = []  # [columns used, rows, [sections]]
+        for sec in page:
+            width, height = min(len(sec), self.KNOB_COLS), max(1, -(-len(sec) // self.KNOB_COLS))
+            if lines and lines[-1][0] + width <= self.KNOB_COLS:
+                lines[-1][0] += width
+                lines[-1][1] = max(lines[-1][1], height)
+                lines[-1][2].append(sec)
+            else:
+                lines.append([width, height, [sec]])
+        rows = sum(line[1] for line in lines)
+        kh = (grid.height() - gap * max(0, len(lines) - 1)) / max(1, rows)
+        kw = grid.width() / self.KNOB_COLS
+        y = grid.top()
+        for used, line_rows, sections in lines:
+            x = grid.left()
+            for sec in sections:
+                width = min(len(sec), self.KNOB_COLS)
+                box = QRectF(x, y, width * kw - gap, line_rows * kh)
+                self.box(p, box, "#0f131b", "#242a36", 1.5, radius=9)
+                color = param_color(sec[0].name)
+                self.box(p, QRectF(box.left() + 9 * s, box.top() + 9 * s, 4 * s, 13 * s), color, None, radius=2)
+                self.text(p, QRectF(box.left() + 18 * s, box.top() + 5 * s, box.width() - 24 * s, 16 * s),
+                          section_name(sec), color, 10, Qt.AlignLeft | Qt.AlignVCenter, bold=True, elide=True)
+                cell_w = box.width() / width
+                for n, prm in enumerate(sec):
+                    cell = QRectF(box.left() + (n % width) * cell_w, box.top() + pad + (n // width) * kh,
+                                  cell_w, kh - pad)
+                    self.draw_knob(p, cell.adjusted(3 * s, 3 * s, -3 * s, -3 * s), plugin, prm)
+                x += width * kw
+            y += line_rows * kh + gap
 
     def draw_knob(self, p, r, plugin, prm):
         """Drag up/down to turn; tap toggles on/off parameters."""
