@@ -6,8 +6,8 @@ import time
 from PySide6.QtCore import QPointF, QRectF, Qt, QTimer
 from PySide6.QtGui import QColor, QLinearGradient, QPen
 
-from .constants import (BG, BORDER, BPM_MAX, BPM_MIN, CC_LANES, DIM, DRUM_COLORS, DRUM_KIT, GATE_RES, MAX_GATE,
-                        PANEL, TEXT, WARN)
+from .constants import (ARP_RATES, BG, BORDER, BPM_MAX, BPM_MIN, CC_LANES, DIM, DRUM_COLORS, DRUM_KIT, GATE_RES,
+                        MAX_GATE, PANEL, TEXT, WARN)
 from .gestures import Gesture
 from .midiin import Inputs
 from .music import (BORROWED, CHORD_SCALE, SCALES, XYFX_MODES, chord_name, note_name, roman, stack, xyfx_filter,
@@ -175,6 +175,7 @@ class Performer(Panel):
         self.midi_in = {}  # Track -> {note: count} the MIDI keyboards are holding (for lighting)
         self.midi_keys = {}  # (port, channel, note) -> [InNote]: what is sounding, to release on note-off
         self.arm_key = None  # (selected track, mode) the current recording was armed with
+        self.choose_arp = lambda tr: None  # the rack: the arpeggiator's settings dialog
         self.pulse_at = None  # when the last external clock pulse came in
         self.pulse_len = None  # its smoothed length (s)
         self.pulses = 0  # pulses since the last tempo decision
@@ -413,16 +414,21 @@ class Performer(Panel):
         tr = self.seq.sel
         header = QRectF(g, g, self.w - 2 * g, 52 * s)
         layouts = [] if tr.drum else [84 * s, 84 * s]
-        target, *rest = split(header, [0] + layouts + [80 * s, 80 * s] + [62 * s] * len(self.QUANTS), 6 * s)
+        target, *rest = split(header, [0] + layouts + [72 * s] + [80 * s, 80 * s] + [62 * s] * len(self.QUANTS),
+                              6 * s)
         if layouts:
             for rect, name in zip(rest[:2], ("chords", "keys")):
                 self.button(p, rect, name.upper(), lambda name=name: setattr(self, "layout", name),
                             on=self.layout == name, color=self.seq.color(tr))
             rest = rest[2:]
-        rec, ovr, *quants = rest
+        arp, rec, ovr, *quants = rest
         color = self.seq.color(tr)
         self.text(p, target.adjusted(6 * s, 0, 0, 0), f"→ T{tr.number}  {tr.kind}  CH{tr.channel}", color.name(), 17,
                   Qt.AlignLeft | Qt.AlignVCenter, bold=True, elide=True)
+        on = tr.arp.on
+        rate = next((name for ticks, name in ARP_RATES if ticks == tr.arp.rate), "1/16")
+        self.button(p, arp, "ARP", lambda: self.choose_arp(tr), on=on, color="#4ade80",
+                    sub=rate if on else "off")
         live = self.engine.playing
         for rect, mode, label in ((rec, "rec", "REC"), (ovr, "ovr", "OVR")):
             self.button(p, rect, label, lambda mode=mode: setattr(self, "mode", None if self.mode == mode else mode),

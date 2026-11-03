@@ -8,7 +8,7 @@ from PySide6.QtGui import QColor, QFont, QPen, Qt
 
 from .constants import WARN
 from .controls import Controls
-from .dialogs import AudioSources, Chooser, MidiInputs, MidiPorts, NewTrack, Settings, Tempo
+from .dialogs import ArpSettings, AudioSources, Chooser, MidiInputs, MidiPorts, NewTrack, Settings, Tempo
 from .model import dump_project, free_project_path, save_text
 from .patchbay import Patchbay
 from .performer import Performer
@@ -36,6 +36,7 @@ class Rack(Window):
         host.choose_port = self.open_port_choice
         self.perf = Performer(project, engine, self.seq, host)  # owns the tracks' MIDI inputs
         self.controls.record_cc = self.perf.record_cc_channel  # faders write into the pattern when armed
+        self.perf.choose_arp = self.open_arp  # its ARP button opens the track's arpeggiator
         self.seq.input_ok = self.perf.input_ok  # its socket says when a keyboard is away
         super().__init__([(0, 0, "CTRL-10", "performance controls", self.controls),
                           (0, 1, "SEQ-64", "step sequencer", self.seq),
@@ -218,6 +219,16 @@ class Rack(Window):
         self.dirty = True
         self.autosave()
         self.close_dialog()
+
+    def open_arp(self, tr):
+        """A track's arpeggiator: every tap in the dialog is heard at once and saved; the x closes it."""
+        if self.dialog:
+            return self.close_dialog()
+        self.open_dialog("ARP", f"track T{tr.number} · one note at a time", ArpSettings(tr, self.touched))
+
+    def touched(self):
+        self.dirty = True
+        self.autosave()
 
     def open_input_choice(self, tr):
         """A track's MIDI keyboard: the device and the channel it takes. Taps apply at once (the socket in

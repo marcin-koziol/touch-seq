@@ -10,7 +10,8 @@ from PySide6.QtGui import QColor
 
 import plugins
 
-from .constants import BG, BORDER, BPM_MAX, BPM_MIN, DIM, NOTE_NAMES, PANEL, PLAY, TEXT, WARN
+from .constants import (ARP_GATES, ARP_MODES, ARP_RATES, BG, BORDER, BPM_MAX, BPM_MIN, DIM, NOTE_NAMES, PANEL,
+                        PLAY, TEXT, WARN)
 from .engine import midi_outputs
 from .midiin import midi_inputs
 from .gestures import Drag, Hold, ScrollOrTap
@@ -376,6 +377,94 @@ class Tempo(Panel):
         self.button(p, tap, "TAP", self.tap_tempo, color=PLAY,
                     pending=bool(self.taps) and time.monotonic() - self.taps[-1] < 2, sub="tap tempo")
         self.button(p, done, "DONE", self.done, on=True)
+
+
+class ArpSettings(Panel):
+    """A track's arpeggiator: the chord it hears played one note at a time, on the transport's grid. Not
+    destructive: the pattern keeps its chords, switching it off plays them again. Taps apply at once."""
+
+    def __init__(self, track, changed=lambda: None):
+        super().__init__()
+        self.track, self.changed = track, changed  # changed() -> None: the rack saves
+
+    @property
+    def arp(self):
+        return self.track.arp
+
+    def set(self, **values):
+        for key, value in values.items():
+            setattr(self.arp, key, value)
+        self.changed()
+
+    def rate_name(self):
+        return next((name for ticks, name in ARP_RATES if ticks == self.arp.rate), "1/16")
+
+    def draw(self, p):
+        s, w, h = self.s, self.w, self.h
+        a = self.arp
+        p.fillRect(self.rect(), QColor(BG))
+        g = 16 * s
+        inner = QRectF(g, g, w - 2 * g, h - 2 * g)
+        self.text(p, QRectF(inner.left(), inner.top(), inner.width(), 30 * s),
+                  f"ARPEGGIATOR · track T{self.track.number}", TEXT, 17, Qt.AlignLeft | Qt.AlignVCenter, bold=True)
+        self.text(p, QRectF(inner.left(), inner.top() + 30 * s, inner.width(), 24 * s),
+                  "the chord it hears, one note at a time - the pattern keeps its chords (nothing to undo)", DIM, 12,
+                  Qt.AlignLeft | Qt.AlignVCenter, elide=True)
+        on = QRectF(inner.left(), inner.top() + 64 * s, 260 * s, 62 * s)
+        self.button(p, on, "ARP ON" if a.on else "ARP OFF", lambda: self.set(on=not a.on), on=a.on,
+                    color="#4ade80", sub="tap to switch")
+        self.text(p, QRectF(on.right() + 20 * s, on.top(), inner.right() - on.right() - 20 * s, on.height()),
+                  "the notes land on the transport's grid, not the key's: RATE is the distance, GATE how much sounds",
+                  DIM, 12, Qt.AlignLeft | Qt.AlignVCenter, elide=True)
+
+        def label(text, y):
+            self.text(p, QRectF(inner.left(), y, 120 * s, 22 * s), text, DIM, 11,
+                      Qt.AlignLeft | Qt.AlignVCenter, bold=True)
+
+        y = on.bottom() + 22 * s
+        label("RATE", y)
+        rates = split(QRectF(inner.left(), y + 22 * s, inner.width(), 58 * s), [0] * len(ARP_RATES), 8 * s)
+        for rect, (ticks, name) in zip(rates, ARP_RATES):
+            self.button(p, rect, name, lambda ticks=ticks: self.set(rate=ticks), on=a.rate == ticks)
+        y += 92 * s
+        label("MODE", y)
+        modes = split(QRectF(inner.left(), y + 22 * s, inner.width(), 58 * s), [0] * len(ARP_MODES), 8 * s)
+        for rect, (mode, name) in zip(modes, ARP_MODES):
+            self.button(p, rect, name, lambda mode=mode: self.set(mode=mode), on=a.mode == mode)
+        y += 92 * s
+        octs = split(QRectF(inner.left(), y, inner.width(), 58 * s), [0] * 4, 8 * s)
+        for j, n in enumerate((1, 2, 3)):
+            self.button(p, octs[j], f"{n} OCT", lambda n=n: self.set(octaves=n), on=a.octaves == n)
+        self.button(p, octs[3], "LATCH", lambda: self.set(latch=not a.latch), on=a.latch, sub="keeps the chord")
+        y += 74 * s
+        label("GATE", y)
+        gates = split(QRectF(inner.left(), y + 22 * s, inner.width(), 54 * s), [0] * len(ARP_GATES), 8 * s)
+        for rect, gate in zip(gates, ARP_GATES):
+            self.button(p, rect, f"{round(gate * 100)}%", lambda gate=gate: self.set(gate=gate),
+                        on=abs(a.gate - gate) < 0.01)
+
+        # what it will play for a held C major chord: the mode's order and the octaves, at a glance
+        y += 90 * s
+        sequence = a.order([60, 64, 67])
+        self.text(p, QRectF(inner.left(), y, inner.width(), 22 * s),
+                  f"WHAT A C-E-G CHORD PLAYS · {len(sequence)} STEPS" +
+                  (" · each one picked at random" if a.mode == "random" else ""), DIM, 11,
+                  Qt.AlignLeft | Qt.AlignVCenter, bold=True)
+        strip = QRectF(inner.left(), y + 22 * s, inner.width(), max(56 * s, inner.bottom() - (y + 22 * s)))
+        self.box(p, strip, PANEL)
+        shown = sequence[:16]
+        area = strip.adjusted(8 * s, 8 * s, -8 * s, -8 * s)
+        cells = split(area, [0] * max(1, len(shown)), 5 * s)
+        lo, hi = min(sequence), max(sequence)
+        for rect, n in zip(cells, shown):
+            tall = rect.height() * (0.45 + 0.55 * (0.5 if hi == lo else (n - lo) / (hi - lo)))
+            block = QRectF(rect.left(), rect.bottom() - tall, rect.width(), tall)
+            self.box(p, block, QColor("#38d6ff") if a.on else QColor("#3a4252"), None, radius=3)
+            self.text(p, block, NOTE_NAMES[n % 12] + str(n // 12 - 1), BG if a.on else DIM, 11, bold=True)
+        if len(sequence) > len(shown):
+            self.text(p, strip.adjusted(0, 0, -8 * s, 0), f"+{len(sequence) - len(shown)}", DIM, 11,
+                      Qt.AlignRight | Qt.AlignVCenter)
+
 
 
 class MidiInputs(Panel):

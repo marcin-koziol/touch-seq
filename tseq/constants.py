@@ -84,6 +84,11 @@ EQ_LABELS = {"touchseq.eq", "urn:touch-seq:eq"}
 CLICK_LABELS = {"touchseq.click", "urn:touch-seq:click"}  # CLAP id, LV2 URI (click/ in this repo)
 CLICK_BEAT, CLICK_ACCENT = 77, 76  # the metronome plugin's notes: a beat, and the first beat of the bar
 CC_LANES = 4  # a pattern takes this many controller lanes at most
+# the arpeggiator: how often it plays (in the engine's ticks, 6 to a 1/16) and in which order
+ARP_RATES = ((3, "1/32"), (4, "1/16T"), (6, "1/16"), (8, "1/8T"), (12, "1/8"), (16, "1/4T"), (24, "1/4"))
+ARP_MODES = (("up", "UP"), ("down", "DOWN"), ("updown", "UP-DOWN"), ("random", "RANDOM"),
+             ("played", "AS PLAYED"))
+ARP_GATES = (0.25, 0.5, 0.75, 1.0)
 # a delay into a reverb, the two effects a live set always needs (space/ in this repo)
 SPACE_LABELS = {"touchseq.space", "urn:touch-seq:space"}
 # the plugins that ship with the app, whatever their format

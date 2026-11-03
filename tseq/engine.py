@@ -156,6 +156,10 @@ class Engine:
         self.rec_fresh = set()  # (lane, step) a held take is sounding: the pattern leaves it to the fingers
         self.rec_taken = set()  # (lane, step) recorded since recording started: REC doesn't erase them
         self.cc_sent = {}  # (track, cc) -> the value last sent, so a lane only talks when it changes
+        self.arp_notes = {}  # Track -> {note: (velocity, when the sequencer lets it go or None)}
+        self.arp_order = {}  # Track -> the held notes in the order they were pressed
+        self.arp_keys = {}  # Track -> keys physically down (LATCH keeps the chord when they are all up)
+        self.arp_step = {}  # Track -> how far through the arp's sequence it is
         self.song_step = None  # the song step playing (None: not started)
         self.song_at = 0  # the bar that step began at
         self.song_jump = None  # a step asked for: taken at the next bar
@@ -189,7 +193,7 @@ class Engine:
         self.out.send_message([0xF8])
         if self.ticks % TICKS_PER_STEP == 0:
             self.step(self.next_tick)
-        self.automate()
+        self.automate(time.perf_counter())
         self.ticks += 1
         self.next_tick += 60 / (self.project.bpm * PPQN)
 
@@ -232,11 +236,88 @@ class Engine:
                 self.note_on(tr, tr.note(k), pat.lane(k)[i].vel, time.perf_counter() + seconds)
 
     def note_on(self, tr, note, vel, off):
+        """A note from the sequencer: with the track's arp on it joins the arp instead of sounding, so the
+        pattern keeps its chords and the arp plays them (non-destructive: switch it off and they are chords)."""
+        with self.lock:
+            if self.arp_hold(tr, note, vel, off):
+                return
+            self._play(tr, note, vel, off)
+
+    def _play(self, tr, note, vel, off):
+        """Send the note now, and end it at `off`."""
         key = (tr.channel, note)
         if key in self.sounding:  # retrigger: close the previous note first
             self.note_off(key)
         self.out.send_message([0x90 | (tr.channel - 1), note, vel], tr)
         self.sounding[key] = (off, tr)
+
+    # --- the arpeggiator --------------------------------------------------------
+    def arp_hold(self, tr, note, vel, ends=None):
+        """The track is holding this note: the arp plays it, the chord does not sound. `ends` is when the
+        sequencer would let it go (None: when the key comes up)."""
+        with self.lock:
+            if not tr.arp.on:
+                return False
+            held = self.arp_notes.setdefault(tr, {})
+            order = self.arp_order.setdefault(tr, [])
+            keys = self.arp_keys.get(tr, 0)
+            if keys == 0 and tr.arp.latch and held:  # a new chord after a latched one starts afresh
+                held.clear()
+                order.clear()
+                self.arp_step[tr] = 0
+            if note not in held:
+                order.append(note)
+            held[note] = (vel, ends)
+            if ends is None:  # a key, not the sequencer: the latch waits for all of them to be up
+                self.arp_keys[tr] = keys + 1
+            return True
+
+    def arp_release(self, tr, note):
+        """A key up: the note leaves the arp, unless LATCH keeps the chord until the next one."""
+        with self.lock:
+            held = self.arp_notes.get(tr) or {}
+            if note not in held:
+                return False
+            if held[note][1] is not None:  # a sequencer note: only its own gate lets it go
+                return True
+            self.arp_keys[tr] = max(0, self.arp_keys.get(tr, 0) - 1)
+            if not tr.arp.latch:
+                held.pop(note, None)
+                if note in self.arp_order.get(tr, []):
+                    self.arp_order[tr].remove(note)
+            return True
+
+    def arp_tick(self, now, track):
+        """One tick of the arp: the notes come on the transport's own grid, so they sit with the sequencer's."""
+        held = self.arp_notes.get(track)
+        order = self.arp_order.get(track, [])
+        if not track.arp.on:  # switched off: let go of what it was holding
+            if held:
+                self.arp_notes.pop(track, None)
+                self.arp_order.pop(track, None)
+                self.arp_keys.pop(track, None)
+            return
+        if not held:
+            return
+        for note, (_, ends) in list(held.items()):  # a sequencer note ends with its own gate
+            if ends is not None and ends <= now:
+                held.pop(note, None)
+                if note in order:
+                    order.remove(note)
+        if not held:
+            return
+        rate = max(1, track.arp.rate)
+        if self.ticks % rate:  # its own grid, anchored where the transport started
+            return
+        sequence = track.arp.sequence(order or list(held))
+        if not sequence:
+            return
+        step = self.arp_step.get(track, 0)
+        self.arp_step[track] = step + 1
+        gap = rate / TICKS_PER_STEP * self.step_len  # one arp step, in seconds
+        vel = max(v for v, _ in held.values())
+        self._play(track, sequence[step % len(sequence)], vel,
+                   now + max(0.01, gap * max(0.05, min(1.0, track.arp.gate))))
 
     def note_off(self, key):
         channel, note = key
@@ -275,6 +356,8 @@ class Engine:
         downbeat), or straight from `start`."""
         self.song_step, self.song_at, self.song_jump = None, 0, None  # a song starts at its first step
         self.cc_sent.clear()  # the lanes talk again from the top
+        for d in (self.arp_notes, self.arp_order, self.arp_keys, self.arp_step):
+            d.clear()  # and the arp starts its sequence over
         self.playing, self.ticks, self.step_index = True, 0, -1
         self.pos.clear()
         self.playhead.clear()
@@ -325,6 +408,8 @@ class Engine:
             self.playing = False
             self.song_step, self.song_at, self.song_jump = None, 0, None
             self.cc_sent.clear()
+            for d in (self.arp_notes, self.arp_order, self.arp_keys, self.arp_step):
+                d.clear()
             self.clicker.flush()  # a beat queued for a moment from now must not sound after a stop
             self.out.send_message([0xFC])
             for key in list(self.sounding):
@@ -359,10 +444,16 @@ class Engine:
     def live(self, tr, note, vel):
         """Note on (vel > 0) / off from a live pad, outside the sequencer's own note bookkeeping.
 
-        A release never cuts a note the sequencer is playing at that moment: a take recorded a moment before
-        the pattern's step comes round again is picked up by the pattern while the key is still held, and
-        lifting the finger then used to silence it until the next pass."""
+        With the track's arp on, a key goes into the arp instead of sounding the chord. A release never cuts a
+        note the sequencer is playing at that moment: a take recorded a moment before the pattern's step comes
+        round again is picked up by the pattern while the key is still held, and lifting the finger then used
+        to silence it until the next pass."""
         with self.lock:
+            if vel:
+                if self.arp_hold(tr, note, vel):
+                    return
+            elif self.arp_release(tr, note):
+                return
             if not vel and (tr.channel, note) in self.sounding:
                 return
             self.out.send_message([(0x90 if vel else 0x80) | (tr.channel - 1), note, vel], tr)
@@ -373,15 +464,16 @@ class Engine:
 
     def preview(self, tr, note):
         with self.lock:
-            self.note_on(tr, note, 100, time.perf_counter() + 0.15)
+            self._play(tr, note, 100, time.perf_counter() + 0.15)  # heard, arp or not
 
-    def automate(self):
-        """The controller lanes, once a tick (24 to a beat): a sweep can move between the steps, which is what
-        lets a lane be drawn finely instead of one value per step."""
-        if not any(tr.current.cc for tr in self.project.tracks):
-            return
+    def automate(self, now):
+        """Once a tick (24 to a beat): the controller lanes, so a sweep can move between the steps, and the arp,
+        whose notes come on the same grid."""
         for tr in self.project.tracks:
             if tr.mute:
+                continue
+            self.arp_tick(now, tr)
+            if not tr.current.cc:
                 continue
             pos = self.playhead.get(tr, 0) + (self.ticks % TICKS_PER_STEP) / TICKS_PER_STEP
             self.send_cc(tr, pos)

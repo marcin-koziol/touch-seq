@@ -151,11 +151,18 @@ Plays the track selected in the sequencer:
   pass
 - **CLICK** and **COUNT** in the top bar: a tick on every beat (higher on the bar's first) while playing, and
   0/1/2 bars of them before the pattern starts, so you can come in on time
+- **ARP** in the header turns the track's arpeggiator on (it lights green, with its rate underneath): the
+  chord the track hears — the pads, the keyboard, its MIDI input or a chord held in the pattern — is played one
+  note at a time on the **transport's grid**, so the notes sit with the pattern instead of drifting from the
+  moment a key went down. Its dialog sets **RATE** (1/32 … 1/4, triplets), **MODE** (up, down, up-down, random,
+  as played), **1/2/3 OCT**, **GATE** and **LATCH**, and shows what a held C-E-G will play. It is
+  **non-destructive**: nothing is recorded, the pattern keeps its chords, and switching it off plays them again
 - with **XYFX** on the master, a **MASTER** row appears in the sequencer; selecting it turns this module
   into an **XY pad**: beat repeat left–right (straight on the right half, triplets or reverse on the left),
   low-pass down / high-pass up, the centre is "dry"
 
 ![Keyboard](docs/screenshots/keys.png)
+![A track's arpeggiator: the chord it hears, one note at a time](docs/screenshots/arp.png)
 ![XY pad](docs/screenshots/xy-pad.png)
 
 ### CTRL-10 — performance faders
@@ -240,6 +247,7 @@ device is unplugged its notes are simply not sent, and they come back when it re
 | piano roll | drag the keyboard on the left | scroll; OCT ▼▲ jumps an octave |
 | plugin knobs | drag up/down | turn; to drive one from a CTRL fader, **ASSIGN** in HOST-4 then tap the knob and the fader |
 | chord pads | 7 / 9 / SUS while holding a chord | the held chord changes right away |
+| PLAY-12 header | **ARP** | the track's arpeggiator: rate, mode, octaves, gate, latch (lights with the rate when on) |
 | LEAD | toggle off and on | restarts voice leading from root position |
 | XY pad | LATCH | keeps the effect on after the finger lifts |
 | keyboard | lower on the key | louder (pads: higher = louder) |

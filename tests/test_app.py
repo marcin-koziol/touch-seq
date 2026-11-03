@@ -2019,3 +2019,77 @@ img.save(str(OUT / "lane_only.png"))
 em3.close()
 print("mute + lane only OK")
 
+# --- the arpeggiator: the chord it hears, one note at a time, on the transport's grid -------
+pra = ts.Project(bpm=600, tracks=[ts.Track("melody", 1, 1)])  # 600 bpm: a step is 25 ms
+ta = pra.tracks[0]
+ta.arp.on = True
+outa = FakeOut(); ea = ts.Engine(pra, outa)
+ea.start(); time.sleep(0.05)
+outa.log.clear()
+ea.live(ta, 60, 100); ea.live(ta, 64, 100); ea.live(ta, 67, 100)
+time.sleep(0.2)
+ons = [m[1] for _, m in outa.log if m[0] & 0xF0 == 0x90]
+print("arp from the keys:", ons[:6])
+assert ons[:6] == [60, 64, 67, 60, 64, 67], ons
+assert {m[1] for _, m in outa.log if m[0] & 0xF0 == 0x90} == {60, 64, 67}
+ea.live(ta, 60, 0); ea.live(ta, 64, 0); ea.live(ta, 67, 0)
+time.sleep(0.06)
+sent = sum(1 for _, m in outa.log if m[0] & 0xF0 == 0x90)
+time.sleep(0.12)
+assert sum(1 for _, m in outa.log if m[0] & 0xF0 == 0x90) == sent, "keys up: the arp stops"
+# off: the chord again, and at once (nothing was written anywhere)
+ta.arp.on = False
+outa.log.clear()
+ea.live(ta, 60, 100); ea.live(ta, 64, 100); ea.live(ta, 67, 100)
+time.sleep(0.02)
+assert [m[1] for _, m in outa.log if m[0] & 0xF0 == 0x90][:3] == [60, 64, 67]
+ea.live(ta, 60, 0); ea.live(ta, 64, 0); ea.live(ta, 67, 0)
+# latch keeps the chord after the keys are up, and a new key starts a new chord
+ta.arp.on, ta.arp.latch, ta.arp.mode = True, True, "up"
+outa.log.clear()
+ea.live(ta, 60, 100); ea.live(ta, 64, 100)
+time.sleep(0.06)
+ea.live(ta, 60, 0); ea.live(ta, 64, 0)
+before = sum(1 for _, m in outa.log if m[0] & 0xF0 == 0x90)
+time.sleep(0.12)
+latched = [m[1] for _, m in outa.log if m[0] & 0xF0 == 0x90]
+assert len(latched) >= before + 3 and set(latched[-4:]) == {60, 64}, "latch keeps the chord going"
+ea.live(ta, 67, 100)
+time.sleep(0.12)
+assert [m[1] for _, m in outa.log if m[0] & 0xF0 == 0x90][-3:] == [67, 67, 67], "a new chord starts afresh"
+ea.stop(); ea.close()
+# a chord held in the pattern is arpeggiated too
+prb2 = ts.Project(bpm=600, tracks=[ts.Track("melody", 1, 1)])
+tb2 = prb2.tracks[0]; tb2.arp.on = True
+for n in (60, 64, 67):
+    tb2.current.lane(n)[0].on = True
+    tb2.current.lane(n)[0].gate = 16  # held for a bar: the arp's window
+outb2 = FakeOut(); eb2 = ts.Engine(prb2, outb2)
+eb2.start(); time.sleep(0.22)
+onsb = [m[1] for _, m in outb2.log if m[0] & 0xF0 == 0x90]
+print("arp over the pattern:", onsb[:6])
+assert onsb[:6] == [60, 64, 67, 60, 64, 67], onsb
+eb2.stop(); eb2.close()
+print("arpeggiator OK")
+
+# --- its order, its octaves, and the dialog that sets them ---------------------------------
+assert ts.Arp(mode="up").sequence([67, 60, 64]) == [60, 64, 67]
+assert ts.Arp(mode="down").sequence([60, 64, 67]) == [67, 64, 60]
+assert ts.Arp(mode="updown").sequence([60, 64, 67]) == [60, 64, 67, 64]
+assert ts.Arp(mode="played").sequence([67, 60, 64]) == [67, 60, 64]
+assert ts.Arp(mode="up", octaves=2).sequence([60, 67]) == [60, 67, 72, 79]
+prd = ts.Project(tracks=[ts.Track("melody", 1, 1)])
+changes = []
+dlg_arp = ts.ArpSettings(prd.tracks[0], lambda: changes.append(1))
+img = QImage(900, 620, QImage.Format_ARGB32); img.fill(0)
+q = QPainter(img); q.setRenderHint(QPainter.Antialiasing); dlg_arp.paint(q, 900, 620); q.end()
+dlg_arp.set(on=True, rate=12, mode="updown", octaves=2, gate=0.75, latch=True)
+assert prd.tracks[0].arp.on and prd.tracks[0].arp.rate == 12 and prd.tracks[0].arp.mode == "updown"
+assert prd.tracks[0].arp.octaves == 2 and prd.tracks[0].arp.gate == 0.75 and prd.tracks[0].arp.latch
+assert dlg_arp.rate_name() == "1/8" and changes, (dlg_arp.rate_name(), changes)
+img.fill(0); q = QPainter(img); q.setRenderHint(QPainter.Antialiasing); dlg_arp.paint(q, 900, 620); q.end()
+img.save(str(OUT / "arp.png"))
+_f = OUT / "arp.json"
+_f.write_text(ts.dump_project(prd))
+assert ts.load_project(_f).tracks[0].arp == prd.tracks[0].arp, "the arp is saved with the project"
+print("arp settings OK")

@@ -3,6 +3,7 @@ project files. No Qt, no MIDI: the engine and the panels read this."""
 import itertools
 import json
 import os
+import random
 import re
 from dataclasses import asdict, astuple, dataclass, field
 
@@ -72,6 +73,33 @@ def load_strip(d):
     return Strip([PluginRef(**r) if r else None for r in d["slots"]], d["volume"], d["mute"])
 
 
+@dataclass
+class Arp:
+    """A track's arpeggiator: the chord it hears is played one note at a time, on the transport's own grid. It
+    is not destructive - the pattern keeps its chords, and switching it off plays them again."""
+    on: bool = False
+    rate: int = 6  # ticks between notes: 6 is a 1/16, 12 a 1/8, 24 a 1/4, 4 a 1/16 triplet (see ARP_RATES)
+    mode: str = "up"  # "up", "down", "updown", "random", "played"
+    octaves: int = 1  # 1..3
+    gate: float = 0.5  # of the gap between two notes
+    latch: bool = False  # keep the chord after the keys are up, until the next one starts
+
+    def order(self, pressed):
+        """The notes the mode plays, in order, from the ones held in the order they were pressed: the mode
+        decides the order, then the octaves above."""
+        base = list(pressed) if self.mode == "played" else sorted(pressed)
+        if self.mode == "down":
+            base.reverse()
+        elif self.mode == "updown" and len(base) > 2:
+            base = base + base[-2:0:-1]
+        return [n + 12 * o for o in range(max(1, min(3, self.octaves))) for n in base]
+
+    def sequence(self, pressed):
+        """The next note to play (RANDOM picks one each time, the other modes walk their order)."""
+        out = self.order(pressed)
+        return [random.choice(out)] if (self.mode == "random" and out) else out
+
+
 @dataclass(eq=False)
 class SongStep:
     """One step of a song: how long it lasts, and which pattern each track plays in it. A track left out keeps
@@ -101,6 +129,7 @@ class Track:
     strip: Strip = field(default_factory=Strip)  # its plugins: instrument + effects
     port: str = ""  # external: the MIDI output it sends to (a name from the system's outputs)
     bus: int = 0  # 0: straight into the master, else the number of the bus it goes through
+    arp: Arp = field(default_factory=Arp)  # the arpeggiator: the chords it hears, one note at a time
     source: str = ""  # audio: the input port it takes its sound from (a mono capture port)
     pan: str = "center"  # audio: "left", "center" or "right" - a mono input into one or both sides
     in_port: str = ""  # MIDI: the input it plays and records from (a name from the system's inputs)
@@ -221,6 +250,7 @@ def dump_project(pr):
          **({"port": t.port} if t.external else {}), **({"bus": t.bus} if t.bus else {}),
          **({"source": t.source, "pan": t.pan} if t.audio else {}),
          **({"in_port": t.in_port, "in_channel": t.in_channel} if t.in_port else {}),
+         **({"arp": asdict(t.arp)} if t.arp.on else {}),
          "patterns": [pattern(p) for p in t.patterns]}
         for t in pr.tracks], "controls": [astuple(c) for c in pr.controls],
         "master": dump_strip(pr.master),
@@ -264,6 +294,7 @@ def load_project(path):
                    voice=t["voice"], last=Step(*last), last_note=last_note, port=t.get("port", ""),
                    bus=t.get("bus", 0), source=t.get("source", ""), pan=t.get("pan", "center"),
                    in_port=t.get("in_port", ""), in_channel=t.get("in_channel", 0),
+                   arp=Arp(**t["arp"]) if "arp" in t else Arp(),
                    strip=load_strip(t["strip"]) if "strip" in t else Strip())
         for p, pd in zip(tr.patterns, t["patterns"]):
             p.length = pd["length"]
