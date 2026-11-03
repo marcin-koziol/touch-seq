@@ -1,16 +1,70 @@
-# Touch-Seq
+<div align="center">
+<img src="docs/screenshots/hero.png" alt="Touch-Seq: the touchscreen live-performance rack" width="100%">
+</div>
 
-**A touchscreen live-performance front end for the [Carla](https://github.com/falkTX/Carla) plugin host.**
-Carla runs the plugins (LV2, VST3, CLAP); Touch-Seq is the instrument you play them with: a step sequencer
-with a **song mode**, per-track plugin chains with a master bus, a **MIDI keyboard** on any track, chord pads /
-keyboard / drum pads, an MPC-style XY effects pad, a metronome and the performance faders — laid out as modules
-in a modular-synth rack, made for fingers on a touchscreen (multi-touch; a mouse works too).
+# TOUCH-SEQ
 
-![Touch-Seq: faders, plugin host, sequencer and chord pads](docs/screenshots/overview.png)
+<div align="center">
 
-Version 0.9.0 — early, but already played with.
+**Your plugins. Your fingers. No laptop face.**
 
-## The rack
+A touchscreen live-performance front end for [Carla](https://github.com/falkTX/Carla).
+A step sequencer with songs, an arpeggiator, a piano roll with fine automation, chord and drum pads, an
+XY effects pad, MIDI keyboards and a touch-first plugin host — one modular rack, built to be played with
+both hands.
+
+[![Release](https://img.shields.io/github/v/release/marcin-koziol/touch-seq?style=for-the-badge&color=38d6ff&labelColor=0d0f14)](https://github.com/marcin-koziol/touch-seq/releases)
+[![CI](https://img.shields.io/github/actions/workflow/status/marcin-koziol/touch-seq/ci.yml?style=for-the-badge&labelColor=0d0f14)](https://github.com/marcin-koziol/touch-seq/actions)
+[![License](https://img.shields.io/github/license/marcin-koziol/touch-seq?style=for-the-badge&color=4ade80&labelColor=0d0f14)](LICENSE)
+[![Platform](https://img.shields.io/badge/platform-Linux%20%C2%B7%20x86__64%20%7C%20aarch64-ff8c42?style=for-the-badge&labelColor=0d0f14)](#install)
+
+**[Download](#install)** · **[Manual](#the-manual)** · **[Less obvious things](#less-obvious-things)** · **[From source](#running-from-source)**
+
+</div>
+
+<img src="docs/screenshots/collage.png" alt="The sequencer, the song, the arpeggiator, the piano roll with automation, the keyboard and the mixer" width="100%">
+
+## Why it exists
+
+Most live sets are a laptop, a mouse and fourteen plugin windows. This is the other thing: every module of
+the set on **one screen**, sized for fingers, so you can play standing up, look at the crowd instead of a
+cursor, and change the arrangement **on the bar** instead of on the downbeat of a mistake.
+
+- **Play it, don't point at it.** Multi-touch modules, hold-then-drag for anything destructive, no tiny
+  window furniture. A mouse works too — it is just less fun.
+- **Your plugins, not ours.** Carla hosts CLAP, LV2 and VST3 inside the app: per-track chains, effect
+  buses, a mixer with real metering, and a patchbay made of cables you draw with a tap. Plugin GUIs open
+  in their own windows only if you ask them to.
+- **Built for the stage.** Pattern and song changes quantized to the bar, a count-in on the metronome, MIDI
+  clock from the keyboard, an arpeggiator locked to the transport, autosave every couple of seconds.
+  A show is not a good time to remember Ctrl+S.
+
+## What's in the rack
+
+| module | in one breath |
+|---|---|
+| **[SEQ-64](#seq-64--step-sequencer)** | 64 steps, 16 patterns, 8 scenes, four track kinds, a polyphonic piano roll and controller lanes finer than the steps |
+| **[SONG](#seq-64--step-sequencer)** | the arrangement: a list of steps with bars × repeats and a pattern per track, switched on the bar |
+| **[PLAY-12](#play-12--live-play)** | chord pads with voice leading, a keyboard, drum pads, REC/OVR and a per-track arpeggiator |
+| **[HOST-4](#host-4--plugins-carla)** | Carla in the app: chains, buses, the mixer, plugin GUIs and the built-in EQ, Space and XYFX |
+| **[CTRL-10](#ctrl-10--performance-faders)** | pitch, mod and 8 faders aimed at a track, a channel or a plugin parameter |
+| **[PATCHBAY](#patchbay--audio-routing)** | every audio port on the machine, linked with a tap per cable |
+| **TOP BAR** | FILE, SETTINGS, PATCHBAY, CLICK, COUNT-in, BPM and SAVE — icons, because words are wide |
+
+![The whole rack, as it comes up: performance controls, the plugin host, the sequencer and the live pads](docs/screenshots/overview.png)
+
+## New in 0.10
+
+- **ARP** — every track gets an arpeggiator: rate (1/32 … 1/4, triplets), up / down / up-down / random /
+  as played, 1–3 octaves, gate and latch. It plays on the transport's grid, free-runs when the transport is
+  stopped, and is **non-destructive** — the pattern keeps its chords.
+- **A tidier HOST-4** — the monitor and the click stay out of the plugin browser (the app puts them in
+  place), a plugin installed as both CLAP and LV2 is one row, and `CHN` fits the sequencer's channel box.
+- 0.9 brought the dense CC automation (points every ¼ step, sent between the engine's ticks), the
+  lane-only view with the notes as a ghost, **Space**, and **BUILTIN** in the browser — see the
+  [release notes](https://github.com/marcin-koziol/touch-seq/releases/tag/v0.9.0).
+
+## The manual
 
 The window is a 2×2 rack under a toolbar of **icons**: the folder is **FILE** (projects), the sliders
 **SETTINGS** (key/scale and audio output), the cable **PATCHBAY** (audio routing); then, past a line, the
@@ -70,15 +124,13 @@ while there is something unsaved (the time next to it is the last save of anythi
   project's key and scale, so the pattern stays in key (a chromatic note keeps its alteration, octaves wrap);
   drum tracks have fixed voices and don't offer it
 
-![The metronome: CLICK and COUNT in the top bar, counting in before the pattern](docs/screenshots/metronome.png)
-![SONG: a list of steps, each with its bars, repeats and a pattern per track](docs/screenshots/song.png)
-![Piano roll](docs/screenshots/piano-roll.png)
-![A controller lane under the roll: values hold until their next point](docs/screenshots/cc.png)
-![The same lane alone, with the roll hidden: the notes stay as a faint ghost](docs/screenshots/cc-only.png)
-![Drum editor](docs/screenshots/drums.png)
-![Adding a track: drum, melody, external MIDI or audio](docs/screenshots/new-track.png)
-![An audio track: an interface input, panned, through the track's chain and into a bus](docs/screenshots/audio.png)
-![A track's MIDI keyboard: the socket in EDIT and the dialog with the inputs and the channel](docs/screenshots/midi-in.png)
+| | |
+|---|---|
+| ![The metronome: CLICK and COUNT in the top bar, counting in before the pattern](docs/screenshots/metronome.png) | ![SONG: a list of steps, each with its bars, repeats and a pattern per track](docs/screenshots/song.png) |
+| ![Piano roll](docs/screenshots/piano-roll.png) | ![A controller lane under the roll: values hold until their next point](docs/screenshots/cc.png) |
+| ![The same lane alone, with the roll hidden: the notes stay as a faint ghost](docs/screenshots/cc-only.png) | ![Drum editor](docs/screenshots/drums.png) |
+| ![Adding a track: drum, melody, external MIDI or audio](docs/screenshots/new-track.png) | ![An audio track: an interface input, panned, through the track's chain and into a bus](docs/screenshots/audio.png) |
+| ![A track's MIDI keyboard: the socket in EDIT and the dialog with the inputs and the channel](docs/screenshots/midi-in.png) | |
 
 ### EQ — eight bands, drawn in the app
 
@@ -117,8 +169,6 @@ the first free name (*Touch-Seq 2*, …) and says so in HOST-4's status line: bo
   for a plugin. **BUILTIN** in the browser lists our own (XYFX, EQ, Space) first, and they come first in
   **ALL**; the two the app puts in place itself — the monitor and the click — are not offered there, because
   there is nothing to add by hand
-
-![Space: the delay and reverb in one, its knobs in HOST-4](docs/screenshots/space.png)
 - **effects buses**: a track's chain can go into a bus instead of straight into the master — **→ MASTER** under
   the chain cycles through the buses, **+ BUS** makes a new one. A bus has its own 3 slots and its own level,
   so one reverb can process just the two of five tracks you route into it; buses are their own columns in the
@@ -132,7 +182,10 @@ the first free name (*Touch-Seq 2*, …) and says so in HOST-4's status line: bo
   plugin GUIs open in their own windows (**UI**)
 - the audio output follows PipeWire's default (headphones ↔ speakers) or is pinned in SETTINGS → AUDIO
 
-![Mixer](docs/screenshots/mixer.png)
+| | |
+|---|---|
+| ![Space: the delay and reverb in one, its knobs in HOST-4](docs/screenshots/space.png) | ![Mixer](docs/screenshots/mixer.png) |
+| ![The plugin browser on BUILTIN: our own plugins first](docs/screenshots/builtin.png) | |
 
 ### PLAY-12 — live play
 
@@ -155,16 +208,18 @@ Plays the track selected in the sequencer:
   chord the track hears — the pads, the keyboard, its MIDI input or a chord held in the pattern — is played one
   note at a time on the **transport's grid**, so the notes sit with the pattern instead of drifting from the
   moment a key went down (with the transport stopped it runs on its own clock, at the project's tempo, so a
-  chord can be arpeggiated before pressing play). Its dialog sets **RATE** (1/32 … 1/4, triplets), **MODE** (up, down, up-down, random,
-  as played), **1/2/3 OCT**, **GATE** and **LATCH**, and shows what a held C-E-G will play. It is
-  **non-destructive**: nothing is recorded, the pattern keeps its chords, and switching it off plays them again
+  chord can be arpeggiated before pressing play). Its dialog sets **RATE** (1/32 … 1/4, triplets), **MODE**
+  (up, down, up-down, random, as played), **1/2/3 OCT**, **GATE** and **LATCH**, and shows what a held C-E-G
+  will play. It is **non-destructive**: nothing is recorded, the pattern keeps its chords, and switching it
+  off plays them again
 - with **XYFX** on the master, a **MASTER** row appears in the sequencer; selecting it turns this module
   into an **XY pad**: beat repeat left–right (straight on the right half, triplets or reverse on the left),
   low-pass down / high-pass up, the centre is "dry"
 
-![Keyboard](docs/screenshots/keys.png)
-![A track's arpeggiator: the chord it hears, one note at a time](docs/screenshots/arp.png)
-![XY pad](docs/screenshots/xy-pad.png)
+| | |
+|---|---|
+| ![Keyboard](docs/screenshots/keys.png) | ![A track's arpeggiator: the chord it hears, one note at a time](docs/screenshots/arp.png) |
+| ![XY pad](docs/screenshots/xy-pad.png) | ![Fader targets](docs/screenshots/faders-edit.png) |
 
 ### CTRL-10 — performance faders
 
@@ -178,8 +233,6 @@ Pitch bend (springs back), mod wheel and 8 CC faders. Each fader has a **target*
 
 Optional 14-bit (MSB/LSB pairs) and bipolar faders.
 
-![Fader targets](docs/screenshots/faders-edit.png)
-
 ### Projects and settings
 
 FILE lists projects, newest first (open, NEW, DUPLICATE, hold DELETE); switching restarts the app with the
@@ -187,8 +240,9 @@ other project. SETTINGS sets the project's key and scale (chord pads, piano roll
 audio graph's **buffer size** (SYSTEM or 64 … 2048 samples): the whole graph follows — plugins included — and
 the machine's own size comes back when the app closes.
 
-![Settings](docs/screenshots/settings.png)
-![Audio settings: the output and the buffer size](docs/screenshots/settings-audio.png)
+| | |
+|---|---|
+| ![Settings](docs/screenshots/settings.png) | ![Audio settings: the output and the buffer size](docs/screenshots/settings-audio.png) |
 
 ### PATCHBAY — audio routing
 
@@ -210,11 +264,12 @@ Download the AppImage for your machine from [Releases](https://github.com/marcin
 then:
 
 ```sh
-chmod +x Touch-Seq-0.9.0-x86_64.AppImage
-./Touch-Seq-0.9.0-x86_64.AppImage
+chmod +x Touch-Seq-0.10.0-x86_64.AppImage
+./Touch-Seq-0.10.0-x86_64.AppImage
 ```
 
-It contains Python, Qt (PySide6), Carla and Touch-Seq's own plugins (XYFX, Monitor, EQ, Click and Space). The machine needs:
+It contains Python, Qt (PySide6), Carla and Touch-Seq's own plugins (XYFX, Monitor, EQ, Click and Space).
+The machine needs:
 
 - Linux, x86_64 or aarch64 (e.g. Raspberry Pi 4/5 with a 64-bit OS), glibc 2.35 or newer
   (Ubuntu 22.04+, Debian 12+, Fedora 36+, Arch, Raspberry Pi OS bookworm)
@@ -308,38 +363,51 @@ git build (e.g. `carla-git` on Arch) or build the engine with `packaging/build-c
 and run with `CARLA_PREFIX=~/carla-touchseq`. A `config.json` next to `touchseq.py` takes precedence over
 the one in `~/.config` (handy for development).
 
-## XYFX
+## Under the hood
 
-[`xyfx/`](xyfx) is Touch-Seq's own effect: a CLAP + LV2 plugin (no GUI — the XY pad is its UI) built with
-[DPF](https://github.com/DISTRHO/DPF). The AppImage includes it; to use it from a source checkout or in a
-DAW:
+**Touch-Seq is not a DAW wearing a touchscreen.** It is a MIDI brain and a UI around Carla's audio graph: no
+audio buffers of its own (the EQ reads its spectrum through the plugin's output parameters), no plugin
+format layer of its own (Carla has it), and no floating windows in the way (HOST-4 draws the parameters).
+
+- `touchseq.py` is the entry point: it flattens the package back into one namespace, so `import touchseq as ts`
+  in the tests sees everything. The app is `tseq/`, one module per concern: `model` (the project and its
+  files), `engine` (MIDI out and the playback thread), `ui` (the drawing toolkit, `Panel` and the module
+  window), one module per rack panel (`sequencer`, `controls`, `host`, `performer`), then `patchbay` (audio
+  routing), `rack`, `dialogs` and `app` (startup). `tseq/__init__.py` lists them in dependency order; nothing
+  in the package imports anything above it.
+- the **engine** runs one thread with a lock: 24 PPQN, notes scheduled with wall-clock deadlines (so a note
+  keeps its gate over the bar line), controller lanes sent every tick, the arpeggiator on the same grid. UI
+  changes that touch playback state take that lock too.
+- the **UI is immediate mode**: panels paint themselves in their own coordinates and collect hit regions while
+  drawing, so a module is a `draw()` plus gestures — nothing to keep in sync, nothing to leak when a track goes.
+- **projects are JSON** (+ a plugin-state folder), autosaved every couple of seconds and on exit.
+
+### The plugins that ship with it
+
+The plugins in this repo are the app's own: **XYFX** (MPC-style beat repeat + filter, also the master's
+XY pad), **EQ** (eight bands, drawn in the app), **Space** (delay + reverb), and the two the app puts in
+place itself — **Monitor** (a transparent gain/pan) and **Click** (the metronome). All are CLAP + LV2,
+built with [DPF](https://github.com/DISTRHO/DPF), and installed with their own script:
 
 ```sh
-xyfx/install.sh    # build, run its DSP test, install to ~/.clap and ~/.lv2
-```
-
-Releases also have `touchseq-xyfx-*.tar.gz` with the built plugin. Its parameters (Engage, X, Y, BPM, Mode)
-can be automated from any host.
-
-## Development
-
-```sh
-QT_QPA_PLATFORM=offscreen python tests/test_app.py   # sequencer, UI, projects, live play: no audio (CI)
-QT_QPA_PLATFORM=offscreen python tests/test_host.py  # plugin host with real Carla + PipeWire (local only)
-QT_QPA_PLATFORM=offscreen python tests/test_xyfx.py  # XYFX + XY pad with real Carla (local only)
-packaging/build-appimage.sh                           # dist/Touch-Seq-<version>-<arch>.AppImage
 xyfx/install.sh monitor/install.sh eq/install.sh click/install.sh space/install.sh   # into ~/.clap and ~/.lv2
 ```
 
-CI runs the app tests and the XYFX build and DSP test on every push; a `v*` tag builds AppImages for x86_64
-and aarch64 and publishes a release.
+The XYFX can also be used outside Touch-Seq (in a DAW, or any plugin host): releases carry
+`touchseq-xyfx-*.tar.gz`, and its parameters (Engage, X, Y, BPM, Mode) can be automated from any host.
+XYFX is ISC licensed; the app and the other plugins are GPL-3.0-or-later.
 
-The app is `touchseq.py` (the entry point: it flattens the package back into one namespace, so `import
-touchseq as ts` in the tests sees everything) plus the `tseq/` package, one module per concern:
-`model` (the project and its files), `engine` (MIDI out and the playback thread), `ui` (the drawing toolkit,
-`Panel` and the module window), one module per rack panel (`sequencer`, `controls`, `host`, `performer`),
-then `patchbay` (audio routing), `rack`, `dialogs` and `app` (startup). `tseq/__init__.py` lists them in
-dependency order; nothing in the package imports anything above it.
+### Tests and builds
+
+```sh
+QT_QPA_PLATFORM=offscreen python tests/test_app.py   # sequencer, UI, projects, live play, arp: no audio (CI)
+QT_QPA_PLATFORM=offscreen python tests/test_host.py  # plugin host with real Carla + PipeWire (local only)
+QT_QPA_PLATFORM=offscreen python tests/test_xyfx.py  # XYFX + XY pad with real Carla (local only)
+packaging/build-appimage.sh                          # dist/Touch-Seq-<version>-<arch>.AppImage
+```
+
+CI runs the app tests and every plugin's DSP test on each push; a `v*` tag builds AppImages for x86_64 and
+aarch64 and publishes a release (with Carla's source attached, as its GPL requires).
 
 ## License
 
