@@ -896,7 +896,7 @@ class Sequencer(Panel):
             self.box(p, ch, PANEL)
             self.text(p, ch, "MONO", DIM, 13, bold=True)
         else:
-            self.value_box(p, ch, "CHANNEL", str(tr.channel), lambda: tr.channel,
+            self.value_box(p, ch, "CHN", str(tr.channel), lambda: tr.channel,
                            lambda v: setattr(tr, "channel", int(v)), 1, 16, 14)
 
         def cycle_length():

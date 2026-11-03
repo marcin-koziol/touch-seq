@@ -1046,9 +1046,21 @@ class HostPanel(Panel):
 
         items = [r for r in self.catalog.plugins if kind(r) and shown(r)]
         have = {str(r.path) for r in self.catalog.plugins}
-        items += [r for r in self.builtin_plugins() if kind(r) and str(r.path) not in have]  # not in the catalog
-        items.sort(key=lambda r: (r.label not in BUILTIN_LABELS, r.name.lower()) if self.browser_fmt in (None, "builtin")
-                   else r.name.lower())
+        # one of ours found on disk is shown by the same rule (a plugin the app puts in place stays out too)
+        items += [r for r in self.builtin_plugins() if kind(r) and shown(r) and str(r.path) not in have]
+        ours = self.browser_fmt in (None, "builtin")
+        if ours:
+            items.sort(key=lambda r: (r.label not in BUILTIN_LABELS, r.name.lower(), r.fmt != "clap"))
+            unique, seen = [], set()  # one of ours in both formats: one row, and the CLAP first
+            for r in items:
+                if r.label in BUILTIN_LABELS:
+                    if r.name in seen:
+                        continue
+                    seen.add(r.name)
+                unique.append(r)
+            items = unique
+        else:
+            items.sort(key=lambda r: r.name.lower())
         return items
 
     def choose(self, ref):

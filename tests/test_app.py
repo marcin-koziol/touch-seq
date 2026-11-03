@@ -1973,8 +1973,9 @@ names = [r.name for r in ts.HostPanel.browser_items(fb)]
 assert names == ["Touch-Seq EQ", "Touch-Seq XYFX", "Reaverb", "Zyn"], names
 # one of ours that a stale catalog does not know about is still offered
 fb.browser_fmt = "builtin"
-fb._builtin = [fake_ref("Touch-Seq Space", "touchseq.space")]
-assert [r.name for r in ts.HostPanel.browser_items(fb)] == ["Touch-Seq EQ", "Touch-Seq Space", "Touch-Seq XYFX"]
+fb._builtin = [fake_ref("Touch-Seq Space", "touchseq.space"), fake_ref("Touch-Seq Click", "touchseq.click")]
+assert [r.name for r in ts.HostPanel.browser_items(fb)] == ["Touch-Seq EQ", "Touch-Seq Space", "Touch-Seq XYFX"], \
+    "one of ours found on disk is filtered too (the click must stay out)"
 print("builtin browser OK")
 
 # --- a drawn sweep is sent between the steps, not only on them ----------------------------
@@ -2017,3 +2018,4 @@ q = QPainter(img); q.setRenderHint(QPainter.Antialiasing); wm3.paint(q, 1024, 60
 img.save(str(OUT / "lane_only.png"))
 em3.close()
 print("mute + lane only OK")
+
