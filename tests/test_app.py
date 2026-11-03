@@ -9,7 +9,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import plugins
 import touchseq as ts
-from PySide6.QtCore import QPointF
+from PySide6.QtCore import QPointF, QRectF
 from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QColor, QImage, QPainter
 
@@ -545,7 +545,7 @@ chord(3); pv.toggle_lead(); pv.toggle_lead()
 assert chord(0) == first_i == [48, 52, 55], "fresh start: I in root position"
 print("lead reset OK")
 # --- keyboard layout: size, glissando, recording ---
-pk = rkp.modules[3][4]; QRectF = ts.QRectF
+pk = rkp.modules[3][4]
 rkp.seq.sel = prp.tracks[0]; pk.layout = "keys"; prp.key, prp.scale = 9, "minor"
 rkp.zoomed = None; rkp.grab()
 kb_small = pk.keyboard(next(r for r, f in pk.hits if r.width() > 500))
@@ -2333,3 +2333,28 @@ assert trm in asked, "the track's row asks for its level"
 assert 0 in sqm.grid_rows, "the row is still there (and tappable) with the meter and the socket"
 sqm.engine.close()
 print("track meters OK")
+
+
+# --- step sequences (LFO Step 1..16) get their own box, drawn as bars ------------------------
+assert ts.param_section("LFO Step 1") == "lfo step" and ts.param_section("LFO Step 16") == "lfo step"
+assert ts.param_section("LFO2 Step 7") == "lfo 2 step" and ts.param_group("LFO Step 1") == "lfo step"
+assert ts.param_section("LFO Step Count") == "lfo", "the count stays a knob with the LFO"
+assert ts.param_section("OSC 1 Wave") == "osc 1", "a number before the name stays in the section"
+steps = [fake(f"LFO Step {i}") for i in range(1, 17)]
+assert ts.is_step_section(steps) and not ts.is_step_section(steps[:3])
+assert ts.section_box(steps, 5) == (5, 1), "sixteen bars take one line, not four"
+assert ts.section_name(steps) == "LFO STEP"
+pages = ts.param_pages([fake("LFO Waveform"), fake("LFO Step Count")] + steps, 5, 3)
+assert any(len(sec) == 16 and ts.is_step_section(sec) for pg in pages for sec in pg), "the steps stay one box"
+# a bar: bipolar values grow both ways from the middle, and it takes a drag
+hp3 = object.__new__(ts.HostPanel)
+ts.Panel.__init__(hp3)
+hp3.s, hp3.assigning = 1.0, None
+hp3.host = types.SimpleNamespace(value=lambda pl, i: 0.25)
+hp3.set_param = lambda *a: None
+prm = types.SimpleNamespace(index=0, name="LFO Step 3", lo=-1.0, hi=1.0, integer=False, boolean=False)
+img = QImage(120, 260, QImage.Format_ARGB32); img.fill(0)
+q = QPainter(img); q.setRenderHint(QPainter.Antialiasing)
+hp3.draw_bar(q, QRectF(4, 4, 24, 200), object(), prm); q.end()
+assert hp3.hits and hp3.hits[-1][0].contains(10, 10), "the bar is draggable"
+print("step bars OK")

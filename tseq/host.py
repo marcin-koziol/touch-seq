@@ -2,6 +2,7 @@
 the plugin browser, plus the `Slide` gesture they use."""
 import json
 import math
+import re
 import threading
 import time
 import zlib
@@ -35,8 +36,7 @@ def _page_rows(page, cols):
     they fit, so a page of small sections is not one full-width bar each."""
     lines = []  # [columns used, rows]
     for sec in page:
-        width = min(len(sec), cols)
-        height = max(1, -(-len(sec) // cols))
+        width, height = section_box(sec, cols)
         if lines and lines[-1][0] + width <= cols:
             lines[-1][0] += width
             lines[-1][1] = max(lines[-1][1], height)
@@ -60,11 +60,12 @@ def param_pages(params, cols, rows):
     groups = [groups[key] for key in order]
     pages, page = [], []
     for group in groups:
-        if max(1, -(-len(group) // cols)) > rows:  # a section taller than a page has to split somewhere
+        width, need = section_box(group, cols)
+        if need > rows:  # a section taller than a page has to split somewhere
             if page:
                 pages.append(page)
                 page = []
-            step = cols * rows
+            step = (BARS_PER_ROW if is_step_section(group) else cols) * rows
             pages.extend([group[j:j + step]] for j in range(0, len(group), step))
             continue
         if page and _page_rows(page + [group], cols) > rows:
@@ -74,6 +75,22 @@ def param_pages(params, cols, rows):
     if page or not pages:
         pages.append(page)
     return pages
+
+
+BARS_PER_ROW = 16  # a step sequence (LFO Step 1..16) draws as one line of bars
+
+
+def is_step_section(section):
+    """A section of numbered parameters ("LFO Step 1".."LFO Step 16", "Env 1"..): a sequence, so its
+    parameters are drawn as vertical bars instead of knobs."""
+    return len(section) >= 4 and all(re.search(r"\d+\s*$", prm.name) for prm in section)
+
+
+def section_box(section, cols):
+    """(columns wide, rows tall) for a section: knobs pack into the columns, a step sequence takes a line."""
+    if is_step_section(section):
+        return cols, max(1, -(-len(section) // BARS_PER_ROW))
+    return min(len(section), cols), max(1, -(-len(section) // cols))
 
 
 def section_name(group):
@@ -1027,7 +1044,7 @@ class HostPanel(Panel):
         gap, pad = 8 * s, 22 * s  # between boxes/lines, and the room for a box's name
         lines = []  # [columns used, rows, [sections]]
         for sec in page:
-            width, height = min(len(sec), self.KNOB_COLS), max(1, -(-len(sec) // self.KNOB_COLS))
+            width, height = section_box(sec, self.KNOB_COLS)
             if lines and lines[-1][0] + width <= self.KNOB_COLS:
                 lines[-1][0] += width
                 lines[-1][1] = max(lines[-1][1], height)
@@ -1041,18 +1058,26 @@ class HostPanel(Panel):
         for used, line_rows, sections in lines:
             x = grid.left()
             for sec in sections:
-                width = min(len(sec), self.KNOB_COLS)
+                width, need = section_box(sec, self.KNOB_COLS)
                 box = QRectF(x, y, width * kw - gap, line_rows * kh)
                 self.box(p, box, "#0f131b", "#242a36", 1.5, radius=9)
                 color = param_color(sec[0].name)
                 self.box(p, QRectF(box.left() + 9 * s, box.top() + 9 * s, 4 * s, 13 * s), color, None, radius=2)
                 self.text(p, QRectF(box.left() + 18 * s, box.top() + 5 * s, box.width() - 24 * s, 16 * s),
                           section_name(sec), color, 10, Qt.AlignLeft | Qt.AlignVCenter, bold=True, elide=True)
-                cell_w = box.width() / width
-                for n, prm in enumerate(sec):
-                    cell = QRectF(box.left() + (n % width) * cell_w, box.top() + pad + (n // width) * kh,
-                                  cell_w, kh - pad)
-                    self.draw_knob(p, cell.adjusted(3 * s, 3 * s, -3 * s, -3 * s), plugin, prm)
+                if is_step_section(sec):  # a sequence: bars, all of them in the box's width
+                    columns = min(len(sec), BARS_PER_ROW)
+                    cell_w, cell_h = box.width() / columns, (box.height() - pad) / need
+                    for n, prm in enumerate(sec):
+                        cell = QRectF(box.left() + (n % columns) * cell_w, box.top() + pad + (n // columns) * cell_h,
+                                      cell_w, cell_h)
+                        self.draw_bar(p, cell.adjusted(2 * s, 2 * s, -2 * s, -2 * s), plugin, prm)
+                else:
+                    cell_w = box.width() / width
+                    for n, prm in enumerate(sec):
+                        cell = QRectF(box.left() + (n % width) * cell_w, box.top() + pad + (n // width) * kh,
+                                      cell_w, kh - pad)
+                        self.draw_knob(p, cell.adjusted(3 * s, 3 * s, -3 * s, -3 * s), plugin, prm)
                 x += width * kw
             y += line_rows * kh + gap
 
@@ -1086,6 +1111,45 @@ class HostPanel(Panel):
             return
         toggle = (lambda: set_(0.0 if get() > 0.5 else 1.0)) if prm.boolean else None
         self.region(r, lambda pos: Drag(pos, get, set_, 0.0, 1.0, 1.5 * s, 1 / 150, toggle))
+
+    def draw_bar(self, p, r, plugin, prm):
+        """A step's value as a vertical bar: bipolar parameters (an LFO step is -1..1) grow both ways from the
+        middle line. Drag up/down to set it, like a knob."""
+        s, host = self.s, self.host
+        f = (host.value(plugin, prm.index) - prm.lo) / (prm.hi - prm.lo)
+        f = max(0.0, min(1.0, f))
+        zero = (0.0 - prm.lo) / (prm.hi - prm.lo) if prm.lo < 0 < prm.hi else None
+        color = param_color(prm.name)
+        label = 16 * s
+        width = min(16 * s, r.width() * 0.62)
+        track = QRectF(r.center().x() - width / 2, r.top() + 2 * s, width, r.height() - label - 2 * s)
+        self.box(p, track, "#141821", BORDER, 1, radius=4)
+        value_y = track.top() + track.height() * (1 - f)
+        if zero is None:
+            bar = QRectF(track.left() + 1 * s, value_y, track.width() - 2 * s, track.bottom() - value_y)
+        else:
+            middle = track.top() + track.height() * (1 - zero)
+            bar = QRectF(track.left() + 1 * s, min(middle, value_y), track.width() - 2 * s, abs(middle - value_y))
+            p.setPen(QPen(QColor("#3a4252"), 1))
+            p.drawLine(QPointF(track.left() + 1 * s, middle), QPointF(track.right() - 1 * s, middle))
+        if bar.height() > 0.4:
+            self.box(p, bar, color, None, radius=2)
+        number = re.search(r"(\d+)\s*$", prm.name)
+        self.text(p, QRectF(r.left(), track.bottom() + 1 * s, r.width(), label), number.group(1) if number else "",
+                  DIM, 10)
+
+        def get():
+            return (host.value(plugin, prm.index) - prm.lo) / (prm.hi - prm.lo)
+
+        def set_(norm):
+            v = prm.lo + norm * (prm.hi - prm.lo)
+            self.set_param(plugin, prm.index, round(v) if prm.integer or prm.boolean else v)
+
+        if self.assigning == "pick":  # ASSIGN: the tap chooses this parameter for a fader, it does not set it
+            self.box(p, r, QColor(0, 0, 0, 0), "#38d6ff", 1.2, radius=6)
+            self.on_press(r, lambda prm=prm: self.assign_knob(prm))
+            return
+        self.region(r, lambda pos: Drag(pos, get, set_, 0.0, 1.0, 1.5 * s, 1 / 150, None))
 
     def toggle_assign(self):
         """The ASSIGN button: the next knob tapped is the one a CTRL fader will drive (tap again to cancel)."""

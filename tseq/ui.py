@@ -242,6 +242,8 @@ def param_section(name):
     "Amp Attack", "Sub" in "SubOscVol", "OSC 1" in "OSC 1 Wave". Empty for a bare parameter ("Attack",
     "Cutoff"): it belongs to the section its kind names (an envelope, a filter)."""
     words = _name_words(name)
+    if len(words) > 2 and words[-1].isdigit():  # "LFO Step 1": the number indexes a section, it is not one
+        return " ".join(words[:-1])
     for i, word in enumerate(words):
         if not _is_kind(word):
             continue

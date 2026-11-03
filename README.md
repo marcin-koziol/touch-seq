@@ -201,7 +201,10 @@ the first free name (*Touch-Seq 2*, …) and says so in HOST-4's status line: bo
   one page, a filter's cutoff and resonance stay together, an oscillator's shapes too — even when the
   plugin lists them apart (a drum's "Hat Open Tune", "Tone", "Metal" and "Attack" all land in one
   **HAT OPEN** box) and even when that leaves a page with fewer knobs than it could hold. Small sections
-  share a line, so a page still holds a good few
+  share a line, so a page still holds a good few. A **sequence** of numbered parameters (Sideous' LFO
+  Step 1…16, an envelope's stages) is a box of **vertical bars** instead: bipolar ones (the LFO steps, -1…1)
+  grow both ways from the middle line, and dragging a bar draws the shape the way the plugin's own editor
+  would
 - **MIXER** view: a column per plugin track, one per bus, plus the master, each with a **stereo peak meter**
   (Carla's own data, taken after the chain's fader; an **audio track's shows its input** instead) whose peak
   line holds for a moment and then falls.
@@ -213,7 +216,7 @@ the first free name (*Touch-Seq 2*, …) and says so in HOST-4's status line: bo
 |---|---|
 | ![Space: the delay and reverb in one, its knobs in HOST-4](docs/screenshots/space.png) | ![Mixer](docs/screenshots/mixer.png) |
 | ![The plugin browser on BUILTIN: our own plugins first](docs/screenshots/builtin.png) | |
-| ![Plugin knobs grouped by section: OSC, ENVELOPE, FILTER, DELAY, each in its own box](docs/screenshots/knobs.png) | |
+| ![Plugin knobs grouped by section: OSC, ENVELOPE, FILTER, DELAY, each in its own box](docs/screenshots/knobs.png) | ![A sequence of parameters as bars: Sideous' 16 LFO steps, bipolar around the middle line](docs/screenshots/steps.png) |
 
 ### PLAY-12 — live play
 
