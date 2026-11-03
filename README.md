@@ -54,13 +54,16 @@ cursor, and change the arrangement **on the bar** instead of on the downbeat of 
 
 ![The whole rack, as it comes up: performance controls, the plugin host, the sequencer and the live pads](docs/screenshots/overview.png)
 
-## New in 0.11
+## New in 0.11.1
 
-- **LAUNCH** — every track's patterns as pads on one screen: tap one and that track plays it at the next
-  bar, with a progress line on the playing pad. **FILL** turns patterns into **transitions**: they play
-  their bars once and the track goes back to what it was playing (chaining, cancelling and SONG included).
-- the progress line is smooth and only moves forward; a transition's line is amber and drains over the
-  bars it has left.
+- **HOST-4 groups its knobs into boxes**: OSC, ENVELOPE, FILTER, DELAY… each section its own box with its
+  name, whole sections on a page (an ADSR never splits), small ones sharing a line. A section of numbered
+  parameters is a row of **vertical bars** instead — Sideous' 16 LFO steps, bipolar, growing both ways from
+  the middle. A chain with nothing chosen opens on its **first plugin**.
+- **SEQ-64 track rows** carry a small **level meter** of each chain beside the M, and the MIDI socket sits
+  at the foot of the channel column.
+- 0.11.0 brought **LAUNCH** — every track's patterns as pads, with **FILL** transitions that play once and
+  go back, and a progress line on the playing pad.
 
 0.10 brought the **arpeggiator** — per track, on the transport's grid, non-destructive — the click kept
 out of the plugin browser, and `CHN` in the sequencer. 0.9 brought the dense CC automation (points every
@@ -295,8 +298,8 @@ Download the AppImage for your machine from [Releases](https://github.com/marcin
 then:
 
 ```sh
-chmod +x Touch-Seq-0.11.0-x86_64.AppImage
-./Touch-Seq-0.11.0-x86_64.AppImage
+chmod +x Touch-Seq-0.11.1-x86_64.AppImage
+./Touch-Seq-0.11.1-x86_64.AppImage
 ```
 
 It contains Python, Qt (PySide6), Carla and Touch-Seq's own plugins (XYFX, Monitor, EQ, Click and Space).
