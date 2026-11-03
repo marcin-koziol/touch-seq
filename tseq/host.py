@@ -738,6 +738,13 @@ class HostPanel(Panel):
         db = 20 * math.log10(value)
         return max(0.0, min(1.0, (db + 60.0) / 60.0))
 
+    def levels(self, strip):
+        """(left, right) heights, 0..1 on the -60..0 dB scale, for the small meters in the sequencer."""
+        meter = self.meters.get(strip)
+        if not meter:
+            return 0.0, 0.0
+        return self.db_fraction(meter["l"]), self.db_fraction(meter["r"])
+
     def sample_meters(self):
         """Read every chain's level on a clock: an audio track's *input* (its first plugin), every other
         chain's output (the last plugin, so after its fader). The bars fall back, the peak holds, then

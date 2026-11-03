@@ -116,7 +116,8 @@ while there is something unsaved (the time next to it is the last save of anythi
   at the left of its EDIT header opens a dialog with the system's MIDI inputs and a channel (**ALL** or 1–16,
   so one keyboard can drive several tracks on different channels). The socket is **green with the channel**
   once configured, **amber** when that device is away, dim when the track only plays its patterns (its row in
-  GRID shows the same socket, small, so you can see which tracks have a keyboard from there). Incoming
+  GRID shows the same socket, small, so you can see which tracks have a keyboard from there — it sits under
+  the track's channel, and beside the **M** a small **level meter** shows what the chain is doing). Incoming
   notes play the track's instrument (or its hardware output), light its pads/keys in PLAY-12 and are recorded
   when REC/OVR is armed — quantized like the on-screen pads, into the track the keyboard is routed to (which
   need not be the selected one). Pitch bend and the mod wheel reach the instrument too. A note keeps the

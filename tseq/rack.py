@@ -38,6 +38,8 @@ class Rack(Window):
         self.controls.record_cc = self.perf.record_cc_channel  # faders write into the pattern when armed
         self.perf.choose_arp = self.open_arp  # its ARP button opens the track's arpeggiator
         self.seq.input_ok = self.perf.input_ok  # its socket says when a keyboard is away
+        levels = getattr(host, "levels", None)  # its rows carry each track's level (a stub host has none)
+        self.seq.levels = (lambda tr: levels(tr.strip)) if levels else (lambda tr: (0.0, 0.0))
         super().__init__([(0, 0, "CTRL-10", "performance controls", self.controls),
                           (0, 1, "SEQ-64", "step sequencer", self.seq),
                           (1, 0, "HOST-4", "plugin host", host),

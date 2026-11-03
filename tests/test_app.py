@@ -2312,3 +2312,24 @@ hp.sel = None
 hp.focus_first(empty)
 assert hp.sel is None, "a chain with no plugins has nothing to focus"
 print("host focus OK")
+
+# --- track meters in the sequencer: the host's chain levels, beside each track's M ----------
+hp2 = object.__new__(ts.HostPanel)
+strip_m = ts.Strip()
+hp2.meters = {strip_m: {"l": 0.5, "r": 0.25, "peak": 0.5, "at": 0.0}}
+left, right = hp2.levels(strip_m)
+assert abs(left - hp2.db_fraction(0.5)) < 1e-9 and abs(right - hp2.db_fraction(0.25)) < 1e-9
+assert hp2.levels(ts.Strip()) == (0.0, 0.0), "a strip with no chain has no meter"
+prm = ts.Project(tracks=[ts.Track("melody", 1, 1)])
+trm = prm.tracks[0]
+trm.in_port = "KeyStep"
+sqm = ts.Sequencer(prm, ts.Engine(prm, FakeOut()))
+asked = []
+sqm.levels = lambda tr: asked.append(tr) or (0.6, 0.3)
+sqm.input_ok = lambda tr: True
+img = QImage(1200, 700, QImage.Format_ARGB32); img.fill(0)
+q = QPainter(img); q.setRenderHint(QPainter.Antialiasing); sqm.paint(q, 1200, 700); q.end()
+assert trm in asked, "the track's row asks for its level"
+assert 0 in sqm.grid_rows, "the row is still there (and tappable) with the meter and the socket"
+sqm.engine.close()
+print("track meters OK")

@@ -5,7 +5,7 @@ import math
 import time
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QPen, QPolygonF
+from PySide6.QtGui import QColor, QLinearGradient, QPen, QPolygonF
 
 from .constants import (BG, BORDER, CC_LANES, DIM, DRUM_COLORS, DRUM_KIT, GATE_RES, MAX_GATE, MAX_STEPS,
                         PALETTE, PANEL, PATTERNS, PLAY, SCENES, STEPS_PER_BAR, TEXT, WARN)
@@ -223,6 +223,7 @@ class Sequencer(Panel):
         self.choose_source = lambda tr: None  # the rack: pick the input of an audio track
         self.choose_input = lambda tr: None  # the rack: pick the MIDI keyboard a track plays from
         self.input_ok = None  # the rack: is the track's MIDI input open? (None: unknown, assume it is)
+        self.levels = lambda tr: (0.0, 0.0)  # the rack: the track's (left, right) meter heights
         self.reroute = lambda: None  # the rack: rebuild the audio wiring after an input or pan change
 
     # --- actions --------------------------------------------------------
@@ -911,17 +912,15 @@ class Sequencer(Panel):
         p.setPen(Qt.NoPen)
         p.setBrush(color)
         p.drawRoundedRect(QRectF(head.left() + 5 * s, head.top() + 8 * s, 5 * s, head.height() - 16 * s), 2, 2)
-        info = head.adjusted(18 * s, 6 * s, -56 * s, -6 * s)
+        info = head.adjusted(18 * s, 6 * s, -68 * s, -6 * s)
         self.text(p, info, f"T{tr.number}", TEXT, 19, Qt.AlignLeft | Qt.AlignTop, bold=True)
-        right = info
-        if tr.in_port:  # a MIDI keyboard is set for this track: a small socket says so (green when it is here)
+        self.text(p, info, "MONO" if tr.audio else f"CH{tr.channel}", DIM, 12, Qt.AlignRight | Qt.AlignTop)
+        if tr.in_port:  # a MIDI keyboard is set for this track: a small socket says so, under the channel
             ready = self.input_ok is None or self.input_ok(tr)
-            socket = QRectF(info.right() - 17 * s, info.top() - 2 * s, 17 * s, 17 * s)
+            socket = QRectF(info.right() - 15 * s, info.top() + 15 * s, 15 * s, 15 * s)
             self.box(p, socket, "#11141b", "#4ade80" if ready else "#ff8c42", 1.2, radius=4)
             glyph(p, socket.adjusted(1.5 * s, 1.5 * s, -1.5 * s, -1.5 * s), "din",
                   "#4ade80" if ready else "#ff8c42", width=0.12)
-            right = info.adjusted(0, 0, -20 * s, 0)
-        self.text(p, right, "MONO" if tr.audio else f"CH{tr.channel}", DIM, 12, Qt.AlignRight | Qt.AlignTop)
         if tr.drum:
             self.text(p, info, DRUM_KIT[tr.voice][0], color, 12, Qt.AlignRight | Qt.AlignBottom, bold=True)
         elif tr.audio:  # the input it takes and how it is panned, instead of a drum voice and a pattern
@@ -937,9 +936,29 @@ class Sequencer(Panel):
                       Qt.AlignLeft | Qt.AlignBottom)
         self.region(head.intersected(clip), lambda pos, tr=tr: ScrollOrTap(
             pos, lambda: self.scroll, lambda v: setattr(self, "scroll", v), lambda: self.select(tr)))
+        if not tr.external:  # its chain's level, right beside the M
+            self.draw_track_meter(p, QRectF(head.right() - 64 * s, head.top() + 6 * s, 10 * s, head.height() - 12 * s),
+                                  tr)
         mute = QRectF(head.right() - 50 * s, head.top() + 6 * s, 44 * s, head.height() - 12 * s)
         self.button(p, mute, "M", lambda tr=tr: self.set_mute(tr), on=tr.mute, color=WARN)
         self.hits[-1] = (mute.intersected(clip), self.hits[-1][1])
+
+    def draw_track_meter(self, p, r, tr):
+        """A small level meter by the track's M: how loud its chain is, -60..0 dB in green-yellow-red."""
+        s = self.s
+        self.box(p, r, "#0f1117", "#262b36", 1, radius=3)
+        left, right = self.levels(tr)
+        level = max(0.0, min(1.0, max(left, right)))
+        if level < 0.004:
+            return
+        gradient = QLinearGradient(0, r.bottom(), 0, r.top())
+        gradient.setColorAt(0.0, QColor("#4ade80"))
+        gradient.setColorAt(0.72, QColor("#facc15"))
+        gradient.setColorAt(1.0, QColor("#ff5d5d"))
+        p.setPen(Qt.NoPen)
+        p.setBrush(gradient)
+        height = level * (r.height() - 2 * s)
+        p.drawRect(QRectF(r.left() + 1.5 * s, r.bottom() - s - height, r.width() - 3 * s, height))
 
     @staticmethod
     def source_name(tr):
