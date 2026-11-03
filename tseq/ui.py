@@ -227,8 +227,13 @@ def _name_words(name):
     return words
 
 
+SECTION_GENERIC = {"rate", "mod"}  # properties of a section, not sections of their own ("SampleRate")
+
+
 def _is_kind(word):
     """Does this word name what a parameter is (an envelope's attack, a filter's cutoff, an LFO...)? """
+    if word in SECTION_GENERIC:
+        return False
     return any(word in whole or any(part in word for part in parts) for _, _, parts, whole in PARAM_FAMILIES)
 
 
@@ -248,6 +253,8 @@ def param_section(name):
                 break
             section.append(word)
         return " ".join(section) if len(words) > 1 else ""
+    if len(words) > 1 and re.search(r"[\s_-]", name):  # "Crash Tone", "Clap Hands": words before the property
+        return " ".join(words[:-1])  # (a compact name like "MonoPoly" is one setting, not a section)
     return ""
 
 

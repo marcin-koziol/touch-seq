@@ -197,8 +197,10 @@ the first free name (*Touch-Seq 2*, …) and says so in HOST-4's status line: bo
   the plugin's parameters as knobs, colored by what they are (filter, envelope, LFO, oscillator, level, effect).
   The knobs are paged by **section**, not by count, and each section is a **box of its own** with its name on
   it (OSC, ENVELOPE, FILTER, DELAY, …): an envelope's attack, decay, sustain and release stay in one box on
-  one page, a filter's cutoff and resonance stay together, an oscillator's shapes too — even when that leaves
-  a page with fewer knobs than it could hold. Small sections share a line, so a page still holds a good few
+  one page, a filter's cutoff and resonance stay together, an oscillator's shapes too — even when the
+  plugin lists them apart (a drum's "Hat Open Tune", "Tone", "Metal" and "Attack" all land in one
+  **HAT OPEN** box) and even when that leaves a page with fewer knobs than it could hold. Small sections
+  share a line, so a page still holds a good few
 - **MIXER** view: a column per plugin track, one per bus, plus the master, each with a **stereo peak meter**
   (Carla's own data, taken after the chain's fader; an **audio track's shows its input** instead) whose peak
   line holds for a moment and then falls.

@@ -2287,7 +2287,12 @@ assert [p.name for p in envelope] == names[5:9], "the ADSR is one whole box, on 
 assert ts.section_name([fake("OscFineTune")]) == "OSC" and ts.section_name([fake("Cutoff")]) == "FILTER"
 assert ts.section_name([fake("MonoPoly")]) == "GENERAL"
 # sections share a line: small ones are not one full-width box each
-assert [len(pg) for pg in pages] == [5, 4, 5], [len(pg) for pg in pages]
+assert [len(pg) for pg in pages] == [3, 2, 3], [len(pg) for pg in pages]
+# a section is one box, not one per page: a parameter listed apart from its section joins it
+seen = [ts.section_name(sec) for pg in pages for sec in pg]
+assert len(seen) == len(set(seen)), seen
+assert sorted(ts.section_name([fake(n)]) for n in names) and all(
+    any(n in [p.name for p in sec] for pg in pages for sec in pg) for n in names), "every knob is on a page"
 assert ts.param_pages([], 5, 3) == [[]]
 print("knob groups OK")
 

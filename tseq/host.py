@@ -46,16 +46,18 @@ def _page_rows(page, cols):
 
 
 def param_pages(params, cols, rows):
-    """A plugin's knobs in pages of whole sections, each section a box of its own. A page takes as many
-    whole boxes as fit, so Attack is never on one page with Decay/Sustain/Release on the next. Returns
-    pages of sections (each a list of parameters)."""
-    groups, start = [], 0
-    for i in range(1, len(params)):
-        if param_group(params[i].name) != param_group(params[i - 1].name):
-            groups.append(params[start:i])
-            start = i
-    if params:
-        groups.append(params[start:])
+    """A plugin's knobs in pages of whole sections, each section a box of its own. The parameters of a
+    section are brought together even when the plugin lists them apart ("Hat Open Tune" and "Hat Open
+    Attack" are one HAT OPEN box), and a page takes as many whole boxes as fit, so Attack is never on one
+    page with Decay/Sustain/Release on the next. Returns pages of sections (each a list of parameters)."""
+    groups, order = {}, []
+    for prm in params:  # sections in the order they first appear, each with all of its parameters
+        key = param_group(prm.name)
+        if key not in groups:
+            groups[key] = []
+            order.append(key)
+        groups[key].append(prm)
+    groups = [groups[key] for key in order]
     pages, page = [], []
     for group in groups:
         if max(1, -(-len(group) // cols)) > rows:  # a section taller than a page has to split somewhere
