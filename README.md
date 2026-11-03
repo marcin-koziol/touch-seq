@@ -194,7 +194,10 @@ the first free name (*Touch-Seq 2*, …) and says so in HOST-4's status line: bo
   so one reverb can process just the two of five tracks you route into it; buses are their own columns in the
   MIXER and boxes in the PATCHBAY (`BUS 1 · Reverb`), so an interface's input can be patched through one too
 - **TRACK** view: the chain of the track selected in the sequencer (or of the bus you tapped in the mixer) and
-  the plugin's parameters as knobs, colored by what they are (filter, envelope, LFO, oscillator, level, effect)
+  the plugin's parameters as knobs, colored by what they are (filter, envelope, LFO, oscillator, level, effect).
+  The knobs are paged by **section**, not by count: an envelope's attack, decay, sustain and release stay on
+  one page, a filter's cutoff and resonance stay together, an oscillator's shapes too — even when that leaves
+  a page with fewer knobs than it could hold
 - **MIXER** view: a column per plugin track, one per bus, plus the master, each with a **stereo peak meter**
   (Carla's own data, taken after the chain's fader; an **audio track's shows its input** instead) whose peak
   line holds for a moment and then falls.

@@ -19,9 +19,41 @@ from .constants import (BG, BORDER, BUILTIN_LABELS, CLICK_ACCENT, CLICK_BEAT, CL
                         XYFX_LABELS)
 from .eq import EqEditor
 from .gestures import Drag, Hold, ScrollOrTap, Slide
-from .ui import Panel, param_color, split
+from .ui import Panel, param_color, param_family, param_section, split
 
 
+
+
+def param_pages(params, per_page):
+    """A plugin's knobs in pages that keep their sections whole. A section is a run of parameters of the same
+    kind (an envelope's attack/decay/sustain/release, a filter's cutoff and resonance, an LFO...), and a page
+    takes as many whole sections as fit - so Attack is never on one page with Decay/Sustain/Release on the
+    next, even if that leaves a page with fewer knobs than it could hold."""
+    def section(prm):
+        return param_section(prm.name), param_family(prm.name)
+
+    groups, start = [], 0
+    for i in range(1, len(params)):
+        if section(params[i]) != section(params[i - 1]):
+            groups.append(params[start:i])
+            start = i
+    if params:
+        groups.append(params[start:])
+    pages, page = [], []
+    for group in groups:
+        if len(group) > per_page:  # a section bigger than a page has to split somewhere
+            if page:
+                pages.append(page)
+                page = []
+            pages.extend(group[j:j + per_page] for j in range(0, len(group), per_page))
+        elif len(page) + len(group) > per_page:
+            pages.append(page)
+            page = list(group)
+        else:
+            page = page + group
+    if page or not pages:
+        pages.append(page)
+    return pages
 
 
 class HostPanel(Panel):
@@ -933,19 +965,19 @@ class HostPanel(Panel):
             return
 
         per_page = self.KNOB_COLS * self.KNOB_ROWS
-        pages = max(1, math.ceil(len(plugin.params) / per_page))
-        self.page = min(self.page, pages - 1)
+        pages = param_pages(plugin.params, per_page)  # whole sections per page (an ADSR never splits)
+        self.page = min(self.page, len(pages) - 1)
         nav = QRectF(inner.left(), inner.bottom() - 40 * s, inner.width(), 40 * s)
         prev, label, nxt = split(nav, [70 * s, 0, 70 * s], 6 * s)
         self.button(p, prev, "◀", lambda: setattr(self, "page", max(0, self.page - 1)), enabled=self.page > 0)
-        hint = "tap a knob to drive it from a CTRL fader" if picking else f"{self.page + 1} / {pages}  ·  " \
+        hint = "tap a knob to drive it from a CTRL fader" if picking else f"{self.page + 1} / {len(pages)}  ·  " \
             f"{len(plugin.params)} params"
         self.text(p, label, hint, "#38d6ff" if picking else DIM, 12)
-        self.button(p, nxt, "▶", lambda: setattr(self, "page", min(pages - 1, self.page + 1)),
-                    enabled=self.page < pages - 1)
+        self.button(p, nxt, "▶", lambda: setattr(self, "page", min(len(pages) - 1, self.page + 1)),
+                    enabled=self.page < len(pages) - 1)
         grid = QRectF(inner.left(), title.bottom() + 8 * s, inner.width(), nav.top() - title.bottom() - 16 * s)
         kw, kh = grid.width() / self.KNOB_COLS, grid.height() / self.KNOB_ROWS
-        for n, prm in enumerate(plugin.params[self.page * per_page:(self.page + 1) * per_page]):
+        for n, prm in enumerate(pages[self.page]):
             cell = QRectF(grid.left() + (n % self.KNOB_COLS) * kw, grid.top() + (n // self.KNOB_COLS) * kh, kw, kh)
             self.draw_knob(p, cell.adjusted(3 * s, 3 * s, -3 * s, -3 * s), plugin, prm)
 

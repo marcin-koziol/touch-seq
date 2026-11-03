@@ -206,14 +206,43 @@ def glyph(p, r, name, color, width=0.075, lit=None):
             p.drawEllipse(QPointF(cx + rad * math.cos(a), cy + rad * math.sin(a) + 0.16 * s), dot, dot)
 
 
-def param_color(name):
-    """Knob color for a plugin parameter, guessed from its name (unknown: the default cyan)."""
+def param_family(name):
+    """What a plugin parameter's name says it is - "envelope", "filter", "lfo", "effect", "oscillator",
+    "level" - or "" when it says nothing."""
     low = name.lower()
     words = set(re.split(r"[^a-z0-9]+", low))
-    for _, color, parts, whole in PARAM_FAMILIES:
+    for key, _, parts, whole in PARAM_FAMILIES:
         if any(p in low for p in parts) or words & set(whole):
-            return color
-    return "#38d6ff"
+            return key
+    return ""
+
+
+def param_section(name):
+    """The section a parameter's name puts it in: the words before its kind ("Amp" in "Amp Attack", "Filter"
+    in "Filter Cutoff"), so an amp envelope and a filter envelope do not end up as one run. Empty when the
+    name starts with the kind itself (plain "Attack", "Cutoff"...)."""
+    low = name.lower()
+    words = [(m.start(), m.group(0)) for m in re.finditer(r"[a-z0-9]+", low)]
+    for _, _, parts, whole in PARAM_FAMILIES:
+        hits = [(i, i + len(p)) for p in parts for i in [low.find(p)] if i >= 0]
+        hits += [(i, i + len(w)) for i, w in words if w in whole]
+        if not hits:
+            continue
+        hits.sort()
+        spans = [list(hits[0])]  # "tune" inside "detune": one word, one kind
+        for a, b in hits[1:]:
+            if a <= spans[-1][1]:
+                spans[-1][1] = max(spans[-1][1], b)
+            else:
+                spans.append([a, b])
+        return re.sub(r"[^a-z0-9]+", " ", low[:spans[-1][0]]).strip()
+    return ""
+
+
+def param_color(name):
+    """Knob color for a plugin parameter, guessed from its name (unknown: the default cyan)."""
+    family = param_family(name)
+    return next((color for key, color, _, _ in PARAM_FAMILIES if key == family), "#38d6ff")
 
 
 class Window(QWidget):

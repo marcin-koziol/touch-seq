@@ -2251,3 +2251,21 @@ assert abs(sp.launch_progress(tp) - (56 + 0.5 - 32) / 32) < 0.01, "a transition 
 flat.playing = False
 assert sp.launch_progress(tp) == 0.0
 print("launch progress OK")
+
+# --- plugin knobs are paged by whole sections: an ADSR never splits across pages -------------
+assert ts.param_family("Amp Attack") == "envelope" and ts.param_family("Filter Cutoff") == "filter"
+assert ts.param_family("Reverb Mix") == "effect" and ts.param_family("Frequency") == ""
+assert ts.param_section("Amp Attack") == "amp" and ts.param_section("Filter Env Attack") == "filter env"
+assert ts.param_section("OSC 1 Detune") == "osc 1", "a keyword inside a word is still the same kind"
+assert ts.param_section("Attack") == "" and ts.param_section("Amp Level") == "amp"
+fake = lambda n: types.SimpleNamespace(name=n)
+names = ["OSC 1 Wave", "OSC 1 Octave", "OSC 1 Detune", "OSC 2 Wave", "OSC 2 Octave",
+         "Filter Cutoff", "Filter Resonance", "Filter Env Attack", "Filter Env Sustain",
+         "Amp Attack", "Amp Decay", "Amp Sustain", "Amp Release", "LFO Rate", "LFO Depth", "Master Volume"]
+pages = ts.param_pages([fake(n) for n in names], 10)
+assert [[p.name for p in pg] for pg in pages] == [names[:9], names[9:]], pages
+assert [p.name for p in pages[1]][:4] == names[9:13], "Attack..Release stay on one page"
+assert ts.param_pages([], 10) == [[]]
+big = ts.param_pages([fake(n) for n in ["Attack", "Decay", "Sustain", "Release"] + names], 10)
+assert all(len(pg) <= 10 for pg in big), "a page never holds more than it can"
+print("knob groups OK")
