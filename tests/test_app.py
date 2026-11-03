@@ -2072,6 +2072,30 @@ assert onsb[:6] == [60, 64, 67, 60, 64, 67], onsb
 eb2.stop(); eb2.close()
 print("arpeggiator OK")
 
+# --- with the transport stopped the arp keeps its own time (a keyboard in hand, no sequencer) ---------------
+prc = ts.Project(bpm=600, tracks=[ts.Track("melody", 1, 1)])
+tc = prc.tracks[0]; tc.arp.on = True
+outc = FakeOut(); ec = ts.Engine(prc, outc)
+time.sleep(0.05)
+ec.live(tc, 60, 100); ec.live(tc, 64, 100); ec.live(tc, 67, 100)
+time.sleep(0.2)
+onsc = [m[1] for _, m in outc.log if m[0] & 0xF0 == 0x90]
+print("arp, transport stopped:", onsc[:6])
+assert onsc[:6] == [60, 64, 67, 60, 64, 67], onsc
+# starting the transport does not silence the keys that are down: the arp carries on, now on its grid
+count = len(onsc)
+ec.start(); time.sleep(0.2)
+onsd = sum(1 for _, m in outc.log if m[0] & 0xF0 == 0x90)
+assert onsd > count + 3, "the arp keeps going once the transport starts"
+# and a stop leaves it free-running again, with the keys still down
+ec.stop(); time.sleep(0.08)
+before = sum(1 for _, m in outc.log if m[0] & 0xF0 == 0x90)
+time.sleep(0.2)
+assert sum(1 for _, m in outc.log if m[0] & 0xF0 == 0x90) > before, "and free-runs again after the stop"
+ec.live(tc, 60, 0); ec.live(tc, 64, 0); ec.live(tc, 67, 0)
+ec.close()
+print("arp without the transport OK")
+
 # --- its order, its octaves, and the dialog that sets them ---------------------------------
 assert ts.Arp(mode="up").sequence([67, 60, 64]) == [60, 64, 67]
 assert ts.Arp(mode="down").sequence([60, 64, 67]) == [67, 64, 60]

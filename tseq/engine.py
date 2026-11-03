@@ -160,6 +160,7 @@ class Engine:
         self.arp_order = {}  # Track -> the held notes in the order they were pressed
         self.arp_keys = {}  # Track -> keys physically down (LATCH keeps the chord when they are all up)
         self.arp_step = {}  # Track -> how far through the arp's sequence it is
+        self.arp_at = {}  # Track -> when its next note is due (only while the transport stands)
         self.song_step = None  # the song step playing (None: not started)
         self.song_at = 0  # the bar that step began at
         self.song_jump = None  # a step asked for: taken at the next bar
@@ -182,6 +183,10 @@ class Engine:
                     self.count(now)
                 elif self.playing and now >= self.next_tick:
                     self.tick(now)
+                if not self.playing:  # the arp keeps time on its own while the transport stands
+                    for tr in self.project.tracks:
+                        if tr.arp.on and not tr.mute:
+                            self.arp_tick(now, tr)
                 wake = min([self.next_tick if self.playing else now + 0.005,
                             self.count_beat if self.counting else now + 0.005,
                             *(o for o, _ in self.sounding.values())])
@@ -265,6 +270,8 @@ class Engine:
                 held.clear()
                 order.clear()
                 self.arp_step[tr] = 0
+            if not held:  # the first note: the arp starts on the next tick, or right away when stopped
+                self.arp_at[tr] = 0.0
             if note not in held:
                 order.append(note)
             held[note] = (vel, ends)
@@ -288,7 +295,8 @@ class Engine:
             return True
 
     def arp_tick(self, now, track):
-        """One tick of the arp: the notes come on the transport's own grid, so they sit with the sequencer's."""
+        """One tick of the arp: while the transport plays its notes come on the transport's own grid, so they
+        sit with the sequencer's; when it stands the arp free-runs from the keys, at the project's tempo."""
         held = self.arp_notes.get(track)
         order = self.arp_order.get(track, [])
         if not track.arp.on:  # switched off: let go of what it was holding
@@ -296,6 +304,8 @@ class Engine:
                 self.arp_notes.pop(track, None)
                 self.arp_order.pop(track, None)
                 self.arp_keys.pop(track, None)
+                self.arp_step.pop(track, None)
+                self.arp_at.pop(track, None)
             return
         if not held:
             return
@@ -307,17 +317,38 @@ class Engine:
         if not held:
             return
         rate = max(1, track.arp.rate)
-        if self.ticks % rate:  # its own grid, anchored where the transport started
-            return
+        gap = rate * 60 / (self.project.bpm * PPQN)  # one arp step, in seconds
+        if self.playing:
+            if self.ticks % rate:  # its own grid, anchored where the transport started
+                return
+        else:
+            due = self.arp_at.get(track, 0.0)
+            if now < due:
+                return
+            self.arp_at[track] = (due if now - due < gap else now) + gap  # steady, but no catch-up burst
         sequence = track.arp.sequence(order or list(held))
         if not sequence:
             return
         step = self.arp_step.get(track, 0)
         self.arp_step[track] = step + 1
-        gap = rate / TICKS_PER_STEP * self.step_len  # one arp step, in seconds
         vel = max(v for v, _ in held.values())
         self._play(track, sequence[step % len(sequence)], vel,
                    now + max(0.01, gap * max(0.05, min(1.0, track.arp.gate))))
+
+    def arp_reset(self):
+        """The arp's sequence starts over: the pattern's notes are let go, the keys that are still down keep
+        arpeggiating (a chord held over the bar line, or the transport stopped under the fingers)."""
+        for tr, held in list(self.arp_notes.items()):
+            order = self.arp_order.get(tr, [])
+            for note in [n for n, (_, ends) in held.items() if ends is not None]:
+                held.pop(note, None)
+                if note in order:
+                    order.remove(note)
+            if not held:
+                self.arp_notes.pop(tr, None)
+                self.arp_order.pop(tr, None)
+        self.arp_step.clear()
+        self.arp_at.clear()
 
     def note_off(self, key):
         channel, note = key
@@ -356,8 +387,7 @@ class Engine:
         downbeat), or straight from `start`."""
         self.song_step, self.song_at, self.song_jump = None, 0, None  # a song starts at its first step
         self.cc_sent.clear()  # the lanes talk again from the top
-        for d in (self.arp_notes, self.arp_order, self.arp_keys, self.arp_step):
-            d.clear()  # and the arp starts its sequence over
+        self.arp_reset()
         self.playing, self.ticks, self.step_index = True, 0, -1
         self.pos.clear()
         self.playhead.clear()
@@ -408,8 +438,7 @@ class Engine:
             self.playing = False
             self.song_step, self.song_at, self.song_jump = None, 0, None
             self.cc_sent.clear()
-            for d in (self.arp_notes, self.arp_order, self.arp_keys, self.arp_step):
-                d.clear()
+            self.arp_reset()
             self.clicker.flush()  # a beat queued for a moment from now must not sound after a stop
             self.out.send_message([0xFC])
             for key in list(self.sounding):

@@ -154,7 +154,8 @@ Plays the track selected in the sequencer:
 - **ARP** in the header turns the track's arpeggiator on (it lights green, with its rate underneath): the
   chord the track hears — the pads, the keyboard, its MIDI input or a chord held in the pattern — is played one
   note at a time on the **transport's grid**, so the notes sit with the pattern instead of drifting from the
-  moment a key went down. Its dialog sets **RATE** (1/32 … 1/4, triplets), **MODE** (up, down, up-down, random,
+  moment a key went down (with the transport stopped it runs on its own clock, at the project's tempo, so a
+  chord can be arpeggiated before pressing play). Its dialog sets **RATE** (1/32 … 1/4, triplets), **MODE** (up, down, up-down, random,
   as played), **1/2/3 OCT**, **GATE** and **LATCH**, and shows what a held C-E-G will play. It is
   **non-destructive**: nothing is recorded, the pattern keeps its chords, and switching it off plays them again
 - with **XYFX** on the master, a **MASTER** row appears in the sequencer; selecting it turns this module
