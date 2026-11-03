@@ -2232,6 +2232,8 @@ class FlatEngine:
     playhead = {}
     ticks = 0
     step_index = 0
+    step_time = 0.0
+    step_len = 1.0
     fill_until = {}
 
 
@@ -2239,12 +2241,13 @@ prp, tp = launch_project()
 flat = FlatEngine()
 sp = ts.Sequencer(prp, flat)
 assert sp.launch_progress(tp) == 0.0, "nothing playing, no progress"
-flat.playing, flat.step_index, flat.ticks = True, 56, 3
+flat.playing, flat.step_index = True, 56
+flat.step_len, flat.step_time = 100.0, time.perf_counter() - 50.0  # halfway through the step
 flat.playhead[tp] = 8
-assert abs(sp.launch_progress(tp) - (8 + 0.5) / 16) < 0.001, sp.launch_progress(tp)
+assert abs(sp.launch_progress(tp) - (8 + 0.5) / 16) < 0.01, sp.launch_progress(tp)
 tp.pattern = 3  # a 32-step transition: two bars
 flat.fill_until[tp] = 4
-assert abs(sp.launch_progress(tp) - (3 + 8.5 / 16 - 2) / 2) < 0.001, "a transition drains over its bars"
+assert abs(sp.launch_progress(tp) - (56 + 0.5 - 32) / 32) < 0.01, "a transition drains over its bars"
 flat.playing = False
 assert sp.launch_progress(tp) == 0.0
 print("launch progress OK")

@@ -8,7 +8,7 @@ from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QPen, QPolygonF
 
 from .constants import (BG, BORDER, CC_LANES, DIM, DRUM_COLORS, DRUM_KIT, GATE_RES, MAX_GATE, MAX_STEPS,
-                        PALETTE, PANEL, PATTERNS, PLAY, SCENES, STEPS_PER_BAR, TEXT, TICKS_PER_STEP, WARN)
+                        PALETTE, PANEL, PATTERNS, PLAY, SCENES, STEPS_PER_BAR, TEXT, WARN)
 from .gestures import Drag, Gesture, Hold, ScrollOrTap
 from .model import DEFAULT_STEP, SongStep, Step
 from .music import note_name, transpose
@@ -516,12 +516,13 @@ class Sequencer(Panel):
         if not e.playing or tr not in e.playhead:
             return 0.0
         n = max(1, tr.patterns[tr.pattern].length)
-        frac = (e.ticks % TICKS_PER_STEP) / TICKS_PER_STEP
+        # time into the step, not the tick count: a step's playhead moves a moment after the tick that starts
+        # it, and the gap made the line step back for a few milliseconds
+        frac = max(0.0, min(1.0, (time.perf_counter() - e.step_time) / max(1e-6, e.step_len)))
         if tr in e.fill_until:
             bars = max(1, -(-n // STEPS_PER_BAR))
-            start = e.fill_until[tr] - bars
-            now = e.step_index // STEPS_PER_BAR + ((e.step_index % STEPS_PER_BAR) + frac) / STEPS_PER_BAR
-            return max(0.0, min(1.0, (now - start) / bars))
+            start = (e.fill_until[tr] - bars) * STEPS_PER_BAR
+            return max(0.0, min(1.0, (e.step_index + frac - start) / (bars * STEPS_PER_BAR)))
         return max(0.0, min(1.0, (e.playhead[tr] + frac) / n))
 
     def draw_launch_row(self, p, lane, tr):
