@@ -385,7 +385,8 @@ def find_click():
     return None
 
 
-BUILTIN_FILES = ("touchseq-xyfx", "touchseq-monitor", "touchseq-eq", "touchseq-click", "touchseq-space")
+BUILTIN_FILES = ("touchseq-xyfx", "touchseq-monitor", "touchseq-eq", "touchseq-click", "touchseq-space",
+                 "touchseq-acid", "touchseq-sampler")
 _builtin_cache = None
 
 

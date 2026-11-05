@@ -6,7 +6,7 @@ import time
 import rtmidi
 
 from .click import Clicker
-from .constants import PPQN, STEPS_PER_BAR, TICKS_PER_STEP
+from .constants import PPQN
 from .model import Track
 
 
@@ -198,28 +198,32 @@ class Engine:
         if now - self.next_tick > 0.05:  # fell far behind (e.g. system stall): don't burst-catch-up
             self.next_tick = now
         self.out.send_message([0xF8])
-        if self.ticks % TICKS_PER_STEP == 0:
+        ticks_per_step = self.project.ticks_per_step
+        if self.ticks % ticks_per_step == 0:
             self.step(self.next_tick)
         self.automate(time.perf_counter())
         self.ticks += 1
         self.next_tick += 60 / (self.project.bpm * PPQN)
 
     def step(self, t):
-        self.step_index = self.ticks // TICKS_PER_STEP
-        if self.step_index % STEPS_PER_BAR == 0:
-            bar = self.step_index // STEPS_PER_BAR
+        ticks_per_step = self.project.ticks_per_step
+        steps_per_bar = self.project.steps_per_bar
+        steps_per_beat = self.project.steps_per_beat
+        self.step_index = self.ticks // ticks_per_step
+        if self.step_index % steps_per_bar == 0:
+            bar = self.step_index // steps_per_bar
             if self.project.song_on and self.project.song:
                 self.song_tick(bar)  # the arrangement decides first
             self.end_fills(bar)
             self.apply_pending()
-        step_len = TICKS_PER_STEP * 60 / (self.project.bpm * PPQN)
+        step_len = ticks_per_step * 60 / (self.project.bpm * PPQN)
         self.step_time, self.step_len = t, step_len
-        if self.project.click and self.step_index % 4 == 0:  # a beat: higher on the first of the bar
+        if self.project.click and self.step_index % steps_per_beat == 0:  # a beat: higher on the bar's first
             if self.click_tap is not None:  # the graph plays it with the notes: send it as the step plays
-                self.click_beat(t, self.step_index % STEPS_PER_BAR == 0)
+                self.click_beat(t, self.step_index % steps_per_bar == 0)
             else:  # a stream of our own runs a buffer behind: queue the next beat a whole beat early
-                nxt = self.step_index + 4
-                self.clicker.at(t + 4 * step_len, accent=nxt % STEPS_PER_BAR == 0)
+                nxt = self.step_index + steps_per_beat
+                self.clicker.at(t + steps_per_beat * step_len, accent=nxt % steps_per_bar == 0)
         for tr in self.project.tracks:
             pat = tr.current
             i = self.pos.get(tr, self.step_index) % pat.length  # a track added mid-play joins in step
@@ -359,7 +363,7 @@ class Engine:
         self.out.send_message([0x80 | (channel - 1), note, 0], self.sounding.pop(key)[1])
 
     def apply_pending(self):
-        bar = self.step_index // STEPS_PER_BAR if self.playing else None
+        bar = self.step_index // self.project.steps_per_bar if self.playing else None
         if self.pending_scene is not None:
             for tr in self.project.tracks:
                 if tr.scenes[self.pending_scene] is not None:
@@ -384,7 +388,7 @@ class Engine:
             return
         if tr not in self.fill_back:  # a second transition in a row keeps the original way back
             self.fill_back[tr] = previous
-        self.fill_until[tr] = bar + max(1, -(-pat.length // STEPS_PER_BAR))
+        self.fill_until[tr] = bar + max(1, -(-pat.length // self.project.steps_per_bar))
 
     def end_fill(self, tr):
         """Forget any transition: the track keeps the pattern it is on."""
@@ -551,7 +555,8 @@ class Engine:
             self.arp_tick(now, tr)
             if not tr.current.cc:
                 continue
-            pos = self.playhead.get(tr, 0) + (self.ticks % TICKS_PER_STEP) / TICKS_PER_STEP
+            ticks_per_step = self.project.ticks_per_step
+            pos = self.playhead.get(tr, 0) + (self.ticks % ticks_per_step) / ticks_per_step
             self.send_cc(tr, pos)
 
     def send_cc(self, tr, pos):
@@ -579,7 +584,7 @@ class Engine:
         with self.lock:
             if self.song_step is None or not self.playing:
                 return None, 0
-            return self.song_step, max(0, self.step_index // STEPS_PER_BAR - self.song_at)
+            return self.song_step, max(0, self.step_index // self.project.steps_per_bar - self.song_at)
 
     def song_tick(self, bar):
         """At every bar: move on when the step's bars are done, and hand the tracks their patterns for the step

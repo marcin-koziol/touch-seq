@@ -12,7 +12,7 @@ from PySide6.QtGui import (QColor, QFont, QFontMetrics, QLinearGradient, QPainte
                            QPolygonF, QRadialGradient)
 from PySide6.QtWidgets import QWidget
 
-from .constants import BG, BORDER, DIM, MIN_TEXT, MOUSE_ID, PANEL, PARAM_FAMILIES, TEXT, TOUCH_LOG
+from .constants import BG, BORDER, DIM, MIN_TEXT, MOUSE_ID, PANEL, PARAM_FAMILIES, TEXT, TOUCH_LOG, WARN
 from .gestures import Drag, Gesture
 
 
@@ -38,6 +38,7 @@ class Panel:
         self.gestures = {}
         self.hits = []
         self.stale = False  # changed outside a touch: repaint even though nothing is animating
+        self.zoomed = False  # set by the window: this panel fills the rack (HOST-4 keeps its chain narrow)
 
     def invalidate(self):
         """Ask for a repaint after a change made without a touch (touches repaint by themselves)."""
@@ -464,6 +465,7 @@ class Window(QWidget):
         p.save()
         p.translate(screen.topLeft())
         p.setClipRect(QRectF(0, 0, screen.width(), screen.height()))
+        panel.zoomed = self.zoomed is panel
         try:
             panel.paint(p, screen.width(), screen.height())
         except Exception as e:  # noqa: BLE001 - anything a panel's drawing does must not stop the frame
@@ -621,3 +623,67 @@ class Window(QWidget):
         p.setPen(QPen(QColor("#3b4048"), rad * 0.3, Qt.SolidLine, Qt.RoundCap))
         p.drawLine(QPointF(-rad * 0.6, 0), QPointF(rad * 0.6, 0))
         p.restore()
+
+
+class Keyboard:
+    """An on-screen keyboard for a name: a field, letters and digits, shift, space, backspace, OK and CANCEL.
+    It draws into a rect and registers its keys on the panel, so a dialog or an editor can use it as an
+    overlay without a window of its own."""
+
+    ROWS = ("1234567890", "QWERTYUIOP", "ASDFGHJKL", "ZXCVBNM-_")
+    MAX = 28
+
+    def __init__(self, text="", title="Name", done=None, cancel=None, placeholder=""):
+        self.text, self.title, self.done, self.cancel = text, title, done, cancel
+        self.placeholder, self.shift = placeholder, True
+
+    def press(self, key):
+        if key == "back":
+            self.text = self.text[:-1]
+        elif key == "space":
+            self.text = (self.text + " ")[:self.MAX]
+        elif key == "shift":
+            self.shift = not self.shift
+        elif key == "ok":
+            if self.done:
+                self.done((self.text.strip() or self.placeholder).strip())
+        elif key == "cancel":
+            if self.cancel:
+                self.cancel()
+        else:
+            ch = key.upper() if self.shift and key.isalpha() else key.lower() if key.isalpha() else key
+            self.text = (self.text + ch)[:self.MAX]
+
+    def key(self, panel, p, r, label, key, color=None, on=False):
+        fill = QColor(color) if on and color else QColor(PANEL)
+        border = QColor(color).darker(140) if color else QColor(BORDER)
+        panel.box(p, r, fill, border, radius=5)
+        panel.text(p, r, label, BG if on and color else TEXT, 15, bold=True)
+        panel.on_press(r, lambda key=key: self.press(key))
+
+    def draw(self, panel, p, rect):
+        s = panel.s
+        panel.box(p, rect, QColor(13, 15, 20), BORDER, radius=8)
+        panel.region(rect, lambda pos: Gesture())  # taps that miss a key do nothing
+        title = QRectF(rect.left() + 12 * s, rect.top() + 8 * s, rect.width() - 24 * s, 22 * s)
+        panel.text(p, title, self.title, DIM, 12, Qt.AlignLeft | Qt.AlignVCenter)
+        field = QRectF(rect.left() + 12 * s, title.bottom() + 2 * s, rect.width() - 24 * s, 40 * s)
+        panel.box(p, field, PANEL, BORDER, radius=6)
+        shown = (self.text or self.placeholder) + "▌"
+        panel.text(p, field.adjusted(10 * s, 0, -10 * s, 0), shown, TEXT if self.text else "#5b6577", 20,
+                   Qt.AlignLeft | Qt.AlignVCenter, bold=True, elide=True)
+        top = field.bottom() + 8 * s
+        bottom_h = 40 * s
+        row_h = max(24 * s, (rect.bottom() - bottom_h - 10 * s - top) / len(self.ROWS) - 4 * s)
+        for n, row in enumerate(self.ROWS):
+            keys = split(QRectF(rect.left() + 12 * s, top + n * (row_h + 4 * s), rect.width() - 24 * s, row_h),
+                         [0] * len(row), 5 * s)
+            for box, ch in zip(keys, row):
+                self.key(panel, p, box, ch, ch)
+        bottom = QRectF(rect.left() + 12 * s, rect.bottom() - bottom_h - 8 * s, rect.width() - 24 * s, bottom_h)
+        shift, space, back, ok, cancel = split(bottom, [62 * s, 0, 62 * s, 84 * s, 88 * s], 6 * s)
+        self.key(panel, p, shift, "⇧" if self.shift else "⇩", "shift", color="#38d6ff", on=self.shift)
+        self.key(panel, p, space, "SPACE", "space")
+        self.key(panel, p, back, "⌫", "back")
+        self.key(panel, p, ok, "OK", "ok", color="#4ade80")
+        self.key(panel, p, cancel, "CANCEL", "cancel", color=WARN)

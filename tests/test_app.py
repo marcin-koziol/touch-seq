@@ -88,6 +88,19 @@ e.store_scene(1)
 e.queue_scene(0)
 assert a.pattern == 1 and e.scene == 0
 print("engine OK")
+# grid: 1/8T is 12 steps/bar and a step is 8 ticks; the engine and project follow it
+gp = ts.Project(bpm=240, tracks=[ts.Track("melody", 1, 1)], grid="1/8T")
+assert gp.ticks_per_step == 8 and gp.steps_per_bar == 12 and gp.steps_per_beat == 3
+assert '"grid":"1/8T"' in ts.dump_project(gp)
+ts.save_text(OUT / "grid.json", ts.dump_project(gp))
+assert ts.load_project(OUT / "grid.json").grid == "1/8T"
+ge = ts.Engine(gp, FakeOut()); ge.start(); time.sleep(0.12); ge.stop()
+print("1/8T step ms:", round(ge.step_len * 1000, 1))
+assert abs(ge.step_len - 8 * 60 / (240 * 24)) < 0.005
+gs = ts.Sequencer(gp, ge)
+gp.grid = "1/16"; gs.cycle_grid(); assert gp.grid == "1/8T"
+assert ts.Performer(gp, ge, gs, None).quants()[0] == ("1/8T", 1)
+print("grid OK")
 
 # --- UI render ---
 app = QApplication([])
@@ -176,6 +189,36 @@ assert len(p3.tracks) == 8 and p3.tracks[0].patterns[0].lanes[n][9].gate == st.g
 assert sorted(k for k, _ in p3.tracks[0].patterns[0].notes_at(4)) == on_notes(4)
 w.sel = dr; w.view = "edit"
 w.grab().save(str(OUT / "drum_edit.png"))
+# the drum editor's GATE mode: a step's length is editable, not stuck at the default
+w.drum_param = "gate"
+gst = dr.current.lane(0)[0]
+w.edit_step(dr, gst, "gate", 1.0)
+assert gst.gate == 1.0 and dr.last.gate == 1.0
+w.grab().save(str(OUT / "drum_gate.png"))
+# and a sideways drag stretches it across the following steps, the way the piano roll does
+s = w.s
+mid = QRectF(0, 64 * s, 1024, 600 - 70 * s - 64 * s)
+area = QRectF(8 * s, mid.top() + 8 * s + 58 * s + 10 * s, 1024 - 16 * s,
+              mid.bottom() - (mid.top() + 8 * s + 58 * s) - 18 * s)
+row = QRectF(area.left(), area.top(), area.width(), area.height() / len(dr.current.lanes) - 3 * s)
+lane0 = QRectF(row.left() + 130 * s, row.top(), row.width() - 130 * s, row.height())
+cells = w.panel.cells(lane0)
+w.press(30, cells[0].center()); w.move(30, QPointF(cells[0].center().x() + 20, cells[0].center().y()))
+w.move(30, cells[3].center()); w.release(30, cells[3].center())
+print("drum gate stretched to", gst.gate)
+assert gst.on and gst.gate == 4.0, gst.gate  # room ends at the next hit of the same voice (step 4)
+# pressing the tail grabs the step: a tap there takes the whole step out
+w.press(31, cells[2].center()); w.release(31, cells[2].center())
+assert not gst.on, "a tap on the tail removes the step"
+# a press on an empty step makes it, and the same drag stretches it
+dr.last.gate = 1.0
+w.press(32, cells[1].center()); w.move(32, QPointF(cells[1].center().x() + 20, cells[1].center().y()))
+w.move(32, cells[2].center()); w.release(32, cells[2].center())
+newst = dr.current.lane(0)[1]
+print("new step gate:", newst.gate)
+assert newst.on and newst.gate == 2.0, newst.gate
+w.grab().save(str(OUT / "drum_gate_stretched.png"))
+w.drum_param = "step"
 w.view = "grid"; w.scroll = 1e9
 w.grab().save(str(OUT / "drum_grid.png"))
 w.scroll = 0
@@ -377,25 +420,28 @@ opened = []
 ch = View(ts.Chooser(pdir, opened.append)); ch.resize(1888, 1000); ch.grab()
 nb = next(r for r, f in ch.hits if r.width() > 150 and r.top() < 120)  # NEW
 ch.press(1, nb.center()); ch.release(1, nb.center())
-assert opened == [pdir / "Project 1.json"] and opened[0].exists(), opened
-ch.new(); time.sleep(0.02)
+assert ch.keyboard is not None, "NEW asks for a name first"
+ch.grab().save(str(OUT / "chooser_keyboard.png"))
+ch.keyboard.press("ok")  # the placeholder name: "Project"
+assert opened == [pdir / "Project.json"] and opened[0].exists(), opened
+ch.new(); ch.keyboard.press("ok"); time.sleep(0.02)
 (pdir / "Project 1.plugins").mkdir(); (pdir / "Project 1.plugins" / "s1.carxs").write_text("x")
 assert ts.free_project_path(pdir, "Project 1").name == "Project 3.json"
 ch.grab().save(str(OUT / "chooser.png"))
 rows = [r for r, f in ch.hits if r.height() > 60 and r.width() > 1000]
 first = [p.name for p in ts.project_files(pdir)]
-print("projects newest first:", first); assert first == ["Project 2.json", "Project 1.json"]
-ch.press(2, rows[1].center()); ch.release(2, rows[1].center()); assert opened[-1].name == "Project 1.json"
+print("projects newest first:", first); assert first == ["Project 2.json", "Project.json"]
+ch.press(2, rows[1].center()); ch.release(2, rows[1].center()); assert opened[-1].name == "Project.json"
 dels = [r for r, f in ch.hits if 150 < r.width() < 300 and r.top() > 150]
 ch.press(3, dels[-1].center()); time.sleep(0.9); ch.tick(); ch.release(3, dels[-1].center())
-assert not (pdir / "Project 1.json").exists() and not (pdir / "Project 1.plugins").exists()
+assert not (pdir / "Project.json").exists() and not (pdir / "Project.plugins").exists()
 # duplicate from the rack copies json + plugin states and asks for a restart into the copy
 src = pdir / "Project 2.json"; (pdir / "Project 2.plugins").mkdir(); (pdir / "Project 2.plugins" / "a.carxs").write_text("state")
 prd = ts.load_project(src)
 rk = ts.Rack(prd, ts.Engine(prd, FakeOut()), src, StubHost())
 rk.duplicate()
 print("restart:", rk.restart, rk.next_project.name)
-assert rk.restart and rk.next_project.name == "Project 1.json" and (pdir / "Project 1.plugins" / "a.carxs").read_text() == "state"
+assert rk.restart and rk.next_project.name == "Project 3.json" and (pdir / "Project 3.plugins" / "a.carxs").read_text() == "state"
 rk2 = ts.Rack(prd, ts.Engine(prd, FakeOut()), src, StubHost()); rk2.resize(1920, 1080); rk2.grab().save(str(OUT / "rack_project.png"))
 print("projects OK")
 
@@ -2002,6 +2048,29 @@ assert [r.name for r in ts.HostPanel.browser_items(fb)] == ["Touch-Seq EQ", "Tou
     "one of ours found on disk is filtered too (the click must stay out)"
 print("builtin browser OK")
 
+# --- the A-Z strip skips the pinned block: T goes to the other T plugins, not to the top ---
+fj = types.SimpleNamespace(
+    catalog=types.SimpleNamespace(plugins=[fake_ref("Reaverb", "rev"), fake_ref("Touch-Seq EQ", "touchseq.eq"),
+                                           fake_ref("TAL Dub", "taldub"), fake_ref("Zyn", "zyn")]),
+    browser=("strip", 0), browser_fmt=None, _builtin=[], instrument_slot=lambda strip, k: False)
+fj.builtin_plugins = lambda: fj._builtin
+fj.LETTERS = ts.HostPanel.LETTERS
+fj.letter = ts.HostPanel.letter.__get__(fj)
+fj.pinned = ts.HostPanel.pinned.__get__(fj)
+jitems = ts.HostPanel.browser_items(fj)
+assert [r.name for r in jitems] == ["Touch-Seq EQ", "Reaverb", "TAL Dub", "Zyn"], [r.name for r in jitems]
+assert ts.HostPanel.pinned(fj, jitems) == 1
+ts.HostPanel.jump(fj, jitems, "T", 50.0)
+assert fj.browser_scroll == 100.0, f"T jumped to {fj.browser_scroll / 50:.0f}, not to TAL Dub"
+ts.HostPanel.jump(fj, jitems, "A", 50.0)
+assert fj.browser_scroll == 50.0, "a letter before the free list stops at its first plugin, not at the pinned row"
+fj.browser_fmt = "builtin"  # the BUILTIN list is all ours: its letters still jump normally
+bitems = ts.HostPanel.browser_items(fj)
+assert ts.HostPanel.pinned(fj, bitems) == 0 and [r.name for r in bitems] == ["Touch-Seq EQ"]
+ts.HostPanel.jump(fj, bitems, "T", 50.0)
+assert fj.browser_scroll == 0.0
+print("browser letters OK")
+
 # --- a drawn sweep is sent between the steps, not only on them ----------------------------
 prv2 = ts.Project(bpm=240, tracks=[ts.Track("melody", 1, 1)])
 tv2 = prv2.tracks[0]
@@ -2382,3 +2451,237 @@ q = QPainter(img); q.setRenderHint(QPainter.Antialiasing)
 hp3.draw_bar(q, QRectF(4, 4, 24, 200), object(), prm); q.end()
 assert hp3.hits and hp3.hits[-1][0].contains(10, 10), "the bar is draggable"
 print("step bars OK")
+
+# --- sampler: WAV reading, the pad map the plugin reads, and 16 equal chops --------------------
+import struct
+import wave as wavelib
+from tseq.sampler import (PadDrag, SamplerEditor, chop_regions, import_sample, preset_folders, read_manifest,
+                          write_manifest)
+from tseq.wav import read_wav
+
+wav_path = OUT / "sampler-test.wav"
+with wavelib.open(str(wav_path), "wb") as w:
+    w.setnchannels(1)
+    w.setsampwidth(2)
+    w.setframerate(48000)
+    w.writeframes(b"".join(struct.pack("<h", 10000 if i % 2 else -10000) for i in range(4800)))
+samples, rate, frames = read_wav(wav_path)
+assert rate == 48000 and frames == 4800 and len(samples) == 4800
+assert max(samples) > 0.2 and min(samples) < -0.2, (max(samples), min(samples))
+state = OUT / "sampler.plugins"
+pads = [None] * 16
+pads[0] = {"file": "sampler-test.wav", "start": 0, "end": frames, "root": 36, "gain": 1.0, "pan": 0.0,
+           "pitch": 0.0, "loop": 0, "reverse": 0}
+manifest = state / "sampler" / "sampler-5.txt"
+write_manifest(manifest, "sampler-test.wav", pads)
+current, back, mono = read_manifest(manifest)
+assert current == "sampler-test.wav" and back[0]["end"] == frames and back[1] is None and mono == 0
+regions = chop_regions(frames)
+assert len(regions) == 16 and regions[0][0] == 0 and regions[-1][1] == frames
+assert all(a < b for a, b in regions), regions
+copied = import_sample(wav_path, state)
+assert (state / "sampler" / copied).is_file()
+# the editor's status toast: shown for a few seconds, then gone
+panel = ts.Panel()
+panel.s = 1.0
+panel.state_dir = state
+panel.set_param = lambda *a, **k: None
+editor = SamplerEditor(panel)
+fake_plugin = types.SimpleNamespace(params=[])
+editor.use(fake_plugin, 5, manifest)
+editor.samples, editor.rate, editor.frames = samples, rate, frames
+editor.chop()
+assert editor.message.startswith("chopped"), editor.message
+img = QImage(700, 400, QImage.Format_ARGB32); img.fill(0)
+q = QPainter(img); q.setRenderHint(QPainter.Antialiasing)
+editor.draw(q, QRectF(0, 0, 700, 400), fake_plugin, 5, manifest); q.end()
+editor.message_at -= editor.MESSAGE_SECONDS + 1.0
+img.fill(0); q = QPainter(img); editor.draw(q, QRectF(0, 0, 700, 400), fake_plugin, 5, manifest); q.end()
+assert editor.message == "", "the toast expires"
+# a pad brings its own file to the waveform (the bug: current stayed on the last loaded file)
+other_path = state / "sampler" / "other.wav"
+with wavelib.open(str(other_path), "wb") as w:
+    w.setnchannels(1)
+    w.setsampwidth(2)
+    w.setframerate(48000)
+    w.writeframes(b"".join(struct.pack("<h", 8000 if i % 2 else -8000) for i in range(2400)))
+pads[1] = {"file": "other.wav", "start": 0, "end": 2400, "root": 37, "gain": 1.0, "pan": 0.0,
+           "pitch": 0.0, "loop": 0, "reverse": 0}
+write_manifest(manifest, "sampler-test.wav", pads)
+editor.load()
+editor.select_pad(0)
+assert editor.current == "sampler-test.wav" and editor.frames == 4800, (editor.current, editor.frames)
+editor.select_pad(1)
+assert editor.current == "other.wav" and editor.frames == 2400, (editor.current, editor.frames)
+# zoom/pan and the slice handles: edges resize, the bar moves the whole slice
+editor.select_pad(0)
+editor.fit()
+assert editor.view_start == 0 and editor.view_end == 4800
+editor.zoom(2)
+assert editor.view_end - editor.view_start < 4800
+editor.fit()
+slice_rect = QRectF(0, 0, 480, 200)
+editor.set_slice("start", slice_rect, QPointF(48, 10))
+editor.set_slice("end", slice_rect, QPointF(240, 10))
+assert editor.pads[0]["start"] == 480 and editor.pads[0]["end"] == 2400, editor.pads[0]
+editor.move_range(slice_rect, 48, 480, 2400)
+assert editor.pads[0]["start"] == 960 and editor.pads[0]["end"] == 2880, editor.pads[0]
+# COPY: the same chop on another pad, with its own pitch (one slice, two notes)
+editor.select_pad(0)
+editor.pads[0]["pitch"] = 5.0
+editor.copy_pad()
+assert editor.copy_src == 0, editor.copy_src
+editor.select_pad(7)
+cp = editor.pads[7]
+assert cp and cp["file"] == editor.pads[0]["file"], cp
+assert (cp["start"], cp["end"]) == (editor.pads[0]["start"], editor.pads[0]["end"]), cp
+assert cp["root"] == 36 + 7 and cp["pitch"] == 5.0, cp  # the target's own note as root: it sounds the same
+assert editor.copy_src is None and editor.pad == 7
+editor.pads[7]["pitch"] = 12.0
+assert editor.pads[0]["pitch"] == 5.0, "the two pads have independent pitch"
+editor.save_reload()
+_, saved, _ = read_manifest(manifest)
+assert saved[0]["pitch"] == 5.0 and saved[7]["pitch"] == 12.0, (saved[0]["pitch"], saved[7]["pitch"])
+editor.pad = 0
+editor.copy_pad()
+img.fill(0); q = QPainter(img); editor.draw(q, QRectF(0, 0, 700, 400), fake_plugin, 5, manifest); q.end()
+img.save(str(OUT / "sampler_copy.png"))
+editor.copy_pad()  # a second tap cancels the armed copy
+assert editor.copy_src is None
+editor.pad = 3
+editor.pads[3] = None
+editor.copy_pad(); assert "nothing to copy" in editor.message, editor.message
+print("sampler copy OK")
+# PRESETS: the pads and their samples kept outside the project, so deleting the track does not lose them
+panel.presets_dir = OUT / "sampler-presets"
+editor.pad = 0
+editor.mono = True
+editor.save_preset()
+saved_folders = preset_folders(panel.presets_dir)
+assert len(saved_folders) == 1, saved_folders
+preset = saved_folders[0]
+assert preset.name == "sampler-test", preset.name
+assert (preset / "preset.txt").is_file() and (preset / "sampler-test.wav").is_file()
+_, kept, kept_mono = read_manifest(preset / "preset.txt")
+assert kept_mono == 1 and kept[0]["pitch"] == 5.0 and kept[7]["pitch"] == 12.0
+editor.save_preset()  # a second save is a second preset, not an overwrite
+assert len(preset_folders(panel.presets_dir)) == 2
+# the track (and the project's sampler folder) gone: the preset still has its samples
+_sh.rmtree(state / "sampler")
+(state / "sampler").mkdir(parents=True)
+(state / "sampler" / "sampler-test.wav").write_bytes(b"a different sample with the same name")
+editor.cache.clear()
+editor.load_preset(preset)
+assert editor.current != "sampler-test.wav", "a same-named but different sample is kept, not overwritten"
+assert (state / "sampler" / editor.current).is_file(), "loading brings the samples back"
+assert (state / "sampler" / "sampler-test.wav").read_bytes() == b"a different sample with the same name"
+assert editor.pads[0]["file"] == editor.current and editor.pads[1]["file"] == "other.wav"
+assert editor.mono
+assert (editor.pads[0]["start"], editor.pads[0]["end"]) == (960, 2880), editor.pads[0]
+assert editor.pads[0]["pitch"] == 5.0 and editor.pads[7]["pitch"] == 12.0
+assert "loaded preset" in editor.message, editor.message
+_, loaded_pads, _ = read_manifest(manifest)
+assert loaded_pads[0]["file"] == editor.current, loaded_pads[0]
+editor.open_presets()
+img.fill(0); q = QPainter(img); editor.draw(q, QRectF(0, 0, 700, 400), fake_plugin, 5, manifest); q.end()
+img.save(str(OUT / "sampler_presets.png"))
+editor.presets_open = False
+editor.delete_preset(preset_folders(panel.presets_dir)[0])
+assert len(preset_folders(panel.presets_dir)) == 1
+print("sampler presets OK")
+# pads use the same fixed colors as the drum pads; playback groups cut each other
+editor.pad = 0
+assert editor.pad_color(0) == ts.DRUM_COLORS[0] and editor.pad_color(1) == ts.DRUM_COLORS[1]
+assert editor.pad_color(12) == ts.DRUM_COLORS[0], "16 pads cycle the 12 drum colors"
+editor.cycle_group()
+assert editor.pads[0]["group"] == 1
+editor.save_map()
+_, grouped, _ = read_manifest(manifest)
+assert grouped[0]["group"] == 1
+for _ in range(ts.SAMPLER_GROUPS):
+    editor.cycle_group()
+assert editor.pads[0]["group"] == 0, "after group 8 comes off"
+editor.cycle_group()
+assert editor.pads[0]["group"] == 1, "and then group 1 again"
+editor.pads[0]["pitch"] = 1.94
+editor.snap_pitch()
+assert editor.pads[0]["pitch"] == 2.0, editor.pads[0]["pitch"]
+editor.pads[0]["pitch"] = 1.5
+editor.snap_pitch()
+assert editor.pads[0]["pitch"] == 1.5, "a half semitone is not snapped away"
+# the knobs move in their own units: gain past 1 (0..4) in 0.02 steps, pitch in 0.1 semitones
+gv = []
+gpd = PadDrag(QPointF(0, 0), lambda: 1.0, gv.append, 0.0, 4.0, 1.2, 0.02, lambda: None)
+gpd.move(QPointF(0, -10))   # past the drag threshold
+gpd.move(QPointF(0, -130))  # 120 px up: 100 steps of 0.02
+assert gv[-1] == 3.0, gv
+pitchv = []
+ppd = PadDrag(QPointF(0, 0), lambda: 0.0, pitchv.append, -12.0, 12.0, 1.2, 0.1, lambda: None)
+ppd.move(QPointF(0, -10)); ppd.move(QPointF(0, -34))  # 24 px: 2 semitones
+assert pitchv[-1] == 2.0, pitchv
+# the waveform is read in the background in the app: the editor can paint a spinner and poll for it
+panel2 = ts.Panel(); panel2.s = 1.0; panel2.state_dir = state; panel2.set_param = lambda *a, **k: None
+ed2 = SamplerEditor(panel2, background=True)
+ed2.use(fake_plugin, 5, manifest)
+ed2.cache.clear()
+ed2.load_wave(editor.current)
+assert ed2.loading, "the read is off the UI thread"
+for _ in range(500):
+    ed2.poll()
+    if not ed2.loading:
+        break
+    time.sleep(0.01)
+assert not ed2.loading and ed2.frames == 4800, (ed2.loading, ed2.frames)
+ed2.loading = True  # what the waveform area shows meanwhile
+img.fill(0); q = QPainter(img); ed2.draw(q, QRectF(0, 0, 700, 400), fake_plugin, 5, manifest); q.end()
+img.save(str(OUT / "sampler_spinner.png"))
+ed2.loading = False
+# the on-screen keyboard: shift, space, backspace, placeholder, cancel
+typed = []
+kb = ts.Keyboard("", "Name", typed.append, placeholder="Project")
+kb.press("a"); assert kb.text == "A", kb.text
+kb.press("shift"); kb.press("b"); assert kb.text == "Ab", kb.text
+kb.press("space"); kb.press("1"); kb.press("back"); assert kb.text == "Ab ", kb.text
+kb.press("ok"); assert typed == ["Ab"], typed
+ts.Keyboard("", "Name", typed.append, placeholder="Project").press("ok")
+assert typed[-1] == "Project", typed
+cancel = []
+ts.Keyboard("x", "Name", typed.append, lambda: cancel.append(1)).press("cancel")
+assert cancel == [1]
+# naming a preset with it
+editor.open_presets(); editor.name_preset()
+assert editor.naming is not None
+editor.naming.press("shift")  # lowercase
+for ch in "kick":
+    editor.naming.press(ch)
+img.fill(0); q = QPainter(img); editor.draw(q, QRectF(0, 0, 700, 400), fake_plugin, 5, manifest); q.end()
+img.save(str(OUT / "sampler_keyboard.png"))
+editor.naming.press("ok")
+assert editor.naming is None and "kick" in [f.name for f in preset_folders(panel.presets_dir)]
+editor.presets_open = False
+assert ts.named_project_path(pdir, "Live Set").name == "Live Set.json"
+print("sampler pads/groups/pitch/load/keyboard OK")
+print("sampler view/handles OK")
+print("sampler pad files OK")
+print("sampler helpers OK")
+
+# --- a drum track whose instrument is the sampler: pads record as kit voices, never as note numbers ------
+dt9 = ts.Track("drum", 10, 9)
+assert dt9.note(0) == 36 and dt9.note(11) == 70
+assert dt9.note(48) == 48, "a lane outside the kit plays its own note instead of raising IndexError"
+assert ts.Performer.pad_lane(dt9, 36) == 0 and ts.Performer.pad_lane(dt9, 38) == 1
+assert ts.Performer.pad_lane(dt9, 70) == 11
+assert ts.Performer.pad_lane(dt9, 40) is None, "a sampler pad with no GM kit note has no drum lane"
+assert ts.Performer.pad_lane(ts.Track("melody", 1, 1), 60) == 60
+pr9 = ts.Project(bpm=240, tracks=[dt9])
+e9 = ts.Engine(pr9, FakeOut()); e9.start(); time.sleep(0.06)
+p9 = ts.Performer(pr9, e9, ts.Sequencer(pr9, e9), None)
+p9.mode = "rec"; e9.rec = {dt9: True}
+g9 = p9.press_pad(("sampler", 0), dt9, [(0, 36)], QRectF(0, 0, 60, 60), QPointF(30, 30), lanes=[0])
+assert g9.take and g9.take[3] == [0], g9.take
+g9.release(None)
+g10 = p9.press_pad(("sampler", 4), dt9, [(0, 40)], QRectF(0, 0, 60, 60), QPointF(30, 30), lanes=[])
+assert g10.take is None, "a pad with no kit voice plays but writes nothing"
+g10.release(None)
+e9.stop(); e9.close()
+print("drum sampler recording OK")

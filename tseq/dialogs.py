@@ -15,21 +15,22 @@ from .constants import (ARP_GATES, ARP_MODES, ARP_RATES, BG, BORDER, BPM_MAX, BP
 from .engine import midi_outputs
 from .midiin import midi_inputs
 from .gestures import Drag, Hold, ScrollOrTap
-from .model import dump_project, free_project_path, new_project, project_files, save_text
+from .model import dump_project, named_project_path, new_project, project_files, save_text
 from .music import SCALES
-from .ui import Panel, split
+from .ui import Keyboard, Panel, split
 
 
 class Chooser(Panel):
     """Projects, most recently changed first: the start screen, and the FILE dialog (which also marks
-    the `current` project and offers to `duplicate` it). Tap opens, NEW starts an empty one, DELETE (hold)
-    removes a project with its plugin states."""
+    the `current` project and offers to `duplicate` it). Tap opens, NEW names and starts an empty one,
+    DELETE (hold) removes a project with its plugin states."""
 
     def __init__(self, folder, open_, current=None, duplicate=None):
         super().__init__()
         self.folder, self.open, self.current, self.duplicate = folder, open_, current, duplicate
         self.scroll = 0.0
         self.info = {}  # path -> (mtime, summary line)
+        self.keyboard = None  # naming a new project
 
     def summary(self, path, mtime):
         if self.info.get(path, (None,))[0] != mtime:
@@ -42,7 +43,12 @@ class Chooser(Panel):
         return self.info[path][1]
 
     def new(self):
-        path = free_project_path(self.folder, "Project")
+        self.keyboard = Keyboard("", "New project", self.create, lambda: setattr(self, "keyboard", None),
+                                 placeholder="Project")
+
+    def create(self, name):
+        self.keyboard = None
+        path = named_project_path(self.folder, name or "Project")
         save_text(path, dump_project(new_project()))
         self.open(path)
 
@@ -93,6 +99,8 @@ class Chooser(Panel):
         p.restore()
         if not files:
             self.text(p, listing, "no projects yet — NEW starts one", "#5b6577", 18)
+        if self.keyboard:
+            self.keyboard.draw(self, p, QRectF(g, g, self.w - 2 * g, self.h - 2 * g))
 
 
 class Settings(Panel):

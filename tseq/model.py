@@ -9,7 +9,7 @@ from dataclasses import asdict, astuple, dataclass, field
 
 from plugins import PluginRef
 
-from .constants import DRUM_KIT, MAX_STEPS, NOTE_NAMES, PATTERNS, SCENES, SLOTS
+from .constants import DRUM_KIT, GRIDS, MAX_STEPS, NOTE_NAMES, PATTERNS, SCENES, SLOTS
 from .music import SCALES
 
 
@@ -160,7 +160,12 @@ class Track:
         return Pattern(lanes={k: new_lane() for k in range(len(DRUM_KIT))} if self.drum else {})
 
     def note(self, lane):
-        return DRUM_KIT[lane][1] if self.drum else lane
+        """The MIDI note a pattern lane plays: a drum's lane is its kit voice, a melody's is the pitch. A lane
+        that is not a kit voice (an old take, or a sampler pad recorded before the mapping) plays as its own
+        note instead of crashing the engine."""
+        if not self.drum:
+            return lane
+        return DRUM_KIT[lane][1] if 0 <= lane < len(DRUM_KIT) else lane
 
     @property
     def edit_lane(self):
@@ -227,6 +232,19 @@ class Project:
     song: list = field(default_factory=list)  # SongStep list: the arrangement above the patterns
     song_on: bool = False  # the transport follows the song instead of the patterns playing
     song_loop: bool = True  # back to the first step at the end, or stay on the last
+    grid: str = "1/16"  # the step grid: 1/16, 1/8T, 1/16T or 1/32 (see GRIDS)
+
+    @property
+    def ticks_per_step(self):
+        return GRIDS.get(self.grid, GRIDS["1/16"])[0]
+
+    @property
+    def steps_per_bar(self):
+        return GRIDS.get(self.grid, GRIDS["1/16"])[1]
+
+    @property
+    def steps_per_beat(self):
+        return max(1, self.steps_per_bar // 4)
 
     def in_scale(self, note):
         return (note - self.key) % 12 in SCALES[self.scale]
@@ -247,7 +265,7 @@ def dump_project(pr):
             d["fill"] = True
         return d
 
-    return json.dumps({"bpm": pr.bpm, "key": pr.key, "scale": pr.scale, "tracks": [
+    return json.dumps({"bpm": pr.bpm, "key": pr.key, "scale": pr.scale, "grid": pr.grid, "tracks": [
         {"kind": t.kind, "channel": t.channel, "number": t.number, "pattern": t.pattern, "scenes": t.scenes, "mute": t.mute,
          "voice": t.voice, "last": astuple(t.last), "last_note": t.last_note, "strip": dump_strip(t.strip),
          **({"port": t.port} if t.external else {}), **({"bus": t.bus} if t.bus else {}),
@@ -279,6 +297,19 @@ def free_project_path(folder, stem):
     `stem` is replaced, so a copy of 'Project 3' becomes the next free 'Project N'."""
     stem = re.sub(r" \d+$", "", stem)
     for n in itertools.count(1):
+        path = folder / f"{stem} {n}.json"
+        if not path.exists() and not path.with_suffix(".plugins").exists():
+            return path
+
+
+def named_project_path(folder, name):
+    """The path for a project the user named: '<name>.json', or '<name> 2.json' when that is taken (and the
+    plugin-state folder is free too). Unlike `free_project_path`, the name is kept as typed."""
+    stem = re.sub(r"[^A-Za-z0-9._ -]+", "", str(name)).strip(" ._-")[:48] or "Project"
+    path = folder / f"{stem}.json"
+    if not path.exists() and not path.with_suffix(".plugins").exists():
+        return path
+    for n in itertools.count(2):
         path = folder / f"{stem} {n}.json"
         if not path.exists() and not path.with_suffix(".plugins").exists():
             return path
@@ -325,7 +356,7 @@ def load_project(path):
                    [SongStep(bars=int(st.get("bars", 4)), repeats=int(st.get("repeats", 1)),
                              patterns={int(k): int(v) for k, v in (st.get("patterns") or {}).items()})
                     for st in d.get("song", [])],
-                   d.get("song_on", False), d.get("song_loop", True))
+                   d.get("song_on", False), d.get("song_loop", True), d.get("grid", "1/16"))
 
 
 def save_text(path, text):

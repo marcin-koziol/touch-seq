@@ -3,7 +3,7 @@ plugin slot layout and the parameter-name colour families."""
 import os
 
 
-MAX_STEPS = 64
+MAX_STEPS = 96
 
 
 PATTERNS = 16
@@ -15,10 +15,28 @@ SCENES = 8
 PPQN = 24
 
 
-TICKS_PER_STEP = PPQN // 4  # steps are 16th notes
+TICKS_PER_STEP = PPQN // 4  # the default grid: steps are 16th notes
 
 
 STEPS_PER_BAR = 16
+
+
+# The project's grid: (MIDI ticks per step, steps per bar). The default is 1/16; the triplets and 1/32
+# let a drum pattern play rolls that the 16-step grid cannot hold.
+GRIDS = {
+    "1/16": (6, 16),
+    "1/8T": (8, 12),
+    "1/16T": (4, 24),
+    "1/32": (3, 32),
+}
+GRID_ORDER = ("1/16", "1/8T", "1/16T", "1/32")
+# recording quantization per grid: (label, steps) - the finest is one step of that grid
+GRID_QUANTS = {
+    "1/16": (("1/16", 1), ("1/8", 2), ("1/4", 4)),
+    "1/8T": (("1/8T", 1), ("1/4", 2), ("1/2", 4)),
+    "1/16T": (("1/16T", 1), ("1/8T", 2), ("1/4T", 4)),
+    "1/32": (("1/32", 1), ("1/16", 2), ("1/8", 4)),
+}
 
 
 BPM_MIN, BPM_MAX = 30, 300
@@ -92,8 +110,16 @@ ARP_MODES = (("up", "UP"), ("down", "DOWN"), ("updown", "UP-DOWN"), ("random", "
 ARP_GATES = (0.25, 0.5, 0.75, 1.0)
 # a delay into a reverb, the two effects a live set always needs (space/ in this repo)
 SPACE_LABELS = {"touchseq.space", "urn:touch-seq:space"}
+# the 303-style acid bass, a monophonic instrument (acid/ in this repo)
+ACID_LABELS = {"touchseq.acid", "urn:touch-seq:acid"}
+# the 16-pad MPC-style sampler (sampler/ in this repo)
+SAMPLER_LABELS = {"touchseq.sampler", "urn:touch-seq:sampler"}
+SAMPLER_PADS = 16
+SAMPLER_GROUPS = 8  # playback groups: pads in the same group cut each other (0 = no group)
+SAMPLER_NOTE_BASE = 36  # pad 1 is MIDI note 36, as on an MPC
 # the plugins that ship with the app, whatever their format
-BUILTIN_LABELS = XYFX_LABELS | MONITOR_LABELS | EQ_LABELS | CLICK_LABELS | SPACE_LABELS
+BUILTIN_LABELS = (XYFX_LABELS | MONITOR_LABELS | EQ_LABELS | CLICK_LABELS | SPACE_LABELS | ACID_LABELS
+                  | SAMPLER_LABELS)
 # the ones the app puts in place itself - the monitor in a bare audio track, the click between master and
 # output: not for the browser, there is nothing to add by hand. XYFX is not one of them: it is an effect like
 # any other, and on the master it is what PLAY-12's XY pad drives

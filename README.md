@@ -47,31 +47,51 @@ cursor, and change the arrangement **on the bar** instead of on the downbeat of 
 | **[SONG](#seq-64--step-sequencer)** | the arrangement: a list of steps with bars × repeats and a pattern per track, switched on the bar |
 | **[LAUNCH](#launch--every-pattern-at-once)** | every track's patterns as pads, and transitions that play once and go back |
 | **[PLAY-12](#play-12--live-play)** | chord pads with voice leading, a keyboard, drum pads, REC/OVR and a per-track arpeggiator |
-| **[HOST-4](#host-4--plugins-carla)** | Carla in the app: chains, buses, the mixer, plugin GUIs and the built-in EQ, Space and XYFX |
+| **[HOST-4](#host-4--plugins-carla)** | Carla in the app: chains, buses, the mixer, plugin GUIs and the built-in EQ, Space, XYFX, Acid and Sampler |
 | **[CTRL-10](#ctrl-10--performance-faders)** | pitch, mod and 8 faders aimed at a track, a channel or a plugin parameter |
 | **[PATCHBAY](#patchbay--audio-routing)** | every audio port on the machine, linked with a tap per cable |
 | **TOP BAR** | FILE, SETTINGS, PATCHBAY, CLICK, COUNT-in, BPM and SAVE — icons, because words are wide |
 
 ![The whole rack, as it comes up: performance controls, the plugin host, the sequencer and the live pads](docs/screenshots/overview.png)
 
-## New in 0.11.2
+## New in 0.12.0
 
-- **A preset chosen in a plugin's own UI is no longer overwritten** by Touch-Seq: the `.params.json` sidecar
-  is now only for our own plugins (XYFX, Space, EQ, Click), whose parameters live outside their state. A
-  third-party plugin's state is left to speak for itself.
-- a parameter a plugin changes itself (a preset, its own knob) **marks its state for saving**, so it survives
-  a project switch without waiting for the 30 s clock; plugin states are prepared before saving.
+- **Acid** — our 303-style bass (`acid/`): the **Open303** engine (Robin Schmidt's, the one jc303 uses),
+  with a saw/square oscillator, the TeeBee ladder filter, Cutoff / Reso / Env Mod / Decay, Accent, Slide and
+  an **Overdrive switch** (jc303's BYOD neural TS808 model). Monophonic, last-note priority, and no window of
+  its own: HOST-4 shows its **OSC / FILTER / AMP** knobs, and the **UI** button is gone for our own plugins.
+  Pick it in slot 0 of a melody track and let it scream.
+- **Sampler** — our 16-pad MPC-style sampler (`sampler/`): **LOAD** a WAV (or let ffmpeg convert another
+  format), see its waveform (pan, **+ / − / FIT**, pinch), tap to add chop markers, **CHOP** into 16 slices,
+  select a pad and **TO PAD** a slice. **COPY** then a tap on another pad puts the same slice there, so one
+  chop can sit on several pads — each with its own **PITCH** (the copy starts at the source's pitch and keeps
+  the target pad's note as its root, so it sounds identical until you change it). The pads use the same fixed
+  colors as the drum voices. Each pad has Gain (up to 4×), Pan, Pitch, Loop, Reverse and **Gate** (play while
+  held vs one-shot) and a **GRP** playback group: pads in the same group cut each other, like MONO for that
+  group. **MONO** cuts the previous pad when a new
+  one starts. **PITCH** moves at 12 px per semitone and snaps to a whole semitone on release. **PRESETS**
+  keeps the pads and their samples on the machine (`~/.local/share/touch-seq/sampler-presets/`), so deleting
+  a track — or the whole project — does not lose them; SAVE asks for a name on an on-screen keyboard, tap a
+  preset to load it, hold its ✕ to delete it. A long sample is read in the background, with a spinner over
+  the waveform, so the panel stays responsive. PLAY-12 shows the sampler's pads
+  (notes 36–51) instead of the keyboard, so a melody track becomes a pad track. On a **drum** track the pads
+  play, but only those whose note is one of the 12 kit voices are written into the pattern (the others have
+  no voice to sit on); use a melody track to record all 16. Samples and the pad map live
+  in the project's `.plugins/sampler/` folder and travel with the project.
+- the preset fix from 0.11.2 stays: a third-party plugin's own state is not overridden by a sidecar, and a
+  change the plugin makes itself marks the state for saving.
 - `TOUCHSEQ_PARAM_LOG=params.log` logs every parameter write with its source (knob, fader, tempo, restore,
   plugin), for finding what writes what.
 
-0.11.1 brought **HOST-4 knob sections** (OSC, ENVELOPE, FILTER… in boxes, numbered sequences as vertical
-bars), a level meter on every track row, and the MIDI socket at the foot of the channel column. 0.11.0
-brought **LAUNCH** — every track's patterns as pads, with **FILL** transitions that play once and go back.
-0.10 brought the **arpeggiator** — per track, on the transport's grid, non-destructive — the click kept
-out of the plugin browser, and `CHN` in the sequencer. 0.9 brought the dense CC automation (points every
-¼ step, sent between the engine's ticks), the lane-only view with the notes as a ghost, **Space**, and
-**BUILTIN** in the browser. The [release notes](https://github.com/marcin-koziol/touch-seq/releases) have
-every version.
+0.11.2 fixed presets being overwritten and plugin states not being saved promptly. 0.11.1 brought
+**HOST-4 knob sections** (OSC, ENVELOPE, FILTER… in boxes, numbered sequences as vertical bars), a level
+meter on every track row, and the MIDI socket at the foot of the channel column. 0.11.0 brought **LAUNCH** —
+every track's patterns as pads, with **FILL** transitions that play once and go back. 0.10 brought the
+**arpeggiator** —
+per track, on the transport's grid, non-destructive — the click kept out of the plugin browser, and `CHN` in
+the sequencer. 0.9 brought the dense CC automation (points every ¼ step, sent between the engine's ticks),
+the lane-only view with the notes as a ghost, **Space**, and **BUILTIN** in the browser. The
+[release notes](https://github.com/marcin-koziol/touch-seq/releases) have every version.
 
 ## The manual
 
@@ -85,7 +105,10 @@ while there is something unsaved (the time next to it is the last save of anythi
 
 - any number of **melody**, **drum**, **external MIDI** and **audio** tracks; **+** adds one (the dialog picks
   the kind, and for external the MIDI output it sends to, for audio the interface input it takes)
-- 16 patterns per track, 1–64 steps (polymetric tracks are fine), 8 **scenes**
+- 16 patterns per track, 1–96 steps (polymetric tracks are fine), 8 **scenes**
+- the top bar's grid button switches the whole project between **1/16**, **1/8T**, **1/16T** and **1/32**:
+  pattern lengths, song bars, the metronome and the recording quantize follow it (changing it stops the
+  transport, so start again on the new grid)
 - pattern and scene changes are **quantized to the bar**: the current pattern plays to the end of the bar
 - rows are **yours to order**: hold a track's header for a moment, then drag it up or down — the track keeps its
   number and colour, and the same works for the steps of a song (hold a step, drag it in the list)
@@ -110,7 +133,12 @@ while there is something unsaved (the time next to it is the last save of anythi
     whole panel for drawing (the notes stay as a faint grey ghost, so there is something to draw against). With
     REC/OVR armed a controller from the track's MIDI keyboard — or a CTRL-10 fader on its channel — is written
     under the playhead (a lane is made for it when there is none), and the lanes play with the pattern
-  - drums: a voice × step matrix, voices in fixed colors (kick red, snare orange, hats yellow, …)
+  - drums: a voice × step matrix, voices in fixed colors (kick red, snare orange, hats yellow, …);
+    **STEP** paints hits, **VEL** drags velocity and **GATE** sets a step's length: drag sideways to stretch
+    it over the following cells exactly like a note in the piano roll (an empty cell makes the step and
+    stretches it in one move), or up/down for the value. The white bar runs across the cells it covers, with
+    a cyan handle at its end; a tap on a step takes it out. Lengths are in grid steps, so a 1/16T grid can
+    hold fast rolls, and a step never runs into the next hit of the same voice
   - external MIDI: the same piano roll, but the track has **no plugins**: its notes, velocity, gate and the
     faders go straight out to the chosen hardware output (and nowhere else), and its header shows the port
   - audio: an **interface input** (a mono capture port, e.g. the UMC404HD's FL) with **L / C / R** panning —
@@ -192,9 +220,30 @@ the first free name (*Touch-Seq 2*, …) and says so in HOST-4's status line: bo
   Damp, Delay, Time, Feedback and Tone as knobs. **Sync** + **Note** make the delay follow the tempo
   (1/32 … 1/2, triplets too) — and since the project's tempo follows the keyboard's clock, that is a
   MIDI-synced delay; the two effects a live set always needs, without hunting
-  for a plugin. **BUILTIN** in the browser lists our own (XYFX, EQ, Space) first, and they come first in
-  **ALL**; the two the app puts in place itself — the monitor and the click — are not offered there, because
-  there is nothing to add by hand
+  for a plugin. **BUILTIN** in the browser lists our own (XYFX, EQ, Space, Acid) first, and they come first
+  in **ALL**; the two the app puts in place itself — the monitor and the click — are not offered there,
+  because there is nothing to add by hand
+- **Acid** is our 303-style bass (`acid/`): the **Open303** engine (MIT, the one jc303 uses) — saw/square,
+  the TeeBee ladder filter with Cutoff, Reso, Env Mod and Decay, then Accent, Slide and an **Overdrive
+  switch** (jc303's BYOD neural TS808 model). It is monophonic with last-note priority, so overlapping notes
+  slide; velocity 100 and up triggers the accent, as on the 303. It has **no window of its own** — HOST-4
+  shows its OSC, FILTER and AMP knobs, and the **UI** button is hidden for our own plugins. Pick it in slot 0
+  of a melody track; it is a synth, not an effect
+- **Sampler** is our MPC-style pad sampler (`sampler/`): a waveform with chop markers, 16 pads, and
+  Gain / Pan / Pitch / Loop / Reverse for the selected pad. **LOAD** imports a file into the project's
+  `.plugins/sampler/` folder (WAV directly; ffmpeg converts other formats), **CHOP** makes 16 equal slices,
+  a tap on the waveform adds a marker, and **TO PAD** puts the selected slice on the selected pad. **COPY**
+  and then a tap on another pad copies the slice there (same file and range, the target's own note as root),
+  so the two pads can play the same chop at different **PITCH**es. The
+  waveform pans, zooms (buttons, pinch, **FIT**) and its white handles resize a pad's slice while the white
+  **↔** bar moves the whole slice. Each pad has Gain (up to 4×), Pan, Pitch, Loop, Reverse and **Gate** and a **GRP**
+  playback group: pads in the same group cut each other; the pads take the drum voices' fixed colors.
+  **MONO** cuts the previous pad when a new one starts. **PRESETS** saves the pads and the
+  samples they use on the machine (not in the project's plugin folder): a track or project deleted later
+  leaves the preset intact, and one preset can be loaded into another project; SAVE asks for the name on the
+  on-screen keyboard. A long sample is read in the background (the waveform shows a spinner meanwhile). The
+  sampler has **no window of its own**; its editor is HOST-4's parameter area, and PLAY-12 shows its pads
+  (notes 36–51) when the selected track's instrument is the sampler
 - **effects buses**: a track's chain can go into a bus instead of straight into the master — **→ MASTER** under
   the chain cycles through the buses, **+ BUS** makes a new one. A bus has its own 3 slots and its own level,
   so one reverb can process just the two of five tracks you route into it; buses are their own columns in the
@@ -220,6 +269,8 @@ the first free name (*Touch-Seq 2*, …) and says so in HOST-4's status line: bo
 | | |
 |---|---|
 | ![Space: the delay and reverb in one, its knobs in HOST-4](docs/screenshots/space.png) | ![Mixer](docs/screenshots/mixer.png) |
+| ![The sampler: Project 6's choir chopped into 16 pads, with playback groups and the drum colors](docs/screenshots/sampler.png) | ![The sampler's presets: the pads and their samples kept outside the project](docs/screenshots/sampler-presets.png) |
+| ![PLAY-12: the sampler's 16 pads in the drum colors](docs/screenshots/sampler-pads.png) | |
 | ![The plugin browser on BUILTIN: our own plugins first](docs/screenshots/builtin.png) | |
 | ![Plugin knobs grouped by section: OSC, ENVELOPE, FILTER, DELAY, each in its own box](docs/screenshots/knobs.png) | ![A sequence of parameters as bars: Sideous' 16 LFO steps, bipolar around the middle line](docs/screenshots/steps.png) |
 
@@ -231,6 +282,9 @@ Plays the track selected in the sequencer:
   ones), with 7/9/sus2/sus4, strum, octave and **voice leading** (each chord takes the inversion nearest
   the last one), or a **keyboard** (2 octaves in the module, 4 full screen, glissando)
 - drum tracks: 12 pads in the voices' colors
+- a track whose instrument is the **Sampler**: its 16 pads (notes 36–51) in the drum voices' fixed colors,
+  named after the samples and regions in its HOST-4 editor, instead of the chords or keyboard. On a drum track
+  they play but only the pads that match a kit note are recorded (a drum pattern holds voices, not pitches)
 - external MIDI tracks: like melody tracks (chords, keyboard), straight out to their output port
 - **REC** (replaces the steps you play over) or **OVR** (overdub: leaves them and adds) records what you play
   into the pattern, quantized to 1/16, 1/8 or 1/4 — fingers on the pads and notes from a track's MIDI keyboard
@@ -271,7 +325,8 @@ Optional 14-bit (MSB/LSB pairs) and bipolar faders.
 
 ### Projects and settings
 
-FILE lists projects, newest first (open, NEW, DUPLICATE, hold DELETE); switching restarts the app with the
+FILE lists projects, newest first (open, NEW, DUPLICATE, hold DELETE); NEW asks for the project's name on an
+on-screen keyboard first. Switching restarts the app with the
 other project. SETTINGS sets the project's key and scale (chord pads, piano roll), where plugins play, and the
 audio graph's **buffer size** (SYSTEM or 64 … 2048 samples): the whole graph follows — plugins included — and
 the machine's own size comes back when the app closes.
@@ -300,11 +355,12 @@ Download the AppImage for your machine from [Releases](https://github.com/marcin
 then:
 
 ```sh
-chmod +x Touch-Seq-0.11.2-x86_64.AppImage
-./Touch-Seq-0.11.2-x86_64.AppImage
+chmod +x Touch-Seq-0.12.0-x86_64.AppImage
+./Touch-Seq-0.12.0-x86_64.AppImage
 ```
 
-It contains Python, Qt (PySide6), Carla and Touch-Seq's own plugins (XYFX, Monitor, EQ, Click and Space).
+It contains Python, Qt (PySide6), Carla and Touch-Seq's own plugins (XYFX, Monitor, EQ, Click, Space,
+Acid and Sampler).
 The machine needs:
 
 - Linux, x86_64 or aarch64 (e.g. Raspberry Pi 4/5 with a 64-bit OS), glibc 2.35 or newer
@@ -372,8 +428,8 @@ behind; `click_lead` shifts that one by hand if a machine needs it.
 back when the app closes.
 
 Projects save themselves (every couple of seconds while editing, and on exit); plugin states are saved next
-to each project in `<name>.plugins/`. Our own plugins (XYFX, Space, EQ, Click) also get a `.params.json` beside
-the state, because they keep their parameters out of it — a knob turned in HOST-4 is saved on that same
+to each project in `<name>.plugins/`. Our own plugins (XYFX, Space, EQ, Click, Acid, Sampler) also get a
+`.params.json` beside the state, because they keep their parameters out of it — a knob turned in HOST-4 is saved on that same
 couple-of-seconds clock. A third-party plugin's state is left to speak for itself, so a preset chosen in its
 own UI is not overwritten by an old sidecar; a change the plugin makes itself (a preset, its own knob) also
 marks the state for saving, so it survives a project switch without waiting for the 30 s clock.
@@ -426,17 +482,22 @@ format layer of its own (Carla has it), and no floating windows in the way (HOST
 ### The plugins that ship with it
 
 The plugins in this repo are the app's own: **XYFX** (MPC-style beat repeat + filter, also the master's
-XY pad), **EQ** (eight bands, drawn in the app), **Space** (delay + reverb), and the two the app puts in
-place itself — **Monitor** (a transparent gain/pan) and **Click** (the metronome). All are CLAP + LV2,
-built with [DPF](https://github.com/DISTRHO/DPF), and installed with their own script:
+XY pad), **EQ** (eight bands, drawn in the app), **Space** (delay + reverb), **Acid** (303-style bass),
+**Sampler** (16-pad MPC-style), and the two the app puts in place itself — **Monitor** (a transparent
+gain/pan) and **Click** (the metronome). All are CLAP + LV2, built with
+[DPF](https://github.com/DISTRHO/DPF), and installed with their own script:
 
 ```sh
-xyfx/install.sh monitor/install.sh eq/install.sh click/install.sh space/install.sh   # into ~/.clap and ~/.lv2
+xyfx/install.sh monitor/install.sh eq/install.sh click/install.sh space/install.sh acid/install.sh sampler/install.sh
+# into ~/.clap and ~/.lv2
 ```
 
 The XYFX can also be used outside Touch-Seq (in a DAW, or any plugin host): releases carry
 `touchseq-xyfx-*.tar.gz`, and its parameters (Engage, X, Y, BPM, Mode) can be automated from any host.
-XYFX is ISC licensed; the app and the other plugins are GPL-3.0-or-later.
+The app is GPL-3.0-or-later; our plugins are ISC licensed, except **Acid**, which is GPL-3.0-or-later: it
+includes the MIT-licensed **Open303** engine (Copyright (c) 2009 Robin Schmidt, `acid/open303/LICENSE`) and
+the GPL-3.0 GuitarML BYOD overdrive from jc303 (`acid/overdrive/LICENSE`). RTNeural is BSD-3
+(`acid/rtneural/LICENSE`).
 
 ### Tests and builds
 

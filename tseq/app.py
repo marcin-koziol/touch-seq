@@ -114,7 +114,8 @@ def main(version):
             engine.clicker.lead = float(cfg["click_lead"]) / 1000
         host = HostPanel(project, router, path.with_suffix(".plugins"),
                          Path.home() / ".cache" / "touch-seq" / "plugins.json", cfg.get("audio_out", "default"),
-                         remember, patch=cfg.get("patch", []), buffer=cfg.get("buffer", 0))
+                         remember, patch=cfg.get("patch", []), buffer=cfg.get("buffer", 0),
+                         presets=DATA_HOME / "sampler-presets")
         racks.append(Rack(project, engine, path, host))
         show(racks[-1])
 

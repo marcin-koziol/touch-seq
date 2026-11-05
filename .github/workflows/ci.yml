@@ -73,6 +73,30 @@ jobs:
       - name: DSP test
         run: click/build/click-test
 
+  acid:
+    name: Acid 303 synth (CLAP + LV2)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - run: sudo apt-get update && sudo apt-get install -y build-essential cmake
+      - run: cmake -B acid/build -S acid -DCMAKE_BUILD_TYPE=Release && cmake --build acid/build -j"$(nproc)"
+      - name: DSP test
+        run: acid/build/acid-test
+
+  sampler:
+    name: Sampler (CLAP + LV2)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - run: sudo apt-get update && sudo apt-get install -y build-essential cmake
+      - run: cmake -B sampler/build -S sampler -DCMAKE_BUILD_TYPE=Release && cmake --build sampler/build -j"$(nproc)"
+      - name: DSP test
+        run: sampler/build/sampler-test
+
   eq:
     name: EQ plugin (CLAP + LV2)
     runs-on: ubuntu-22.04

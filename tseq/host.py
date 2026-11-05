@@ -2,24 +2,27 @@
 the plugin browser, plus the `Slide` gesture they use."""
 import json
 import math
+import os
 import re
 import threading
 import time
 import zlib
+from pathlib import Path
 
 import rtmidi
 
-from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtCore import QPointF, QRectF, Qt, QTimer
 from PySide6.QtGui import QColor, QLinearGradient, QPen
 
 import plugins
 
 from .model import Bus
 from .constants import (BG, BORDER, BUILTIN_LABELS, CLICK_ACCENT, CLICK_BEAT, CLICK_LABELS, DIM, EQ_LABELS,
-                        INTERNAL_LABELS, MONITOR_LABELS, PALETTE, PANEL, PARAM_LOG, SLOTS, SPACE_LABELS, TEXT,
-                        WARN, XYFX_LABELS)
+                        INTERNAL_LABELS, MONITOR_LABELS, PALETTE, PANEL, PARAM_LOG, SAMPLER_LABELS,
+                        SAMPLER_NOTE_BASE, SLOTS, SPACE_LABELS, TEXT, WARN, XYFX_LABELS)
 from .eq import EqEditor
 from .gestures import Drag, Hold, ScrollOrTap, Slide
+from .sampler import SamplerEditor, manifest_path as sampler_manifest_file, read_manifest
 from .ui import Panel, param_color, param_family, param_section, split
 
 
@@ -129,9 +132,11 @@ class HostPanel(Panel):
     click_note = None  # (accent) -> None, one beat of the metronome
 
     def __init__(self, project, router, state_dir, cache_path, audio_out="default", remember=None, name="Touch-Seq",
-                 patch=None, buffer=0):
+                 patch=None, buffer=0, presets=None):
         super().__init__()
         self.project, self.router, self.state_dir, self.audio_out, self.name = project, router, state_dir, audio_out, name
+        # sampler presets belong to this machine, not to a project: deleting a track or a project keeps them
+        self.presets_dir = Path(presets) if presets else Path(state_dir).parent / "sampler-presets"
         self.remember = remember  # (key, value) -> None: keep a machine setting (audio output, patchbay links)
         self.selected = lambda: project.tracks[0]  # the track whose chain TRACK shows (the rack: the sequencer's)
         self.select_track = lambda tr: None  # the rack: select a track in the sequencer
@@ -162,6 +167,10 @@ class HostPanel(Panel):
         self.click_note = None  # (accent) -> None: one beat of the metronome, None without the plugin
         self._builtin = None  # our own plugins, found on disk once (a stale catalog must not hide them)
         self.eq = EqEditor(self)  # the EQ's own editor, drawn in the parameter area
+        self.sampler = SamplerEditor(self, background=True)  # the sampler's editor, drawn in the parameter area
+        self._sampler_cache = {}  # manifest path -> (mtime, pads), so PLAY-12 doesn't read a file every frame
+        self._preview_tokens = {}  # pad -> last audition, so an old note-off can't stop a newer retrigger
+        os.environ["TOUCHSEQ_SAMPLER_DIR"] = str(self.state_dir)  # where the sampler finds its pad maps
         if self.buffer:
             plugins.set_quantum(self.buffer)  # before the engine starts, so the plugins see that size
         free = plugins.free_engine_name(name)  # a name already in the graph would rename our clients, and
@@ -296,6 +305,68 @@ class HostPanel(Panel):
         prefix = prefix or (f"t{tr.number}" if tr else f"b{bus.number}" if bus else "master")
         return self.state_dir / f"{prefix}-{k + 1}-{tag:08x}.carxs"
 
+    def sampler_slot(self, strip, k):
+        """A stable number per chain/slot: the sampler's pad map is sampler-<slot>.txt."""
+        tr = self.track_of(strip)
+        if tr:
+            return (tr.number - 1) * SLOTS + k
+        bus = self.bus_of(strip)
+        if bus:
+            return 256 + (bus.number - 1) * SLOTS + k
+        return 512 + k
+
+    def sampler_manifest_path(self, strip, k):
+        return sampler_manifest_file(self.state_dir, self.sampler_slot(strip, k))
+
+    def preview_pad(self, plugin, index):
+        """Audition one sampler pad through its track's MIDI port (the editor's pads work in fullscreen too)."""
+        for (strip, _k), loaded in self.loaded.items():
+            if loaded is not plugin:
+                continue
+            tr = self.track_of(strip)
+            if tr is None:
+                return
+            self.ensure_port(tr)
+            port = self.router.taps.get(tr)
+            if port is None:
+                return
+            note = SAMPLER_NOTE_BASE + int(index)
+            status = 0x90 | (max(1, min(16, tr.channel)) - 1)
+            token = self._preview_tokens.get(int(index), 0) + 1
+            self._preview_tokens[int(index)] = token
+
+            def stop():
+                if self._preview_tokens.get(int(index)) != token:
+                    return  # a newer tap restarted this pad: its own note-off will stop it
+                try:
+                    port.send_message([0x80 | (status & 0x0F), note, 0])
+                except Exception:
+                    pass
+
+            try:
+                port.send_message([status, note, 100])
+                QTimer.singleShot(1200, stop)  # a looped pad stops; a one-shot ignores the note-off
+            except Exception:
+                pass
+            return
+
+    def sampler_pads(self, tr):
+        """The sampler's 16 pad maps for PLAY-12, or None when the track has no sampler."""
+        plugin = self.loaded.get((tr.strip, 0))
+        if not plugin or plugin.ref.label not in SAMPLER_LABELS:
+            return None
+        path = self.sampler_manifest_path(tr.strip, 0)
+        try:
+            modified = path.stat().st_mtime
+        except OSError:
+            return None
+        cached = self._sampler_cache.get(path)
+        if cached and cached[0] == modified:
+            return cached[1]
+        _, pads, _ = read_manifest(path)
+        self._sampler_cache[path] = (modified, pads)
+        return pads
+
     def load(self, strip, k, ref, restore=False):
         tr, bus = self.track_of(strip), self.bus_of(strip)
         side = f"T{tr.number}" if tr else f"B{bus.number}" if bus else "M"
@@ -318,6 +389,10 @@ class HostPanel(Panel):
             self.host.load_state(plugin, state)
             self.host.refresh_params(plugin)
             self.restore_params(plugin, state)
+        if ref.label in SAMPLER_LABELS:  # tell it which pad map in the project's sampler folder to read
+            parameter = next((q for q in plugin.params if q.name == "Slot"), None)
+            if parameter:
+                self.set_param(plugin, parameter.index, float(self.sampler_slot(strip, k)), source="sampler")
 
     def ensure_port(self, tr):
         """The JACK MIDI port feeding this track's instrument (one JACK client per track)."""
@@ -501,6 +576,9 @@ class HostPanel(Panel):
 
     def tick(self):
         super().tick()
+        sampler = getattr(self, "sampler", None)
+        if sampler:
+            sampler.poll()  # a background waveform read lands on the UI thread here
         self.router.refresh(self.project.tracks)  # external tracks: look for their MIDI outputs again
         if self.host:
             self.host.idle()
@@ -524,8 +602,10 @@ class HostPanel(Panel):
                 self.set_param(plugin, prm.index, float(self.project.bpm), source="tempo")
 
     def animating(self):
-        # knobs read the plugins' live values: their own LFOs and envelopes move them
-        return super().animating() or bool(self.loaded)
+        # knobs read the plugins' live values: their own LFOs and envelopes move them; the sampler's spinner
+        # turns while a waveform is read
+        sampler = getattr(self, "sampler", None)
+        return super().animating() or bool(self.loaded) or bool(sampler and sampler.loading)
 
     # --- fader links (Controls target "param") ------------------------------------
     def link_plugin(self, link):
@@ -663,8 +743,16 @@ class HostPanel(Panel):
                 self.draw_external(p, body, tr)
                 return
             strip = tr.strip
-        left, right = split(body, [body.width() * 0.28, 0], 12 * s)  # narrow chain, room for 5 knob columns
+        # In fullscreen the chain keeps the small layout's width (and its own scale), so the editor gets the
+        # room instead of the plugin strip growing with the whole window.
+        zoomed = getattr(self, "zoomed", False)
+        chain_s = s * 0.5 if zoomed else s
+        chain_w = body.width() * (0.14 if zoomed else 0.28)
+        left, right = split(body, [chain_w, 0], 12 * chain_s)  # narrow chain, room for the editor
+        saved_s = self.s
+        self.s = chain_s
         self.draw_chain(p, left, strip)
+        self.s = saved_s
         self.draw_params(p, right, strip)
 
     def draw_external(self, p, r, tr):
@@ -1047,12 +1135,16 @@ class HostPanel(Panel):
                             lambda: self.open_browser(*sel))
             return
         inner = r.adjusted(10 * s, 8 * s, -10 * s, -8 * s)
-        title, assign, ui, change, remove = split(QRectF(inner.left(), inner.top(), inner.width(), 44 * s),
-                                                  [0, 86 * s, 56 * s, 84 * s, 84 * s], 6 * s)
+        ours = plugin.ref.label in BUILTIN_LABELS  # no native UI to open: its knobs are this panel
+        widths = [0, 86 * s, 84 * s, 84 * s] if ours else [0, 86 * s, 56 * s, 84 * s, 84 * s]
+        parts = split(QRectF(inner.left(), inner.top(), inner.width(), 44 * s), widths, 6 * s)
+        title, assign = parts[0], parts[1]
+        ui, change, remove = (None, parts[2], parts[3]) if ours else (parts[2], parts[3], parts[4])
         self.text(p, title, plugin.ref.name, TEXT, 15, Qt.AlignLeft | Qt.AlignVCenter, bold=True, elide=True)
         picking = self.assigning == "pick"
         self.button(p, assign, "ASSIGN", self.toggle_assign, on=picking, sub="to a fader")
-        self.button(p, ui, "UI", lambda: self.host.show_ui(plugin), enabled=self.host.has_ui(plugin))
+        if not ours:
+            self.button(p, ui, "UI", lambda: self.host.show_ui(plugin), enabled=self.host.has_ui(plugin))
         self.button(p, change, "CHANGE", lambda: self.open_browser(*sel))
         self.button(p, remove, "REMOVE", lambda: None, color=WARN, sub="hold")
         held = next((x for x in self.gestures.values() if isinstance(x, Hold)), None)
@@ -1063,6 +1155,11 @@ class HostPanel(Panel):
             p.restore()
         self.region(remove, lambda pos: Hold(lambda: self.set_slot(*sel, None)))
 
+        if plugin.ref.label in SAMPLER_LABELS:  # our sampler: the waveform and pads, not a grid of knobs
+            self.sampler.draw(p, QRectF(inner.left(), title.bottom() + 8 * s, inner.width(),
+                                        inner.bottom() - title.bottom() - 8 * s), plugin,
+                              self.sampler_slot(strip, sel[1]), self.sampler_manifest_path(strip, sel[1]))
+            return
         if plugin.ref.label in EQ_LABELS:  # our EQ: the curve, not a grid of knobs
             self.eq.draw(p, QRectF(inner.left(), title.bottom() + 8 * s, inner.width(),
                                    inner.bottom() - title.bottom() - 8 * s), plugin)
@@ -1324,9 +1421,11 @@ class HostPanel(Panel):
         if not items:
             self.text(p, listing, "nothing here", "#5b6577", 15)
             return
-        # A-Z strip: tap or slide along it to jump; the letter of the top of the list is lit
+        # A-Z strip: tap or slide along it to jump; the letter of the top of the free list is lit (the pinned
+        # block of our own plugins does not have a letter of its own)
         self.box(p, letters, PANEL, BORDER, radius=8)
-        current = self.letter(items[min(first, len(items) - 1)])
+        pinned = self.pinned(items)
+        current = self.letter(items[min(max(first, pinned), len(items) - 1)])
         lh = letters.height() / len(self.LETTERS)
         for n, ch in enumerate(self.LETTERS):
             r = QRectF(letters.left(), letters.top() + n * lh, letters.width(), lh)
@@ -1341,8 +1440,19 @@ class HostPanel(Panel):
         c = ref.name[:1].upper()
         return c if c in self.LETTERS[1:] else "#"
 
+    def pinned(self, items):
+        """How many of our own plugins the full list pins to the top. The A-Z strip indexes the rest, so a
+        letter lands on the plugins that letter really sorts instead of on the pinned block."""
+        if self.browser_fmt not in (None, "builtin"):
+            return 0
+        n = next((n for n, ref in enumerate(items) if ref.label not in BUILTIN_LABELS), len(items))
+        return n if n < len(items) else 0  # the BUILTIN list is all ours: it jumps like any other list
+
     def jump(self, items, ch, rh):
-        """Scroll the list to the first plugin at or after letter `ch` ('#' = digits and symbols)."""
+        """Scroll the list to the first plugin at or after letter `ch` ('#' = digits and symbols), skipping
+        the pinned block of our own plugins at the top."""
         want = self.LETTERS.index(ch)
-        n = next((n for n, ref in enumerate(items) if self.LETTERS.index(self.letter(ref)) >= want), len(items) - 1)
+        start = self.pinned(items)
+        n = next((n for n in range(start, len(items))
+                  if self.LETTERS.index(self.letter(items[n])) >= want), len(items) - 1)
         self.browser_scroll = n * rh

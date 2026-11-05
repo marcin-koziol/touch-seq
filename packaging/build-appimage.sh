@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Builds dist/Touch-Seq-VERSION-ARCH.AppImage and dist/touchseq-xyfx-VERSION-ARCH.tar.gz:
-# a portable Python (python-appimage) with PySide6 + python-rtmidi, Carla (build-carla.sh), XYFX and the app.
+# a portable Python (python-appimage) with PySide6 + python-rtmidi, Carla (build-carla.sh), our plugins and
+# the app.
 # Needs: git, cmake, a C++ toolchain, curl, X11 headers (see .github/workflows/release.yml).
 # Usage: packaging/build-appimage.sh   (ARCH defaults to this machine's)
 set -euo pipefail
@@ -64,6 +65,20 @@ cmake -B eq-build -S "$ROOT/eq" -DCMAKE_BUILD_TYPE=Release >/dev/null
 cmake --build eq-build -j"$(nproc)" >/dev/null
 eq-build/eq-test
 install -Dm755 eq-build/bin/touchseq-eq.clap AppDir/usr/lib/clap/touchseq-eq.clap
+
+echo "== Acid"
+cmake -B acid-build -S "$ROOT/acid" -DCMAKE_BUILD_TYPE=Release >/dev/null
+cmake --build acid-build -j"$(nproc)" >/dev/null
+acid-build/acid-test
+install -Dm755 acid-build/bin/touchseq-acid.clap AppDir/usr/lib/clap/touchseq-acid.clap
+cp -r acid-build/bin/touchseq-acid.lv2 AppDir/usr/lib/lv2/
+
+echo "== Sampler"
+cmake -B sampler-build -S "$ROOT/sampler" -DCMAKE_BUILD_TYPE=Release >/dev/null
+cmake --build sampler-build -j"$(nproc)" >/dev/null
+sampler-build/sampler-test
+install -Dm755 sampler-build/bin/touchseq-sampler.clap AppDir/usr/lib/clap/touchseq-sampler.clap
+cp -r sampler-build/bin/touchseq-sampler.lv2 AppDir/usr/lib/lv2/
 
 echo "== app"
 install -Dm644 "$ROOT/touchseq.py" AppDir/usr/share/touch-seq/touchseq.py

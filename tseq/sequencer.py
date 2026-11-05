@@ -7,8 +7,8 @@ import time
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QLinearGradient, QPen, QPolygonF
 
-from .constants import (BG, BORDER, CC_LANES, DIM, DRUM_COLORS, DRUM_KIT, GATE_RES, MAX_GATE, MAX_STEPS,
-                        PALETTE, PANEL, PATTERNS, PLAY, SCENES, STEPS_PER_BAR, TEXT, WARN)
+from .constants import (BG, BORDER, CC_LANES, DIM, DRUM_COLORS, DRUM_KIT, GATE_RES, GRID_ORDER, MAX_GATE,
+                        MAX_STEPS, PALETTE, PANEL, PATTERNS, PLAY, SCENES, STEPS_PER_BAR, TEXT, WARN)
 from .gestures import Drag, Gesture, Hold, ScrollOrTap
 from .model import DEFAULT_STEP, SongStep, Step
 from .music import note_name, transpose
@@ -31,6 +31,49 @@ class Paint(Gesture):
         if i not in self.done:
             self.done.add(i)
             self.set_on(i, self.target)
+
+
+class DrumGate(Gesture):
+    """GATE mode of the drum matrix: a sideways drag stretches a step over the following steps (the way the
+    piano roll stretches a note), up/down still drags the length; a tap toggles the step. Pressing an empty
+    step makes it and stretches it in the same move."""
+
+    def __init__(self, ui, tr, lane, rect, cells, page0, pos):
+        self.ui, self.tr, self.lane, self.rect, self.cells = ui, tr, lane, rect, cells
+        p = ui.step_pos(rect, pos)
+        k = max(0, min(len(cells) - 1, int(p)))
+        # a step whose tail reaches this cell is grabbed by its head: the length is stretched from there (its
+        # own cell always counts, even when the gate is shorter than the cell)
+        j = next((j for j in range(k, -1, -1) if lane[page0 + j].on and j + lane[page0 + j].gate > k), None)
+        self.new = j is None
+        self.k = k if self.new else j
+        self.i = page0 + self.k
+        if self.new:
+            ui.set_step(tr, lane[self.i], True)  # a tap adds it; a drag stretches it right away
+        self.gate0 = lane[self.i].gate
+        self.p0, self.step0, self.axis = pos, p, None
+
+    def move(self, pos):
+        st = self.lane[self.i]
+        if self.axis is None:
+            dx, dy = pos.x() - self.p0.x(), pos.y() - self.p0.y()
+            if max(abs(dx), abs(dy)) < Drag.THRESHOLD:
+                return
+            self.axis = "x" if abs(dx) >= abs(dy) else "y"
+            self.y0, self.v0 = self.p0.y(), st.gate
+        if self.axis == "x":
+            gate = self.gate0 + self.ui.step_pos(self.rect, pos) - self.step0
+            st.gate = max(GATE_RES, min(self.ui.room(self.tr.current, self.lane, self.i),
+                                        round(gate / GATE_RES) * GATE_RES))
+        else:
+            v = self.v0 + round((self.y0 - pos.y()) / (3 * self.ui.s)) * GATE_RES
+            st.gate = max(GATE_RES, min(MAX_GATE, round(v / GATE_RES) * GATE_RES))
+        st.on = True
+        self.tr.last = copy.copy(st)
+
+    def release(self, pos):
+        if not self.new and self.axis is None:  # a tap on a step takes it out, as in the piano roll
+            self.ui.set_step(self.tr, self.lane[self.i], False)
 
 
 class Roll(Gesture):
@@ -208,7 +251,7 @@ class Sequencer(Panel):
         self.lane_only = False  # the lane fills the edit view (no piano roll), for drawing automation
         self.roll_bases = {}  # Track -> lowest visible piano roll note
         self.roll_rows = 12
-        self.drum_param = "step"  # drum edit view: "step" paints on/off, "vel" drags velocity
+        self.drum_param = "step"  # drum edit view: "step" paints on/off, "vel" velocity, "gate" length
         self.mode = None  # "copy" / "clear" act on pattern slots, "save" on scenes
         self.scroll = 0.0
         self.song_sel = 0  # the song step the panel below shows
@@ -260,6 +303,13 @@ class Sequencer(Panel):
     def toggle_play(self):
         e = self.engine
         e.stop() if (e.playing or e.counting) else e.start()
+
+    def cycle_grid(self):
+        """Switch the project's step grid (1/16 -> 1/8T -> 1/16T -> 1/32)."""
+        if self.engine.playing or self.engine.counting:
+            self.engine.stop()
+        order = list(GRID_ORDER)
+        self.project.grid = order[(order.index(self.project.grid) + 1) % len(order)]
 
     def toggle_mode(self, mode):
         self.mode = None if self.mode == mode else mode
@@ -344,13 +394,14 @@ class Sequencer(Panel):
     def color(self, tr):
         return QColor(PALETTE[(tr.number - 1) % len(PALETTE)])
 
-    def step_fill(self, color, st, head, k):
-        """Background of a step cell: track color by velocity when on, else a 4-step grouped gray."""
+    def step_fill(self, color, st, head, at):
+        """Background of a step cell: track color by velocity when on, else a beat-grouped gray."""
         if st.on:
             fill = QColor(color)
             fill.setAlpha(round(90 + 165 * st.vel / 127))
             return fill
-        return QColor("#323a4a" if head else "#1d2230" if k % 4 == 0 else "#181c26")
+        return QColor("#323a4a" if head else "#1d2230"
+                      if at % self.project.steps_per_beat == 0 else "#181c26")
 
     # --- frame ----------------------------------------------------------
     def draw(self, p):
@@ -368,8 +419,8 @@ class Sequencer(Panel):
 
     def draw_top(self, p, r):
         s, e = self.s, self.engine
-        play, bar, song, grid, edit, launch, _, *scenes, save = split(
-            r, [86 * s, 110 * s, 72 * s, 72 * s, 72 * s, 80 * s, 0] + [46 * s] * SCENES + [72 * s], 6 * s)
+        play, bar, song, grid, rate, edit, launch, _, *scenes, save = split(
+            r, [86 * s, 110 * s, 72 * s, 72 * s, 64 * s, 72 * s, 80 * s, 0] + [46 * s] * SCENES + [72 * s], 6 * s)
 
         active = e.playing or e.counting
         self.button(p, play, "", self.toggle_play, on=e.playing, color=PLAY, pending=e.counting)
@@ -388,8 +439,8 @@ class Sequencer(Panel):
         if counting:  # the count-in: beats left, dots walking to the downbeat
             label, beat = f"-{int(e.count_left)}", (4 - int(e.count_left)) % 4
         else:
-            label = f"{si // STEPS_PER_BAR + 1}" if si >= 0 else "-"
-            beat = (si % STEPS_PER_BAR) // 4 if si >= 0 else -1
+            label = f"{si // pr.steps_per_bar + 1}" if si >= 0 else "-"
+            beat = (si % pr.steps_per_bar) // pr.steps_per_beat if si >= 0 else -1
         self.text(p, bar.adjusted(10 * s, 0, 0, 0), label, TEXT, 20, Qt.AlignLeft | Qt.AlignVCenter, bold=True)
         cell = (bar.width() - 54 * s) / 4
         for b in range(4):
@@ -398,6 +449,7 @@ class Sequencer(Panel):
 
         self.button(p, song, "SONG", lambda: self.show("song"), on=self.view == "song")
         self.button(p, grid, "GRID", lambda: self.show("grid"), on=self.view == "grid")
+        self.button(p, rate, self.project.grid, self.cycle_grid, color="#facc15")
         self.button(p, edit, "EDIT", lambda: self.show("edit"), on=self.view == "edit")
         self.button(p, launch, "LAUNCH", lambda: self.show("launch"), on=self.view == "launch")
 
@@ -521,9 +573,10 @@ class Sequencer(Panel):
         # it, and the gap made the line step back for a few milliseconds
         frac = max(0.0, min(1.0, (time.perf_counter() - e.step_time) / max(1e-6, e.step_len)))
         if tr in e.fill_until:
-            bars = max(1, -(-n // STEPS_PER_BAR))
-            start = (e.fill_until[tr] - bars) * STEPS_PER_BAR
-            return max(0.0, min(1.0, (e.step_index + frac - start) / (bars * STEPS_PER_BAR)))
+            spb = getattr(getattr(e, "project", None), "steps_per_bar", STEPS_PER_BAR)
+            bars = max(1, -(-n // spb))
+            start = (e.fill_until[tr] - bars) * spb
+            return max(0.0, min(1.0, (e.step_index + frac - start) / (bars * spb)))
         return max(0.0, min(1.0, (e.playhead[tr] + frac) / n))
 
     def draw_launch_row(self, p, lane, tr):
@@ -992,7 +1045,7 @@ class Sequencer(Panel):
             else:  # the column: loudest note decides the shade
                 notes = sorted(pat.notes_at(i), reverse=True)
                 st = max((n[1] for n in notes), key=lambda x: x.vel, default=DEFAULT_STEP)
-            self.box(p, c, self.step_fill(color, st, i == head, k), "#ffffff" if i == head else None, 2.5, radius=5)
+            self.box(p, c, self.step_fill(color, st, i == head, i), "#ffffff" if i == head else None, 2.5, radius=5)
             if tr.drum:  # mini matrix of the other voices, kick at the top
                 vh = (c.height() - 8 * s) / len(DRUM_KIT)
                 for v, voice in pat.lanes.items():
@@ -1009,7 +1062,7 @@ class Sequencer(Panel):
         pat, color = tr.current, self.color(tr)
         g = 8 * s
         ctrl = QRectF(r.left() + g, r.top() + g, r.width() - 2 * g, 58 * s)
-        params = ("step", "vel") if tr.drum else ()  # a melody's lanes are chosen under the roll
+        params = ("step", "vel", "gate") if tr.drum else ()  # a melody's lanes are chosen under the roll
         octaves = [] if tr.drum or tr.audio else [68 * s, 68 * s]
         shifts = [] if tr.drum or tr.audio else [64 * s, 64 * s]  # transpose; drums and inputs have no pitch
         cols = split(ctrl, ([46 * s] if not tr.audio else []) + [100 * s, 80 * s, 80 * s, 72 * s, 0]
@@ -1037,7 +1090,11 @@ class Sequencer(Panel):
                            lambda v: setattr(tr, "channel", int(v)), 1, 16, 14)
 
         def cycle_length():
-            pat.length = 16 if pat.length >= 64 else (pat.length // 16 + 1) * 16
+            step = self.project.steps_per_bar
+            if pat.length < step:
+                pat.length = step
+            else:
+                pat.length = min(MAX_STEPS, (pat.length // step + 1) * step)
 
         if tr.audio:  # an input has no steps to sequence
             self.button(p, length, "AUDIO IN", lambda: self.choose_source(tr), sub="pick the input")
@@ -1417,6 +1474,12 @@ class Sequencer(Panel):
         s, pat = self.s, tr.current
         head = self.engine.playhead.get(tr)
         rh = area.height() / len(DRUM_KIT)
+
+        def gate_name(g):
+            for value, name in ((0.25, "1/64"), (0.5, "1/32"), (1.0, "1/16"), (2.0, "1/8"), (4.0, "1/4")):
+                if abs(g - value) < 0.01:
+                    return name
+            return f"{g:g}"
         for v, (name, note) in enumerate(DRUM_KIT):
             row = QRectF(area.left(), area.top() + v * rh, area.width(), rh - 3 * s)
             label = QRectF(row.left(), row.top(), 120 * s, row.height())
@@ -1432,13 +1495,14 @@ class Sequencer(Panel):
 
             lane = QRectF(label.right() + 10 * s, row.top(), row.right() - label.right() - 10 * s, row.height())
             steps = pat.lanes[v]
-            for k, c in enumerate(self.cells(lane)):
+            cells = self.cells(lane)
+            for k, c in enumerate(cells):
                 i = self.page * 16 + k
                 st = steps[i]
                 if i >= pat.length:
                     self.box(p, c, "#10131a", None, radius=4)
                     continue
-                self.box(p, c, self.step_fill(color, Step(), i == head, k), None, radius=4)
+                self.box(p, c, self.step_fill(color, Step(), i == head, i), None, radius=4)
                 if st.on:  # dim full cell + bright part as tall as the velocity
                     dim = QColor(color)
                     dim.setAlpha(80)
@@ -1453,5 +1517,26 @@ class Sequencer(Panel):
                     self.region(c, lambda pos, st=st: Drag(
                         pos, lambda: st.vel, lambda val: self.edit_step(tr, st, "vel", int(val)), 1, 127, 3 * s,
                         on_tap=lambda: self.set_step(tr, st, not st.on)))
+            # lengths run over the following cells, so they are drawn once the row is laid out
+            for k, c in enumerate(cells):
+                i = self.page * 16 + k
+                st = steps[i]
+                if i >= pat.length or not st.on:
+                    continue
+                end = self.step_x(cells, min(len(cells), k + st.gate), lane.right())
+                if self.drum_param == "gate":
+                    self.box(p, QRectF(c.left() + 2 * s, c.bottom() - 9 * s,
+                                       max(2 * s, end - c.left() - 3 * s), 5 * s), QColor("#ffffff"), None,
+                             radius=2)
+                    self.box(p, QRectF(end - 3 * s, c.bottom() - 10 * s, 2 * s, 7 * s), QColor("#38d6ff"), None,
+                             radius=1)  # the end handle: drag it sideways to change the length
+                    self.text(p, QRectF(c.left(), c.top() + 1 * s, c.width(), 12 * s), gate_name(st.gate),
+                              BG, 9, bold=True)
+                elif st.gate > 1.01:  # a step that runs on: a thin line says where it ends
+                    self.box(p, QRectF(c.left(), c.bottom() - 4 * s, end - c.left(), 2 * s),
+                             QColor(255, 255, 255, 110), None, radius=1)
+            if self.drum_param == "gate":
+                self.region(lane, lambda pos, steps=steps, lane=lane, cells=cells: DrumGate(
+                    self, tr, steps, lane, cells, self.page * 16, pos))
             if self.drum_param == "step":
                 self.region(lane, lambda pos, v=v, lane=lane: Paint(self, lane, *self.painter(tr, v), pos))

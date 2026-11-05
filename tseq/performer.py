@@ -2,12 +2,14 @@
 them."""
 import math
 import time
+from pathlib import Path
 
 from PySide6.QtCore import QPointF, QRectF, Qt, QTimer
 from PySide6.QtGui import QColor, QLinearGradient, QPen
 
 from .constants import (ARP_RATES, BG, BORDER, BPM_MAX, BPM_MIN, CC_LANES, DIM, DRUM_COLORS, DRUM_KIT, GATE_RES,
-                        MAX_GATE, PANEL, TEXT, WARN)
+                        GRID_QUANTS, MAX_GATE, PANEL, SAMPLER_LABELS, SAMPLER_NOTE_BASE, SAMPLER_PADS, TEXT,
+                        WARN)
 from .gestures import Gesture
 from .midiin import Inputs
 from .music import (BORROWED, CHORD_SCALE, SCALES, XYFX_MODES, chord_name, note_name, roman, stack, xyfx_filter,
@@ -17,9 +19,10 @@ from .ui import Panel, split
 
 class Pad(Gesture):
     """A held live pad: notes sound while the finger is down; when the track records, they are written
-    to it on press and get their length on release."""
+    to it on press and get their length on release. `lanes` is what gets written (a drum's kit voice, not
+    the note it plays); the default is the lanes carried by `notes`."""
 
-    def __init__(self, perf, key, tr, notes, vel, strum=0.0, rebuild=None):
+    def __init__(self, perf, key, tr, notes, vel, strum=0.0, rebuild=None, lanes=None):
         self.perf, self.key, self.tr, self.notes, self.vel = perf, key, tr, notes, vel  # notes: [(lane, midi note)]
         self.rebuild = rebuild  # chord pads: () -> the pad's notes under the current modifiers
         self.down = True
@@ -30,7 +33,7 @@ class Pad(Gesture):
                 QTimer.singleShot(round(n * strum * 1000), lambda note=note: self.down and self.on(note))
             else:
                 self.on(note)
-        self.take = perf.record_start(tr, [lane for lane, _ in notes], vel)
+        self.take = perf.record_start(tr, [lane for lane, _ in notes] if lanes is None else lanes, vel)
 
     def on(self, note):
         self.perf.on(self.tr, note, self.vel)
@@ -80,9 +83,7 @@ class InNote:
         notes[note] = notes.get(note, 0) + 1
         if perf.mode:  # this track records what it hears, whatever is selected
             perf.engine.rec[tr] = perf.mode == "rec"
-        lane = note  # a melody's lane is its pitch; a drum's is the kit voice that note plays
-        if tr.drum:
-            lane = next((v for v, (_, n) in enumerate(DRUM_KIT) if n == note), None)
+        lane = perf.pad_lane(tr, note)  # a melody's lane is its pitch; a drum's is the kit voice it plays
         self.take = perf.record_start(tr, [] if lane is None else [lane], vel)
 
     def release(self):
@@ -151,6 +152,10 @@ class Performer(Panel):
     track, finger-drum pads for a drum track. REC (replace, like tape) or OVR (overdub) writes what is
     played into the playing pattern, quantized."""
     QUANTS = (("1/16", 1), ("1/8", 2), ("1/4", 4))
+
+    def quants(self):
+        """Recording quantization follows the project grid (the finest is one grid step)."""
+        return GRID_QUANTS.get(self.project.grid, self.QUANTS)
     KEY_WIDTH = 48  # smallest white key, in pixels (~12 mm on a 20" full-HD screen)
     MODS = ("7", "9", "sus2", "sus4")
     FUNCTION = ["#38d6ff", "#4ade80", "#38d6ff", "#4ade80", "#ff8c42", "#38d6ff", "#ff8c42"]  # tonic/sub/dominant
@@ -251,6 +256,14 @@ class Performer(Panel):
     def input_ok(self, tr):
         """Whether the track's input is actually open (its icon says so when the device is away)."""
         return any(tr.in_port.lower() in name.lower() for name in self.inputs.open_names())
+
+    @staticmethod
+    def pad_lane(tr, note):
+        """The pattern lane a pad writes: a melody's lane is the note, a drum's is the kit voice that note plays
+        (None when the kit has no such voice, e.g. a sampler pad above the 12 drum voices)."""
+        if not tr.drum:
+            return note
+        return next((v for v, (_, n) in enumerate(DRUM_KIT) if n == note), None)
 
     def lit(self, tr, note):
         """A note the track's MIDI keyboard is holding: its pads and keys light up like a finger would."""
@@ -412,16 +425,20 @@ class Performer(Panel):
             self.draw_xy(p)
             return
         tr = self.seq.sel
+        sampler = self.sampler_plugin(tr)
         header = QRectF(g, g, self.w - 2 * g, 52 * s)
-        layouts = [] if tr.drum else [84 * s, 84 * s]
-        target, *rest = split(header, [0] + layouts + [72 * s] + [80 * s, 80 * s] + [62 * s] * len(self.QUANTS),
-                              6 * s)
+        layouts = [] if (tr.drum or sampler) else [84 * s, 84 * s]
+        quant_labels = self.quants()
+        if self.quant not in [q for _, q in quant_labels]:
+            self.quant = quant_labels[0][1]
+        target, *rest = split(header, [0] + layouts + [72 * s] + [80 * s, 80 * s]
+                              + [62 * s] * len(quant_labels), 6 * s)
         if layouts:
             for rect, name in zip(rest[:2], ("chords", "keys")):
                 self.button(p, rect, name.upper(), lambda name=name: setattr(self, "layout", name),
                             on=self.layout == name, color=self.seq.color(tr))
             rest = rest[2:]
-        arp, rec, ovr, *quants = rest
+        arp, rec, ovr, *quant_buttons = rest
         color = self.seq.color(tr)
         self.text(p, target.adjusted(6 * s, 0, 0, 0), f"→ T{tr.number}  {tr.kind}  CH{tr.channel}", color.name(), 17,
                   Qt.AlignLeft | Qt.AlignVCenter, bold=True, elide=True)
@@ -434,9 +451,12 @@ class Performer(Panel):
             self.button(p, rect, label, lambda mode=mode: setattr(self, "mode", None if self.mode == mode else mode),
                         on=self.mode == mode, color=WARN, pending=self.mode == mode and live,
                         sub="replace" if mode == "rec" else "overdub")
-        for rect, (label, q) in zip(quants, self.QUANTS):
+        for rect, (label, q) in zip(quant_buttons, quant_labels):
             self.button(p, rect, label, lambda q=q: setattr(self, "quant", q), on=self.quant == q)
         body = QRectF(g, header.bottom() + 10 * s, self.w - 2 * g, self.h - header.bottom() - 10 * s - g)
+        if sampler:  # a sampler track: its own 16 pads, notes 36..51
+            self.draw_sampler_pads(p, body, tr)
+            return
         if tr.audio:  # an input has nothing to play here
             self.text(p, body, "an audio track: its input is patched in the sequencer (EDIT)", DIM, 16)
             return
@@ -452,9 +472,9 @@ class Performer(Panel):
         self.text(p, r.adjusted(0, 0, 0, -r.height() * 0.3), title, fg, 26, bold=True, elide=True)
         self.text(p, r.adjusted(0, r.height() * 0.45, 0, 0), sub, fg if lit else DIM, 14, elide=True)
 
-    def press_pad(self, key, tr, notes, r, pos, rebuild=None):
+    def press_pad(self, key, tr, notes, r, pos, rebuild=None, lanes=None):
         return Pad(self, key, tr, notes, self.velocity(r, pos), 0.03 if self.strum and len(notes) > 1 else 0.0,
-                   rebuild)
+                   rebuild, lanes)
 
     def rebuild_held(self):
         """Modifiers apply to chords already held."""
@@ -616,6 +636,32 @@ class Performer(Panel):
         down = QRectF(side.left(), side.center().y() + 5 * s, side.width(), side.height() / 2 - 5 * s)
         self.button(p, up, "OCT +", lambda: self.shift_octave(1), sub=f"{self.octave:+d}" if self.octave else None)
         self.button(p, down, "OCT −", lambda: self.shift_octave(-1))
+
+    def sampler_plugin(self, tr):
+        """The sampler in the selected track's instrument slot, if that is what it holds."""
+        loaded = getattr(self.host, "loaded", None) if self.host else None
+        if not loaded:
+            return None
+        plugin = loaded.get((tr.strip, 0))
+        return plugin if plugin and plugin.ref.label in SAMPLER_LABELS else None
+
+    def draw_sampler_pads(self, p, r, tr):
+        """The sampler's 16 pads, MPC-style: pad 1 is note 36, and a tap plays it on this track. Each pad takes
+        the same fixed color as its counterpart in the drum pads (16 pads cycle the 12 drum colors)."""
+        s = self.s
+        pads = self.host.sampler_pads(tr) if self.host else None
+        for index in range(SAMPLER_PADS):
+            row = QRectF(r.left(), r.top() + (index // 4) * r.height() / 4, r.width(), r.height() / 4)
+            cell = split(row.adjusted(0, 4 * s, 0, -4 * s), [0] * 4, 8 * s)[index % 4]
+            pad = pads[index] if pads else None
+            sub = Path(pad["file"]).stem if pad else "empty"
+            note = SAMPLER_NOTE_BASE + index
+            color = DRUM_COLORS[index % len(DRUM_COLORS)]
+            lane = self.pad_lane(tr, note)  # a drum track's lanes are kit voices; pads above them are not written
+            self.pad(p, cell, ("sampler", index), color, f"P{index + 1}", sub, lit=self.lit(tr, note))
+            self.region(cell, lambda pos, index=index, cell=cell, note=note, lane=lane: self.press_pad(
+                ("sampler", index), tr, [(0 if lane is None else lane, note)], cell, pos,
+                lanes=[] if lane is None else [lane]))
 
     def draw_drum_pads(self, p, r, tr):
         s, cols = self.s, 6
