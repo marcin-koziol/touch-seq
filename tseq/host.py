@@ -318,18 +318,19 @@ class HostPanel(Panel):
     def sampler_manifest_path(self, strip, k):
         return sampler_manifest_file(self.state_dir, self.sampler_slot(strip, k))
 
-    def preview_pad(self, plugin, index):
-        """Audition one sampler pad through its track's MIDI port (the editor's pads work in fullscreen too)."""
+    def preview_start(self, plugin, index):
+        """Note-on for a sampler pad; returns its note-off (token-safe, so an old stop can't cut a newer tap),
+        or None when the track has no port. The editor's pads hold the note while the finger is down."""
         for (strip, _k), loaded in self.loaded.items():
             if loaded is not plugin:
                 continue
             tr = self.track_of(strip)
             if tr is None:
-                return
+                return None
             self.ensure_port(tr)
             port = self.router.taps.get(tr)
             if port is None:
-                return
+                return None
             note = SAMPLER_NOTE_BASE + int(index)
             status = 0x90 | (max(1, min(16, tr.channel)) - 1)
             token = self._preview_tokens.get(int(index), 0) + 1
@@ -345,9 +346,35 @@ class HostPanel(Panel):
 
             try:
                 port.send_message([status, note, 100])
-                QTimer.singleShot(1200, stop)  # a looped pad stops; a one-shot ignores the note-off
+            except Exception:
+                return None
+            return stop
+        return None
+
+    def preview_pad(self, plugin, index):
+        """Audition one sampler pad for a moment through its track's MIDI port."""
+        stop = self.preview_start(plugin, index)
+        if stop:
+            QTimer.singleShot(1200, stop)  # a looped pad stops; a one-shot ignores the note-off
+
+    def stop_pads(self, plugin):
+        """Stop every voice the sampler is playing (CC 123, which the plugin turns into allNotesOff)."""
+        for (strip, _k), loaded in self.loaded.items():
+            if loaded is not plugin:
+                continue
+            tr = self.track_of(strip)
+            if tr is None:
+                return
+            port = self.router.taps.get(tr)
+            if port is None:
+                return
+            status = 0xB0 | (max(1, min(16, tr.channel)) - 1)
+            try:
+                port.send_message([status, 123, 0])
             except Exception:
                 pass
+            return
+
             return
 
     def sampler_pads(self, tr):

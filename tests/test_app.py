@@ -2609,6 +2609,15 @@ assert editor.pads[0]["pitch"] == 2.0, editor.pads[0]["pitch"]
 editor.pads[0]["pitch"] = 1.5
 editor.snap_pitch()
 assert editor.pads[0]["pitch"] == 1.5, "a half semitone is not snapped away"
+# STRETCH: pitch without changing the slice's length, stored in the map
+editor.toggle_stretch()
+assert editor.pads[0]["stretch"] == 1
+_, stretched, _ = read_manifest(manifest)
+assert stretched[0]["stretch"] == 1
+editor.toggle_stretch()
+assert editor.pads[0]["stretch"] == 0
+assert editor.start_pad(0) is None, "a bare panel has no port to preview through"
+editor.stop_all()
 # the knobs move in their own units: gain past 1 (0..4) in 0.02 steps, pitch in 0.1 semitones
 gv = []
 gpd = PadDrag(QPointF(0, 0), lambda: 1.0, gv.append, 0.0, 4.0, 1.2, 0.02, lambda: None)

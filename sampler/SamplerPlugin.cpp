@@ -8,7 +8,7 @@ START_NAMESPACE_DISTRHO
 
 class SamplerPlugin : public Plugin {
 public:
-    enum Param { kSlot, kReload, kPlayhead, kPlayPad, kParamCount };
+    enum Param { kSlot, kReload, kLoad, kPlayhead, kPlayPad, kParamCount };
 
     SamplerPlugin() : Plugin(kParamCount, 0, 0) {
         core.prepare(getSampleRate());
@@ -33,10 +33,15 @@ protected:
             p.hints = kParameterIsInteger;
             p.ranges = ParameterRanges(0.0f, 0.0f, 1023.0f);
         } else if (index == kReload) {
-            // the editor bumps this after rewriting the manifest: the Slot value itself does not change, and
-            // a host may not tell the plugin about a parameter set to the value it already has
+            // the editor bumps this after rewriting the manifest: a light reread that reuses the samples
             p.name = "Reload";
             p.symbol = "reload";
+            p.hints = kParameterIsInteger;
+            p.ranges = ParameterRanges(0.0f, 0.0f, 1000000.0f);
+        } else if (index == kLoad) {
+            // and this one when the samples themselves changed: a full load of the manifest and the WAVs
+            p.name = "Load";
+            p.symbol = "load";
             p.hints = kParameterIsInteger;
             p.ranges = ParameterRanges(0.0f, 0.0f, 1000000.0f);
         } else if (index == kPlayhead) {
@@ -58,6 +63,8 @@ protected:
             return float(slot);
         if (index == kReload)
             return float(reload);
+        if (index == kLoad)
+            return float(loads);
         if (index == kPlayhead)
             return playhead;
         if (index == kPlayPad)
@@ -71,7 +78,10 @@ protected:
             core.setSlot(slot);
         } else if (index == kReload) {
             reload = int(value + 0.5f);
-            core.reload();
+            core.applyMap();  // the map changed: reuse the samples, let playing voices follow it
+        } else if (index == kLoad) {
+            loads = int(value + 0.5f);
+            core.setSlot(slot);  // the samples changed: reread the manifest and the WAVs
         }
     }
 
@@ -121,7 +131,8 @@ private:
 
     SamplerCore core;
     int slot = 0;
-    int reload = 0;  // bumped by the editor to make the plugin reread the pad map
+    int reload = 0;  // bumped by the editor for a light map update
+    int loads = 0;   // bumped by the editor when the samples themselves changed
     float playhead = 0.0f;  // output: the newest voice's position within its slice
     int playPad = -1;       // output: that voice's pad, or -1 when nothing is playing
 

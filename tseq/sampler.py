@@ -101,7 +101,8 @@ def read_manifest(path):
                                    "root": int(parts[5]), "gain": float(parts[6]), "pan": float(parts[7]),
                                    "pitch": float(parts[8]), "loop": int(parts[9]), "reverse": int(parts[10]),
                                    "gate": int(parts[11]) if len(parts) >= 12 else 0,
-                                   "group": int(parts[12]) if len(parts) >= 13 else 0}
+                                   "group": int(parts[12]) if len(parts) >= 13 else 0,
+                                   "stretch": int(parts[13]) if len(parts) >= 14 and parts[13].isdigit() else 0}
     except (OSError, ValueError):
         pass
     if not current:
@@ -120,8 +121,12 @@ def write_manifest(path, current, pads, mono=0):
             lines.append(f"pad {index} {pad['file']} {int(pad['start'])} {int(pad['end'])} {int(pad['root'])} "
                          f"{pad['gain']:.6f} {pad['pan']:.6f} {pad['pitch']:.6f} "
                          f"{int(pad['loop'])} {int(pad['reverse'])} {int(pad.get('gate', 0))} "
-                         f"{int(pad.get('group', 0))}")
-    path.write_text("\n".join(lines) + ("\n" if lines else ""))
+                         f"{int(pad.get('group', 0))} {int(pad.get('stretch', 0))}")
+    # write beside it and rename: the plugin reads the manifest from the audio thread, and a half-written file
+    # (or a light map update during a slice drag) would make pads vanish for a moment
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text("\n".join(lines) + ("\n" if lines else ""))
+    os.replace(temporary, path)
 
 
 def import_sample(source, state_dir):
@@ -157,9 +162,14 @@ def chop_regions(frames, count=SAMPLER_PADS):
 class PadDrag(Drag):
     """A pad control drag: the value changes live, the manifest is written when the finger lifts."""
 
-    def __init__(self, pos, get, set_, lo, hi, px, unit, done, snap=None):
+    def __init__(self, pos, get, set_, lo, hi, px, unit, done, snap=None, live=None):
         super().__init__(pos, get, set_, lo, hi, px, unit)
-        self.done, self.snap = done, snap
+        self.done, self.snap, self.live = done, snap, live
+
+    def move(self, pos):
+        super().move(pos)
+        if self.dragging and self.live:
+            self.live()  # the map follows the finger, not only the release
 
     def release(self, pos):
         super().release(pos)
@@ -177,6 +187,7 @@ class SliceDrag(Gesture):
 
     def move(self, pos):
         self.editor.set_slice(self.edge, self.rect, pos)
+        self.editor.save_live()
 
     def release(self, pos):
         self.editor.save_reload()
@@ -229,6 +240,19 @@ class WaveScroll(Gesture):
         self.editor.pinch_last = None
 
 
+class PadHold(Gesture):
+    """A pad in the editor: pressing selects it and starts its note, releasing stops it - the way PLAY-12's
+    pads work, so GATE and LOOP are heard while the finger is down."""
+
+    def __init__(self, editor, index):
+        self.stop = editor.start_pad(index)
+
+    def release(self, pos):
+        if self.stop:
+            self.stop()
+            self.stop = None
+
+
 class RangeDrag(Gesture):
     """The white bar between the pad's handles: sideways moves the whole slice."""
 
@@ -245,6 +269,7 @@ class RangeDrag(Gesture):
         if abs(dx) > 3:
             self.moved = True
             self.editor.move_range(self.rect, dx, self.start0, self.end0)
+            self.editor.save_live()
 
     def release(self, pos):
         if self.moved:
@@ -281,6 +306,7 @@ class SamplerEditor:
         self._load_lock = threading.Lock()
         self.reloads = 0  # bumped after each map write so the plugin rereads it even when the slot is unchanged
         self.playhead = None  # (pad, 0..1 through its slice) of the newest voice, from the plugin's outputs
+        self._live_at = 0.0  # when the map was last written during a drag
         self.MESSAGE_SECONDS = 3.0
         self.view_start = 0
         self.view_end = 0
@@ -413,20 +439,32 @@ class SamplerEditor:
             return
         self._apply_wave(token, name, *result)
 
+    def save_live(self):
+        """Write the map while a finger is dragging, at most every 50 ms, so a held loop follows the edit."""
+        now = time.monotonic()
+        if now - self._live_at >= 0.05:
+            self._live_at = now
+            self.save_reload()
+
     def save_map(self):
-        """Write the pad map; the plugin ignores colors, so a color change needs no sample reload."""
+        """Write the pad map."""
         if self.manifest is not None:
             write_manifest(self.manifest, self.current, self.pads, self.mono)
 
-    def save_reload(self):
+    def save_reload(self, full=False):
+        """Write the map and tell the plugin to read it: `full` when the samples changed (reread the WAVs),
+        otherwise a light map update that keeps playing voices alive and follows slice edits at once."""
         self.save_map()
         if not self.plugin:
             return
-        parameter = next((p for p in self.plugin.params if p.name == "Slot"), None)
-        if parameter:
-            self.panel.set_param(self.plugin, parameter.index, float(self.slot), source="sampler")
-        bump = next((p for p in self.plugin.params if p.name == "Reload"), None)
-        if bump:  # the slot number is the same, so make the plugin see a parameter change and reread the map
+        bump = next((p for p in self.plugin.params if p.name == ("Load" if full else "Reload")), None)
+        if bump is None and full:  # an older plugin: setting the slot again was how it reloaded
+            bump = next((p for p in self.plugin.params if p.name == "Slot"), None)
+        if bump is None:
+            return
+        if bump.name == "Slot":
+            self.panel.set_param(self.plugin, bump.index, float(self.slot), source="sampler")
+        else:
             self.reloads += 1
             self.panel.set_param(self.plugin, bump.index, float(self.reloads % 1000000), source="sampler")
 
@@ -444,7 +482,7 @@ class SamplerEditor:
             self.load_wave(name)  # the cache makes this quick; in the app the peaks are built off the UI thread
             self.pads[self.pad] = self.new_pad(0, frames, SAMPLER_NOTE_BASE + self.pad)
             self.say(f"loaded {name}")
-            self.save_reload()
+            self.save_reload(full=True)
         except Exception as error:
             self.say(str(error), error=True)
 
@@ -459,7 +497,7 @@ class SamplerEditor:
             self.pads[index] = self.new_pad(start, end, SAMPLER_NOTE_BASE + index)
         self.pad, self.region = 0, 0
         self.say(f"chopped into {len(regions)}")
-        self.save_reload()
+        self.save_reload(full=True)
 
     def clear(self):
         self.copy_src = None
@@ -481,11 +519,12 @@ class SamplerEditor:
         start, end = regions[max(0, min(self.region, len(regions) - 1))]
         self.pads[self.pad] = self.new_pad(start, end, SAMPLER_NOTE_BASE + self.pad)
         self.say(f"pad {self.pad + 1} = {start / self.rate:.2f}s")
-        self.save_reload()
+        self.save_reload(full=True)
 
     def new_pad(self, start, end, root):
         return {"file": self.current, "start": int(start), "end": int(end), "root": int(root),
-                "gain": 1.0, "pan": 0.0, "pitch": 0.0, "loop": 0, "reverse": 0, "gate": 0, "group": 0}
+                "gain": 1.0, "pan": 0.0, "pitch": 0.0, "loop": 0, "reverse": 0, "gate": 0, "group": 0,
+                "stretch": 0}
 
     def copy_pad(self):
         """Arm a copy: the next pad tapped gets this slice and its settings. The target keeps its own note as
@@ -577,7 +616,7 @@ class SamplerEditor:
         self.current, self.pads, self.mono = current, pads, mono
         self.pad, self.region = 0, 0
         self.presets_open = False
-        self.save_reload()  # write this slot's map and make the plugin read it
+        self.save_reload(full=True)  # the preset's samples may be new
         self.load()  # refresh the waveform and the pads from what was just written
         self.say(f"loaded preset {folder.name}")
 
@@ -609,9 +648,20 @@ class SamplerEditor:
                 if start == pad["start"] and end == pad["end"]:
                     self.region = number
                     break
-        preview = getattr(self.panel, "preview_pad", None)
-        if preview:  # audition it: in fullscreen HOST-4 PLAY-12's pads are not on screen
-            preview(self.plugin, index)
+
+    def start_pad(self, index):
+        """Select a pad and hold its note (the pad gesture stops it on release, so GATE/LOOP behave as in
+        PLAY-12). Returns the note-off callable, or None when there is nothing to send through."""
+        self.select_pad(index)
+        preview = getattr(self.panel, "preview_start", None)
+        return preview(self.plugin, index) if preview and self.plugin else None
+
+    def stop_all(self):
+        """Stop every sampler voice that is still sounding."""
+        stop = getattr(self.panel, "stop_pads", None)
+        if stop and self.plugin:
+            stop(self.plugin)
+            self.say("stopped")
 
     def frame_at(self, rect, pos):
         if not self.frames:
@@ -835,6 +885,8 @@ class SamplerEditor:
         zoom_in = QRectF(rect.right() - 34 * s, rect.top() + 6 * s, 28 * s, 24 * s)
         zoom_out = QRectF(zoom_in.left() - 32 * s, zoom_in.top(), 28 * s, 24 * s)
         fit = QRectF(zoom_out.left() - 46 * s, zoom_in.top(), 42 * s, 24 * s)
+        stop = QRectF(fit.left() - 58 * s, zoom_in.top(), 52 * s, 24 * s)
+        self.panel.button(p, stop, "STOP", self.stop_all, color=WARN)
         self.panel.button(p, zoom_in, "+", lambda: self.zoom(1.6))
         self.panel.button(p, zoom_out, "−", lambda: self.zoom(1 / 1.6))
         self.panel.button(p, fit, "FIT", self.fit)
@@ -879,7 +931,7 @@ class SamplerEditor:
                 badge = QRectF(cell.right() - 28 * s, cell.top() + 3 * s, 24 * s, 14 * s)
                 self.panel.box(p, badge, QColor("#facc15"), None, radius=3)
                 self.panel.text(p, badge, f"G{group}", BG, 9, bold=True)
-            self.panel.on_press(cell, lambda index=index: self.select_pad(index))
+            self.panel.region(cell, lambda pos, index=index: PadHold(self, index))
 
     def draw_presets(self, p, r):
         """The preset list: tap one to load it, hold its ✕ to delete it, SAVE writes the current pads."""
@@ -930,10 +982,13 @@ class SamplerEditor:
         # a compact row that stays reachable even with no pad chosen: loading a preset brings its pads
         row_h = min(28 * s, max(0.0, rect.height() - 140 * s))
         if row_h >= 16 * s:
-            group, presets = split(QRectF(rect.left(), rect.bottom() - row_h, rect.width(), row_h), [0, 0], 6 * s)
+            group, stretch, presets = split(QRectF(rect.left(), rect.bottom() - row_h, rect.width(), row_h),
+                                            [0, 0, 0], 5 * s)
             number = int(pad.get("group", 0)) if pad else 0
             self.panel.button(p, group, f"GRP {number or '–'}", self.cycle_group, on=bool(number),
                               color="#facc15")
+            self.panel.button(p, stretch, "STRETCH", self.toggle_stretch,
+                              on=bool(pad and pad.get("stretch")), color="#4ade80")
             self.panel.button(p, presets, "PRESET", self.open_presets)
             rect = QRectF(rect.left(), rect.top(), rect.width(), rect.height() - row_h - 6 * s)
         if not pad:
@@ -973,6 +1028,16 @@ class SamplerEditor:
         self.say(f"group {pad['group']}" if pad["group"] else "group off")
         self.save_reload()  # the plugin has to see the new group
 
+    def toggle_stretch(self):
+        """Pitch without changing the slice's length (a granular shift) instead of resampling."""
+        pad = self.pads[self.pad]
+        if not pad:
+            self.say("tap a pad first", error=True)
+            return
+        pad["stretch"] = 0 if pad.get("stretch", 0) else 1
+        self.say("stretch: pitch, same length" if pad["stretch"] else "resample: pitch changes the length")
+        self.save_reload()
+
     def snap_pitch(self):
         pad = self.pads[self.pad]
         if pad:
@@ -985,7 +1050,8 @@ class SamplerEditor:
         self.panel.box(p, rect, PANEL, BORDER, radius=8)
         self.panel.text(p, rect.adjusted(0, 3 * s, 0, 0), label, DIM, 10, Qt.AlignHCenter | Qt.AlignTop)
         self.panel.text(p, rect.adjusted(0, 16 * s, 0, 0), f"{value:.2f}", TEXT, 15, bold=True)
-        self.panel.region(rect, lambda pos: PadDrag(pos, get, set_, lo, hi, px, unit, self.save_reload, snap))
+        self.panel.region(rect, lambda pos: PadDrag(pos, get, set_, lo, hi, px, unit, self.save_reload, snap,
+                                                    self.save_live))
 
     def toggle_mono(self):
         self.mono = not self.mono

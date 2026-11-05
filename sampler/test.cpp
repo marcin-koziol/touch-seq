@@ -67,6 +67,12 @@ int main() {
     groups << "pad 3 tone.wav 0 24000 39 1.0 0.0 0 0 0 0 2\n";
     groups << "pad 4 tone.wav 0 24000 40 1.0 0.0 0 0 0 0 3\n";  // group 3
     groups.close();
+    std::ofstream stretch(root / "sampler" / "sampler-11.txt");
+    stretch << "mono 0\n";
+    stretch << "pad 0 tone.wav 0 48000 36 1.0 0.0 0 0 0 0 0 0\n";
+    stretch << "pad 1 tone.wav 0 48000 37 1.0 0.0 12 0 0 0 0 1\n";   // +12, stretch: same length
+    stretch << "pad 2 tone.wav 0 48000 38 1.0 0.0 12 0 0 0 0 0\n";   // +12, resample: half the length
+    stretch.close();
 
     setenv("TOUCHSEQ_SAMPLER_DIR", root.c_str(), 1);
     SamplerCore core;
@@ -139,6 +145,24 @@ int main() {
     core.allNotesOff();
     std::puts("mono and poly OK");
 
+    // a light map update while a voice plays: it follows the new slice without a gap
+    core.setSlot(9);
+    core.noteOn(36, 127);
+    core.process(left.data(), right.data(), 1000);
+    std::ofstream edited(root / "sampler" / "sampler-9.txt");
+    edited << "mono 0\n";
+    edited << "pad 0 tone.wav 0 12000 36 1.0 0.0 0 0 0 0\n";
+    edited << "pad 1 tone.wav 0 24000 37 1.0 0.0 0 1 0 0\n";
+    edited.close();
+    core.applyMap();
+    core.process(left.data(), right.data(), 1);  // the audio thread adopts the pending map
+    core.playhead(head, playing);
+    assert(playing == 0 && head > 0.04f);  // the shorter slice, not the old one (1000/48000)
+    core.process(left.data(), right.data(), 1000);
+    assert(core.activeVoices() == 1);
+    core.allNotesOff();
+    std::puts("map update OK");
+
     core.setSlot(10);  // playback groups: one voice per non-zero group
     core.noteOn(36, 127);
     core.noteOn(37, 127);
@@ -153,10 +177,23 @@ int main() {
     core.allNotesOff();
     std::puts("playback groups OK");
 
+    core.setSlot(11);  // stretch: PITCH +12 without shortening the slice
+    core.noteOn(37, 127);
+    core.process(left.data(), right.data(), 24000);
+    std::printf("stretch: RMS %.4f, voices %d\n", rms_range(left, 0, 24000), core.activeVoices());
+    assert(core.activeVoices() == 1 && rms_range(left, 0, 24000) > 0.01);
+    core.process(left.data(), right.data(), 24000);
+    assert(core.activeVoices() == 0);  // the full 48000-frame slice
+    core.noteOn(38, 127);  // the same +12 without stretch: twice as fast, half the length
+    core.process(left.data(), right.data(), 24000);
+    assert(core.activeVoices() == 0);
+    core.allNotesOff();
+    std::puts("stretch OK");
+
     core.setSlot(8);  // no manifest for this slot
     core.noteOn(36, 127);
     core.process(left.data(), right.data(), 1000);
-    assert(rms(left) < 1e-6);
+    assert(rms_range(left, 0, 1000) < 1e-6);
     std::puts("missing slot: silent");
 
     fs::remove_all(root);

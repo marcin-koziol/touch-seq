@@ -17,7 +17,8 @@
 #include "dr_wav.h"
 
 struct SamplerPad {
-    std::vector<float> data;  // mono, the whole file
+    std::shared_ptr<const std::vector<float>> data;  // mono, the whole file (shared by light map updates)
+    std::string file;  // its name, so a map update can reuse the samples it already has
     uint32_t fileRate = 48000;
     uint32_t start = 0;
     uint32_t end = 0;
@@ -29,8 +30,9 @@ struct SamplerPad {
     bool loop = false;
     bool reverse = false;
     bool gate = false;  // play only while the note is held; one-shot plays to the end
+    bool stretch = false;  // keep the slice's length when PITCH changes (granular pitch shift)
 
-    bool loaded() const { return end > start && end <= data.size(); }
+    bool loaded() const { return data && end > start && end <= data->size(); }
 };
 
 struct SamplerBank {
@@ -46,6 +48,7 @@ public:
     void prepare(double sampleRate);
     void setSlot(int slot);
     void reload() { load(); }
+    void applyMap();  // a light reload: the pad map changed, the samples are reused
 
     void noteOn(int note, int velocity);
     void noteOff(int note);
@@ -60,6 +63,8 @@ private:
     struct Voice {
         std::shared_ptr<const SamplerBank> bank;
         int pad = -1;
+        int note = 36;              // the note that started it, to recompute the step on a map update
+        float velocityGain = 1.0f;
         double pos = 0.0;
         double step = 1.0;
         float gain = 1.0f;
@@ -71,16 +76,27 @@ private:
         bool releasing = false;
         bool active = false;
         uint64_t age = 0;
+        bool stretch = false;        // granular pitch shift: PITCH does not change the slice's length
+        double baseStep = 1.0;       // the timeline (note transposition), without the pad's PITCH
+        double grainStep = 1.0;      // how fast a grain reads (the pitch)
+        double grainPos[2] = {0.0, 0.0};
+        double grainAge[2] = {0.0, 0.0};
+        double grainLen = 1.0;
     };
 
     void load();
+    void adopt(Voice& voice, const std::shared_ptr<const SamplerBank>& next);  // point a playing voice at a new map
+    void setVoiceStep(Voice& voice, const SamplerPad& pad);
+    void resetGrains(Voice& voice);
 
     double rate = 48000.0;
     int slot = 0;
     std::shared_ptr<const SamplerBank> bank;
+    std::shared_ptr<const SamplerBank> pending;  // a light map update, adopted by the audio thread
     std::array<Voice, 16> voices;
     uint64_t nextAge = 0;
     float releaseStep = 0.01f;  // one sample's share of the 5 ms note-off fade
+    std::array<float, 1025> window{};  // Hann, for the two overlapping grains
 };
 
 #endif // SAMPLER_CORE_HPP_INCLUDED

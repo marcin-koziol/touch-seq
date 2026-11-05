@@ -9,9 +9,33 @@
 #include <fstream>
 #include <sstream>
 
+// One WAV file as mono float samples; nullptr when it cannot be read. Shared by a full load and a light map
+// update, which reuses the data it already has.
+static std::shared_ptr<const std::vector<float>> readSample(const std::string& path, uint32_t& fileRate) {
+    drwav wav;
+    if (!drwav_init_file(&wav, path.c_str(), nullptr))
+        return nullptr;
+    const drwav_uint64 frames = wav.totalPCMFrameCount;
+    const uint32_t channels = std::max<uint32_t>(1u, wav.channels);
+    std::vector<float> interleaved(size_t(frames) * channels);
+    drwav_read_pcm_frames_f32(&wav, frames, interleaved.data());
+    auto samples = std::make_shared<std::vector<float>>(size_t(frames));
+    for (size_t i = 0; i < size_t(frames); ++i) {
+        float sum = 0.0f;
+        for (uint32_t c = 0; c < channels; ++c)
+            sum += interleaved[i * channels + c];
+        (*samples)[i] = sum / float(channels);
+    }
+    fileRate = wav.sampleRate;
+    drwav_uninit(&wav);
+    return samples;
+}
+
 void SamplerCore::prepare(double sampleRate) {
     rate = sampleRate > 1000.0 ? sampleRate : 48000.0;
     releaseStep = 1.0f / (0.005f * float(rate));  // 5 ms fade on note-off
+    for (int i = 0; i <= 1024; ++i)
+        window[i] = 0.5f * (1.0f - std::cos(2.0 * 3.141592653589793 * i / 1024.0));
     voices = {};
 }
 
@@ -55,34 +79,25 @@ void SamplerCore::load() {
         uint64_t start = 0, end = 0;
         int rootNote = 36;
         float gain = 1.0f, pan = 0.0f, pitch = 0.0f;
-        int loop = 0, reverse = 0, gate = 0, group = 0;
+        int loop = 0, reverse = 0, gate = 0, group = 0, stretch = 0;
         if (!(in >> index >> name >> start >> end >> rootNote >> gain >> pan >> pitch >> loop >> reverse))
             continue;
-        in >> gate;   // older manifests have no gate field: one-shot
-        in >> group;  // and no group field: no playback group
+        in >> gate;     // older manifests have no gate field: one-shot
+        in >> group;    // and no group field: no playback group
+        in >> stretch;  // and no stretch field: resample (the pitch changes the length)
         if (index < 0 || index >= kPads)
             continue;
 
-        drwav wav;
-        if (!drwav_init_file(&wav, (dir + "/sampler/" + name).c_str(), nullptr))
+        uint32_t fileRate = 48000;
+        auto samples = readSample(dir + "/sampler/" + name, fileRate);
+        if (!samples)
             continue;
-
-        const drwav_uint64 frames = wav.totalPCMFrameCount;
-        const uint32_t channels = std::max<uint32_t>(1u, wav.channels);
-        std::vector<float> interleaved(size_t(frames) * channels);
-        drwav_read_pcm_frames_f32(&wav, frames, interleaved.data());
+        const uint64_t frames = samples->size();
 
         SamplerPad& pad = next->pads[index];
-        pad.fileRate = wav.sampleRate;
-        pad.data.resize(size_t(frames));
-        for (size_t i = 0; i < size_t(frames); ++i) {
-            float sum = 0.0f;
-            for (uint32_t c = 0; c < channels; ++c)
-                sum += interleaved[i * channels + c];
-            pad.data[i] = sum / float(channels);
-        }
-        drwav_uninit(&wav);
-
+        pad.file = name;
+        pad.fileRate = fileRate;
+        pad.data = samples;
         pad.start = uint32_t(std::min<uint64_t>(start, frames));
         pad.end = uint32_t(std::min<uint64_t>(end, frames));
         if (pad.end <= pad.start)
@@ -95,9 +110,120 @@ void SamplerCore::load() {
         pad.loop = loop != 0;
         pad.reverse = reverse != 0;
         pad.gate = gate != 0;
+        pad.stretch = stretch != 0;
     }
 
     std::atomic_store(&bank, std::shared_ptr<const SamplerBank>(next));
+}
+
+void SamplerCore::setVoiceStep(Voice& voice, const SamplerPad& pad) {
+    const double noteRatio = std::pow(2.0, double(voice.note - pad.root) / 12.0);
+    const double base = (double(pad.fileRate) / rate) * noteRatio;
+    voice.stretch = pad.stretch;
+    voice.baseStep = pad.reverse ? -base : base;
+    voice.grainStep = voice.baseStep * std::pow(2.0, double(pad.pitch) / 12.0);
+    voice.step = voice.grainStep;  // without stretch the grain step is the playback step
+    voice.grainLen = std::max(64.0, 0.05 * rate);
+}
+
+void SamplerCore::resetGrains(Voice& voice) {
+    voice.grainPos[0] = voice.grainPos[1] = voice.pos;
+    voice.grainAge[0] = 0.0;
+    voice.grainAge[1] = voice.grainLen * 0.5;
+}
+
+void SamplerCore::adopt(Voice& voice, const std::shared_ptr<const SamplerBank>& next) {
+    const SamplerPad& pad = next->pads[voice.pad];
+    if (!pad.loaded()) {
+        voice.active = false;
+        return;
+    }
+    voice.bank = next;
+    setVoiceStep(voice, pad);
+    voice.gain = pad.gain * voice.velocityGain;
+    const float angle = (pad.pan + 1.0f) * 0.78539816339f;  // (pan + 1) * pi/4
+    voice.panL = std::cos(angle);
+    voice.panR = std::sin(angle);
+    voice.loop = pad.loop;
+    voice.gate = pad.gate;
+    if (voice.pos < double(pad.start))
+        voice.pos = double(pad.start);
+    if (voice.pos >= double(pad.end))
+        voice.pos = pad.loop ? double(pad.start) : double(pad.end) - 1.0;
+    if (voice.stretch)
+        resetGrains(voice);
+}
+
+void SamplerCore::applyMap() {
+    const char* root = std::getenv("TOUCHSEQ_SAMPLER_DIR");
+    auto current = std::atomic_load(&bank);
+    if (root == nullptr || root[0] == '\0') {
+        std::atomic_store(&bank, std::shared_ptr<const SamplerBank>());
+        std::atomic_store(&pending, std::shared_ptr<const SamplerBank>());
+        return;
+    }
+    const std::string dir = root;
+    const std::string manifest = dir + "/sampler/sampler-" + std::to_string(slot) + ".txt";
+    std::ifstream file(manifest);
+    if (!file) {
+        std::atomic_store(&bank, std::shared_ptr<const SamplerBank>());
+        std::atomic_store(&pending, std::shared_ptr<const SamplerBank>());
+        return;
+    }
+    auto next = std::make_shared<SamplerBank>();
+    std::string line;
+    while (std::getline(file, line)) {
+        std::istringstream in(line);
+        std::string tag;
+        in >> tag;
+        if (tag == "mono") {
+            int value = 0;
+            if (in >> value)
+                next->mono = value != 0;
+            continue;
+        }
+        if (tag != "pad")
+            continue;
+        int index = -1;
+        std::string name;
+        uint64_t start = 0, end = 0;
+        int rootNote = 36;
+        float gain = 1.0f, pan = 0.0f, pitch = 0.0f;
+        int loop = 0, reverse = 0, gate = 0, group = 0, stretch = 0;
+        if (!(in >> index >> name >> start >> end >> rootNote >> gain >> pan >> pitch >> loop >> reverse))
+            continue;
+        in >> gate;
+        in >> group;
+        in >> stretch;
+        if (index < 0 || index >= kPads)
+            continue;
+        SamplerPad& pad = next->pads[index];
+        pad.file = name;
+        pad.root = rootNote;
+        pad.gain = gain;
+        pad.pan = std::max(-1.0f, std::min(1.0f, pan));
+        pad.pitch = pitch;
+        pad.group = group;
+        pad.loop = loop != 0;
+        pad.reverse = reverse != 0;
+        pad.gate = gate != 0;
+        pad.stretch = stretch != 0;
+        if (current && current->pads[index].file == name && current->pads[index].data) {
+            pad.data = current->pads[index].data;  // the same sample: keep it, no gap
+            pad.fileRate = current->pads[index].fileRate;
+        } else {
+            uint32_t fileRate = 48000;
+            pad.data = readSample(dir + "/sampler/" + name, fileRate);
+            pad.fileRate = fileRate;
+        }
+        const uint64_t frames = pad.data ? pad.data->size() : 0;
+        pad.start = uint32_t(std::min<uint64_t>(start, frames));
+        pad.end = uint32_t(std::min<uint64_t>(end, frames));
+        if (pad.end <= pad.start)
+            pad.end = uint32_t(frames);
+    }
+    std::atomic_store(&bank, std::shared_ptr<const SamplerBank>(next));
+    std::atomic_store(&pending, std::shared_ptr<const SamplerBank>(next));  // the audio thread points playing voices at it
 }
 
 void SamplerCore::noteOn(int note, int velocity) {
@@ -140,12 +266,13 @@ void SamplerCore::noteOn(int note, int velocity) {
 
     voice->bank = current;
     voice->pad = index;
+    voice->note = note;
     voice->pos = pad.reverse ? double(pad.end) - 1.0 : double(pad.start);
-    voice->step = (double(pad.fileRate) / rate)
-                  * std::pow(2.0, (double(note - pad.root) + pad.pitch) / 12.0);
-    if (pad.reverse)
-        voice->step = -voice->step;
+    setVoiceStep(*voice, pad);
+    if (voice->stretch)
+        resetGrains(*voice);
     const float velocityGain = 0.2f + 0.8f * std::max(0.0f, std::min(1.0f, velocity / 127.0f));
+    voice->velocityGain = velocityGain;
     voice->gain = pad.gain * velocityGain;
     const float angle = (pad.pan + 1.0f) * 0.78539816339f;  // (pan + 1) * pi/4
     voice->panL = std::cos(angle);
@@ -199,6 +326,13 @@ void SamplerCore::playhead(float& position, int& pad) const {
 }
 
 void SamplerCore::process(float* left, float* right, uint32_t frames) {
+    auto pendingMap = std::atomic_exchange(&pending, std::shared_ptr<const SamplerBank>());
+    if (pendingMap) {  // a light map update: playing voices follow it without a gap
+        for (auto& voice : voices) {
+            if (voice.active)
+                adopt(voice, pendingMap);
+        }
+    }
     for (uint32_t n = 0; n < frames; ++n) {
         float outL = 0.0f, outR = 0.0f;
         for (auto& voice : voices) {
@@ -218,16 +352,50 @@ void SamplerCore::process(float* left, float* right, uint32_t frames) {
                 continue;
             }
 
-            const int index = int(voice.pos);
-            if (index < 0 || index >= int(pad.data.size())) {
-                voice.active = false;
-                continue;
+            const std::vector<float>& data = *pad.data;
+            const int size = int(data.size());
+            float sample = 0.0f;
+            if (voice.stretch) {  // two overlapping grains: the pitch moves, the timeline keeps its length
+                for (int g = 0; g < 2; ++g) {
+                    const double age = voice.grainAge[g];
+                    if (age < voice.grainLen) {
+                        double read = voice.grainPos[g];
+                        if (voice.loop) {
+                            const double start = pad.start, end = pad.end, span = end - start;
+                            if (span > 1.0) {
+                                read = start + std::fmod(read - start, span);
+                                if (read < start)
+                                    read += span;
+                            } else {
+                                read = start;
+                            }
+                        }
+                        const int idx = int(read);
+                        if (idx >= 0 && idx + 1 < size) {
+                            const float s = data[idx] + (data[idx + 1] - data[idx]) * float(read - idx);
+                            const float w = window[int((age / voice.grainLen) * 1024.0) & 1023];
+                            sample += s * w;
+                        }
+                        voice.grainPos[g] += voice.grainStep;
+                        voice.grainAge[g] = age + 1.0;
+                    }
+                    if (voice.grainAge[g] >= voice.grainLen) {
+                        voice.grainAge[g] = 0.0;
+                        voice.grainPos[g] = voice.pos;
+                    }
+                }
+                voice.pos += voice.baseStep;
+            } else {
+                const int index = int(voice.pos);
+                if (index < 0 || index >= size) {
+                    voice.active = false;
+                    continue;
+                }
+                sample = data[index];
+                if (index + 1 < size)
+                    sample += (data[index + 1] - sample) * float(voice.pos - index);
+                voice.pos += voice.step;
             }
-
-            float sample = pad.data[index];
-            if (index + 1 < int(pad.data.size()))
-                sample += (pad.data[index + 1] - sample) * float(voice.pos - index);
-            voice.pos += voice.step;
 
             if (voice.loop) {
                 const double start = pad.start;

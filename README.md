@@ -68,8 +68,11 @@ cursor, and change the arrangement **on the bar** instead of on the downbeat of 
   the target pad's note as its root, so it sounds identical until you change it). The pads use the same fixed
   colors as the drum voices. Each pad has Gain (up to 4×), Pan, Pitch, Loop, Reverse and **Gate** (play while
   held vs one-shot) and a **GRP** playback group: pads in the same group cut each other, like MONO for that
-  group. **MONO** cuts the previous pad when a new
-  one starts. **PITCH** moves at 12 px per semitone and snaps to a whole semitone on release. **PRESETS**
+  group. **MONO** cuts the previous pad when a new one starts. **PITCH** moves at 12 px per semitone and snaps
+  to a whole semitone on release; **STRETCH** shifts the pitch without changing the slice's length (a granular
+  shift, not resampling). **STOP** silences every voice. The editor's pads play while held, like PLAY-12's, so
+  GATE and LOOP are heard; dragging the slice handles or the **↔** bar updates a held loop as you drag, with no
+  gap. **PRESETS**
   keeps the pads and their samples on the machine (`~/.local/share/touch-seq/sampler-presets/`), so deleting
   a track — or the whole project — does not lose them; SAVE asks for a name on an on-screen keyboard, tap a
   preset to load it, hold its ✕ to delete it. A long sample is read in the background, with a spinner over
@@ -239,7 +242,9 @@ the first free name (*Touch-Seq 2*, …) and says so in HOST-4's status line: bo
   waveform pans, zooms (buttons, pinch, **FIT**) and its white handles resize a pad's slice while the white
   **↔** bar moves the whole slice. Each pad has Gain (up to 4×), Pan, Pitch, Loop, Reverse and **Gate** and a **GRP**
   playback group: pads in the same group cut each other; the pads take the drum voices' fixed colors.
-  **MONO** cuts the previous pad when a new one starts. **PRESETS** saves the pads and the
+  **MONO** cuts the previous pad when a new one starts; **STRETCH** shifts the pitch without changing the
+  length, and **STOP** silences every voice. The editor's pads play while held, so GATE/LOOP work as in
+  PLAY-12, and slice edits are heard on a held loop as it is dragged. **PRESETS** saves the pads and the
   samples they use on the machine (not in the project's plugin folder): a track or project deleted later
   leaves the preset intact, and one preset can be loaded into another project; SAVE asks for the name on the
   on-screen keyboard. A long sample is read in the background (the waveform shows a spinner meanwhile), and a
