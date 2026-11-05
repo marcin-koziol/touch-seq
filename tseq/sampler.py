@@ -10,11 +10,11 @@ import time
 from pathlib import Path
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QPen
+from PySide6.QtGui import QColor, QPen, QPolygonF
 from PySide6.QtWidgets import QFileDialog
 
-from .constants import (BG, BORDER, DIM, DRUM_COLORS, PANEL, SAMPLER_GROUPS, SAMPLER_NOTE_BASE, SAMPLER_PADS,
-                        TEXT, WARN)
+from .constants import (BG, BORDER, DIM, DRUM_COLORS, PANEL, PLAY, SAMPLER_GROUPS, SAMPLER_NOTE_BASE,
+                        SAMPLER_PADS, TEXT, WARN)
 from .gestures import Drag, Gesture, Hold, ScrollOrTap
 from .ui import Keyboard, split
 from .wav import peaks_range, read_wav, table_peaks
@@ -280,6 +280,7 @@ class SamplerEditor:
         self._loaded = None
         self._load_lock = threading.Lock()
         self.reloads = 0  # bumped after each map write so the plugin rereads it even when the slot is unchanged
+        self.playhead = None  # (pad, 0..1 through its slice) of the newest voice, from the plugin's outputs
         self.MESSAGE_SECONDS = 3.0
         self.view_start = 0
         self.view_end = 0
@@ -378,8 +379,27 @@ class SamplerEditor:
         self.peak_cache, self.peak_table = {}, table
         self.loading = False
 
+    def read_playhead(self):
+        """The newest voice's position, from the plugin's output parameters (the sampler has no UI of its own,
+        so this is how the editor learns where a playing pad is)."""
+        host = getattr(self.panel, "host", None)
+        if not self.plugin or host is None or not hasattr(host, "output_params"):
+            self.playhead = None
+            return
+        if self.plugin not in getattr(self.panel, "loaded", {}).values():
+            self.playhead = None
+            return
+        indices = host.output_params(self.plugin)
+        if len(indices) < 2:
+            self.playhead = None
+            return
+        position = host.value(self.plugin, indices[0])
+        index = int(round(host.value(self.plugin, indices[1])))
+        self.playhead = (index, max(0.0, min(1.0, position))) if index >= 0 else None
+
     def poll(self):
         """Apply a background read on the UI thread (called from the host's tick)."""
+        self.read_playhead()
         with self._load_lock:
             pending, self._loaded = self._loaded, None
         if not pending:
@@ -796,6 +816,21 @@ class SamplerEditor:
                     self.panel.box(p, bar, QColor("#ffffff"), None, radius=5)
                     self.panel.text(p, bar, "↔", "#0e1116", 10, bold=True)
                     self.panel.region(bar, lambda pos: RangeDrag(self, rect, pos))
+
+        if self.playhead:  # the newest voice on this file: a green line through the waveform
+            index, fraction = self.playhead
+            playing = self.pads[index] if 0 <= index < len(self.pads) else None
+            if playing and playing["file"] == self.current:
+                frame = playing["start"] + fraction * (playing["end"] - playing["start"])
+                if self.view_start <= frame <= self.view_end:
+                    x = x_of(frame)
+                    p.setPen(QPen(QColor(PLAY), 2 * s))
+                    p.drawLine(QPointF(x, rect.top() + 2 * s), QPointF(x, rect.bottom() - 2 * s))
+                    p.setPen(Qt.NoPen)
+                    p.setBrush(QColor(PLAY))
+                    p.drawPolygon(QPolygonF([QPointF(x - 5 * s, rect.top() + 2 * s),
+                                             QPointF(x + 5 * s, rect.top() + 2 * s),
+                                             QPointF(x, rect.top() + 10 * s)]))
 
         zoom_in = QRectF(rect.right() - 34 * s, rect.top() + 6 * s, 28 * s, 24 * s)
         zoom_out = QRectF(zoom_in.left() - 32 * s, zoom_in.top(), 28 * s, 24 * s)

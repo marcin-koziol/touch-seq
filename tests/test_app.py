@@ -2636,6 +2636,19 @@ ed2.loading = True  # what the waveform area shows meanwhile
 img.fill(0); q = QPainter(img); ed2.draw(q, QRectF(0, 0, 700, 400), fake_plugin, 5, manifest); q.end()
 img.save(str(OUT / "sampler_spinner.png"))
 ed2.loading = False
+# the plugin's output parameters are the playhead: the newest voice's pad and position within its slice
+class _PlayHost:
+    position, index = 0.4, 6
+    def output_params(self, plugin): return [2, 3]
+    def value(self, plugin, index): return self.position if index == 2 else self.index
+panel.host, panel.loaded = _PlayHost(), {("t", 0): fake_plugin}
+editor.plugin = fake_plugin
+editor.read_playhead()
+assert editor.playhead == (6, 0.4), editor.playhead
+panel.host.index = -1
+editor.read_playhead()
+assert editor.playhead is None, "nothing playing: no playhead"
+del panel.host, panel.loaded
 # the on-screen keyboard: shift, space, backspace, placeholder, cancel
 typed = []
 kb = ts.Keyboard("", "Name", typed.append, placeholder="Project")

@@ -8,7 +8,7 @@ START_NAMESPACE_DISTRHO
 
 class SamplerPlugin : public Plugin {
 public:
-    enum Param { kSlot, kReload, kParamCount };
+    enum Param { kSlot, kReload, kPlayhead, kPlayPad, kParamCount };
 
     SamplerPlugin() : Plugin(kParamCount, 0, 0) {
         core.prepare(getSampleRate());
@@ -39,6 +39,17 @@ protected:
             p.symbol = "reload";
             p.hints = kParameterIsInteger;
             p.ranges = ParameterRanges(0.0f, 0.0f, 1000000.0f);
+        } else if (index == kPlayhead) {
+            // outputs: the editor draws the playhead over the waveform from these
+            p.name = "Playhead";
+            p.symbol = "playhead";
+            p.hints = kParameterIsOutput;
+            p.ranges = ParameterRanges(0.0f, 0.0f, 1.0f);
+        } else if (index == kPlayPad) {
+            p.name = "Playing Pad";
+            p.symbol = "playing_pad";
+            p.hints = kParameterIsOutput | kParameterIsInteger;
+            p.ranges = ParameterRanges(-1.0f, -1.0f, 15.0f);
         }
     }
 
@@ -47,6 +58,10 @@ protected:
             return float(slot);
         if (index == kReload)
             return float(reload);
+        if (index == kPlayhead)
+            return playhead;
+        if (index == kPlayPad)
+            return float(playPad);
         return 0.0f;
     }
 
@@ -80,6 +95,7 @@ protected:
         }
         if (pos < frames)
             core.process(outLeft + pos, outRight + pos, frames - pos);
+        core.playhead(playhead, playPad);  // for the editor's playhead, read as output parameters
     }
 
 private:
@@ -106,6 +122,8 @@ private:
     SamplerCore core;
     int slot = 0;
     int reload = 0;  // bumped by the editor to make the plugin reread the pad map
+    float playhead = 0.0f;  // output: the newest voice's position within its slice
+    int playPad = -1;       // output: that voice's pad, or -1 when nothing is playing
 
     DISTRHO_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(SamplerPlugin)
 };

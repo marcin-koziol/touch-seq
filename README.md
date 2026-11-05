@@ -73,7 +73,8 @@ cursor, and change the arrangement **on the bar** instead of on the downbeat of 
   keeps the pads and their samples on the machine (`~/.local/share/touch-seq/sampler-presets/`), so deleting
   a track — or the whole project — does not lose them; SAVE asks for a name on an on-screen keyboard, tap a
   preset to load it, hold its ✕ to delete it. A long sample is read in the background, with a spinner over
-  the waveform, so the panel stays responsive. PLAY-12 shows the sampler's pads
+  the waveform, so the panel stays responsive; while a pad plays, a green **playhead** runs through its slice.
+  PLAY-12 shows the sampler's pads
   (notes 36–51) instead of the keyboard, so a melody track becomes a pad track. On a **drum** track the pads
   play, but only those whose note is one of the 12 kit voices are written into the pattern (the others have
   no voice to sit on); use a melody track to record all 16. Samples and the pad map live
@@ -241,8 +242,9 @@ the first free name (*Touch-Seq 2*, …) and says so in HOST-4's status line: bo
   **MONO** cuts the previous pad when a new one starts. **PRESETS** saves the pads and the
   samples they use on the machine (not in the project's plugin folder): a track or project deleted later
   leaves the preset intact, and one preset can be loaded into another project; SAVE asks for the name on the
-  on-screen keyboard. A long sample is read in the background (the waveform shows a spinner meanwhile). The
-  sampler has **no window of its own**; its editor is HOST-4's parameter area, and PLAY-12 shows its pads
+  on-screen keyboard. A long sample is read in the background (the waveform shows a spinner meanwhile), and a
+  green **playhead** runs through the playing pad's slice. The sampler has **no window of its own**; its editor
+  is HOST-4's parameter area, and PLAY-12 shows its pads
   (notes 36–51) when the selected track's instrument is the sampler
 - **effects buses**: a track's chain can go into a bus instead of straight into the master — **→ MASTER** under
   the chain cycles through the buses, **+ BUS** makes a new one. A bus has its own 3 slots and its own level,
@@ -270,7 +272,7 @@ the first free name (*Touch-Seq 2*, …) and says so in HOST-4's status line: bo
 |---|---|
 | ![Space: the delay and reverb in one, its knobs in HOST-4](docs/screenshots/space.png) | ![Mixer](docs/screenshots/mixer.png) |
 | ![The sampler: Project 6's choir chopped into 16 pads, with playback groups and the drum colors](docs/screenshots/sampler.png) | ![The sampler's presets: the pads and their samples kept outside the project](docs/screenshots/sampler-presets.png) |
-| ![PLAY-12: the sampler's 16 pads in the drum colors](docs/screenshots/sampler-pads.png) | |
+| ![PLAY-12: the sampler's 16 pads in the drum colors](docs/screenshots/sampler-pads.png) | ![The playhead: a green line through the playing pad's slice](docs/screenshots/sampler-playhead.png) |
 | ![The plugin browser on BUILTIN: our own plugins first](docs/screenshots/builtin.png) | |
 | ![Plugin knobs grouped by section: OSC, ENVELOPE, FILTER, DELAY, each in its own box](docs/screenshots/knobs.png) | ![A sequence of parameters as bars: Sideous' 16 LFO steps, bipolar around the middle line](docs/screenshots/steps.png) |
 

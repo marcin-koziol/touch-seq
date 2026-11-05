@@ -180,6 +180,24 @@ int SamplerCore::activeVoices() const {
     return count;
 }
 
+void SamplerCore::playhead(float& position, int& pad) const {
+    const Voice* newest = nullptr;
+    for (const auto& voice : voices) {
+        if (voice.active && (newest == nullptr || voice.age > newest->age))
+            newest = &voice;
+    }
+    if (newest == nullptr || newest->bank == nullptr) {
+        position = 0.0f;
+        pad = -1;
+        return;
+    }
+    const SamplerPad& slice = newest->bank->pads[newest->pad];
+    const double span = double(slice.end) - double(slice.start);
+    position = span > 0.0 ? float((newest->pos - double(slice.start)) / span) : 0.0f;
+    position = std::max(0.0f, std::min(1.0f, position));
+    pad = newest->pad;
+}
+
 void SamplerCore::process(float* left, float* right, uint32_t frames) {
     for (uint32_t n = 0; n < frames; ++n) {
         float outL = 0.0f, outR = 0.0f;

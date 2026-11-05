@@ -79,6 +79,18 @@ int main() {
     std::puts("no note: silent");
 
     core.noteOn(36, 127);
+    core.process(left.data(), right.data(), 1000);
+    float head = -1.0f;
+    int playing = -2;
+    core.playhead(head, playing);
+    assert(playing == 0 && head > 0.0f && head < 1.0f);
+    core.allNotesOff();
+    core.process(left.data(), right.data(), 100);
+    core.playhead(head, playing);
+    assert(playing == -1);
+    std::puts("playhead OK");
+
+    core.noteOn(36, 127);
     assert(core.activeVoices() == 1);
     core.process(left.data(), right.data(), uint32_t(left.size()));
     std::printf("pad 0: RMS %.4f\n", rms(left));

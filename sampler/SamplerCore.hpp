@@ -51,6 +51,8 @@ public:
     void noteOff(int note);
     void allNotesOff();
     int activeVoices() const;
+    // The newest active voice: its position within the pad's slice (0..1) and the pad, or pad -1 when silent.
+    void playhead(float& position, int& pad) const;
 
     void process(float* left, float* right, uint32_t frames);
 
