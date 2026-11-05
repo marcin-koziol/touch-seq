@@ -72,7 +72,8 @@ cursor, and change the arrangement **on the bar** instead of on the downbeat of 
   to a whole semitone on release; **STRETCH** shifts the pitch without changing the slice's length (a granular
   shift, not resampling). **STOP** silences every voice. The editor's pads play while held, like PLAY-12's, so
   GATE and LOOP are heard; dragging the slice handles or the **↔** bar updates a held loop as you drag, with no
-  gap. **PRESETS**
+  gap. **LOCATE** centres the waveform on the selected pad's slice, zoomed so it fills about a third of the
+  view. **PRESETS**
   keeps the pads and their samples on the machine (`~/.local/share/touch-seq/sampler-presets/`), so deleting
   a track — or the whole project — does not lose them; SAVE asks for a name on an on-screen keyboard, tap a
   preset to load it, hold its ✕ to delete it. A long sample is read in the background, with a spinner over
@@ -239,7 +240,8 @@ the first free name (*Touch-Seq 2*, …) and says so in HOST-4's status line: bo
   a tap on the waveform adds a marker, and **TO PAD** puts the selected slice on the selected pad. **COPY**
   and then a tap on another pad copies the slice there (same file and range, the target's own note as root),
   so the two pads can play the same chop at different **PITCH**es. The
-  waveform pans, zooms (buttons, pinch, **FIT**) and its white handles resize a pad's slice while the white
+  waveform pans, zooms (buttons, pinch, **FIT**, and **LOCATE** to centre the selected slice at about a third
+  of the view) and its white handles resize a pad's slice while the white
   **↔** bar moves the whole slice. Each pad has Gain (up to 4×), Pan, Pitch, Loop, Reverse and **Gate** and a **GRP**
   playback group: pads in the same group cut each other; the pads take the drum voices' fixed colors.
   **MONO** cuts the previous pad when a new one starts; **STRETCH** shifts the pitch without changing the

@@ -2618,6 +2618,15 @@ editor.toggle_stretch()
 assert editor.pads[0]["stretch"] == 0
 assert editor.start_pad(0) is None, "a bare panel has no port to preview through"
 editor.stop_all()
+# LOCATE: centre the waveform on the selected pad's slice, about a third of the view
+editor.pad = 0
+old_start, old_end = editor.pads[0]["start"], editor.pads[0]["end"]
+editor.pads[0]["start"], editor.pads[0]["end"] = 1000, 1300
+editor.focus_pad()
+view = editor.view_end - editor.view_start
+assert 2.5 <= view / 300 <= 3.5, view
+assert abs((editor.view_start + editor.view_end) / 2 - 1150) <= 60, (editor.view_start, editor.view_end)
+editor.pads[0]["start"], editor.pads[0]["end"] = old_start, old_end
 # the knobs move in their own units: gain past 1 (0..4) in 0.02 steps, pitch in 0.1 semitones
 gv = []
 gpd = PadDrag(QPointF(0, 0), lambda: 1.0, gv.append, 0.0, 4.0, 1.2, 0.02, lambda: None)

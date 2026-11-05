@@ -679,6 +679,17 @@ class SamplerEditor:
     def fit(self):
         self.set_view(0, self.frames)
 
+    def focus_pad(self):
+        """Centre the waveform on the selected pad's slice, zoomed so the slice is about a third of the view."""
+        pad = self.pads[self.pad]
+        if not pad or not self.frames or pad.get("file") != self.current:
+            self.say("select a pad with a slice first", error=True)
+            return
+        span = max(1, int(pad["end"]) - int(pad["start"]))
+        width = max(self.MIN_VIEW, span * 3)
+        center = (int(pad["start"]) + int(pad["end"])) / 2
+        self.set_view(center - width / 2, center + width / 2)
+
     def zoom(self, factor):
         if not self.frames:
             return
@@ -886,6 +897,8 @@ class SamplerEditor:
         zoom_out = QRectF(zoom_in.left() - 32 * s, zoom_in.top(), 28 * s, 24 * s)
         fit = QRectF(zoom_out.left() - 46 * s, zoom_in.top(), 42 * s, 24 * s)
         stop = QRectF(fit.left() - 58 * s, zoom_in.top(), 52 * s, 24 * s)
+        locate = QRectF(stop.left() - 64 * s, zoom_in.top(), 58 * s, 24 * s)
+        self.panel.button(p, locate, "LOCATE", self.focus_pad)
         self.panel.button(p, stop, "STOP", self.stop_all, color=WARN)
         self.panel.button(p, zoom_in, "+", lambda: self.zoom(1.6))
         self.panel.button(p, zoom_out, "−", lambda: self.zoom(1 / 1.6))
