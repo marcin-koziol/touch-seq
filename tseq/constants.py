@@ -31,6 +31,7 @@ MOUSE_ID = -1  # pseudo touch id for desktop testing with a mouse
 
 
 TOUCH_LOG = os.environ.get("TOUCHSEQ_TOUCH_LOG")  # file to log raw touch/mouse events to, for debugging
+PARAM_LOG = os.environ.get("TOUCHSEQ_PARAM_LOG")  # file to log every parameter write, with its source
 
 
 # drum voices top to bottom, notes as in Sideous Drums

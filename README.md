@@ -54,17 +54,19 @@ cursor, and change the arrangement **on the bar** instead of on the downbeat of 
 
 ![The whole rack, as it comes up: performance controls, the plugin host, the sequencer and the live pads](docs/screenshots/overview.png)
 
-## New in 0.11.1
+## New in 0.11.2
 
-- **HOST-4 groups its knobs into boxes**: OSC, ENVELOPE, FILTER, DELAY… each section its own box with its
-  name, whole sections on a page (an ADSR never splits), small ones sharing a line. A section of numbered
-  parameters is a row of **vertical bars** instead — Sideous' 16 LFO steps, bipolar, growing both ways from
-  the middle. A chain with nothing chosen opens on its **first plugin**.
-- **SEQ-64 track rows** carry a small **level meter** of each chain beside the M, and the MIDI socket sits
-  at the foot of the channel column.
-- 0.11.0 brought **LAUNCH** — every track's patterns as pads, with **FILL** transitions that play once and
-  go back, and a progress line on the playing pad.
+- **A preset chosen in a plugin's own UI is no longer overwritten** by Touch-Seq: the `.params.json` sidecar
+  is now only for our own plugins (XYFX, Space, EQ, Click), whose parameters live outside their state. A
+  third-party plugin's state is left to speak for itself.
+- a parameter a plugin changes itself (a preset, its own knob) **marks its state for saving**, so it survives
+  a project switch without waiting for the 30 s clock; plugin states are prepared before saving.
+- `TOUCHSEQ_PARAM_LOG=params.log` logs every parameter write with its source (knob, fader, tempo, restore,
+  plugin), for finding what writes what.
 
+0.11.1 brought **HOST-4 knob sections** (OSC, ENVELOPE, FILTER… in boxes, numbered sequences as vertical
+bars), a level meter on every track row, and the MIDI socket at the foot of the channel column. 0.11.0
+brought **LAUNCH** — every track's patterns as pads, with **FILL** transitions that play once and go back.
 0.10 brought the **arpeggiator** — per track, on the transport's grid, non-destructive — the click kept
 out of the plugin browser, and `CHN` in the sequencer. 0.9 brought the dense CC automation (points every
 ¼ step, sent between the engine's ticks), the lane-only view with the notes as a ghost, **Space**, and
@@ -298,8 +300,8 @@ Download the AppImage for your machine from [Releases](https://github.com/marcin
 then:
 
 ```sh
-chmod +x Touch-Seq-0.11.1-x86_64.AppImage
-./Touch-Seq-0.11.1-x86_64.AppImage
+chmod +x Touch-Seq-0.11.2-x86_64.AppImage
+./Touch-Seq-0.11.2-x86_64.AppImage
 ```
 
 It contains Python, Qt (PySide6), Carla and Touch-Seq's own plugins (XYFX, Monitor, EQ, Click and Space).
@@ -370,8 +372,11 @@ behind; `click_lead` shifts that one by hand if a machine needs it.
 back when the app closes.
 
 Projects save themselves (every couple of seconds while editing, and on exit); plugin states are saved next
-to each project in `<name>.plugins/`, together with their parameter values (some plugins, the XYFX among them,
-keep theirs out of the state) — a knob turned in HOST-4 is saved on that same couple-of-seconds clock.
+to each project in `<name>.plugins/`. Our own plugins (XYFX, Space, EQ, Click) also get a `.params.json` beside
+the state, because they keep their parameters out of it — a knob turned in HOST-4 is saved on that same
+couple-of-seconds clock. A third-party plugin's state is left to speak for itself, so a preset chosen in its
+own UI is not overwritten by an old sidecar; a change the plugin makes itself (a preset, its own knob) also
+marks the state for saving, so it survives a project switch without waiting for the 30 s clock.
 
 **Touchscreen on a multi-monitor GNOME/Wayland desktop:** tell Mutter which monitor the touch panel belongs
 to — the touch device's vendor:product from `lsusb`, the monitor's vendor/product/serial from
@@ -383,6 +388,8 @@ gsettings set org.gnome.desktop.peripherals.touchscreen:/org/gnome/desktop/perip
 ```
 
 Raw touch events can be logged with `TOUCHSEQ_TOUCH_LOG=touch.log` to debug a touch panel.
+Parameter writes and plugin-state saves can be logged with `TOUCHSEQ_PARAM_LOG=params.log`, which says what
+Touch-Seq wrote, to which plugin, and from where (a knob, a fader, the tempo follow, a state restore).
 
 ## Running from source
 

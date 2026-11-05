@@ -170,6 +170,7 @@ class Plugin:
     def __init__(self, host, ref, client):
         self.host, self.ref, self.client = host, ref, client
         self.params = []
+        self.param_indices = set()  # its input parameters, so the engine callback can ignore outputs/internal
         self.output = None  # indices of its output parameters, looked up once (our EQ's analyser)
 
     @property
@@ -206,6 +207,9 @@ class Host:
         import carla_backend as cb
         self.cb = cb
         self.h = h = cb.CarlaHostDLL(CARLA_LIB, False)
+        self.plugins = []
+        self.on_parameter_changed = None  # (plugin, index, value) -> None: a plugin changed one itself
+        h.set_engine_callback(self._engine_callback)
         h.set_engine_option(cb.ENGINE_OPTION_PROCESS_MODE, cb.ENGINE_PROCESS_MODE_MULTIPLE_CLIENTS, "")
         h.set_engine_option(cb.ENGINE_OPTION_TRANSPORT_MODE, cb.ENGINE_TRANSPORT_MODE_DISABLED, "")
         h.set_engine_option(cb.ENGINE_OPTION_OSC_ENABLED, 0, "")
@@ -213,7 +217,16 @@ class Host:
         h.set_engine_option(cb.ENGINE_OPTION_PATH_RESOURCES, 0, CARLA_RES)
         if not h.engine_init("JACK", client):
             raise RuntimeError(h.get_last_error() or "Carla engine failed to start")
-        self.plugins = []
+
+    def _engine_callback(self, _handle, action, plugin_id, value1, value2, value3, valuef, _value_str):
+        """Carla's engine callback. The one thing the app needs is a parameter a plugin changed by itself
+        (its own UI, a preset): the state is then worth saving without waiting for the 30 s clock."""
+        if action != self.cb.ENGINE_CALLBACK_PARAMETER_VALUE_CHANGED or value1 < 0:
+            return
+        if self.on_parameter_changed and 0 <= plugin_id < len(self.plugins):
+            plugin = self.plugins[plugin_id]
+            if value1 in plugin.param_indices:  # an input parameter: an output (our EQ's analyser) is not one
+                self.on_parameter_changed(plugin, value1, valuef)
 
     def add(self, ref, client):
         cb, h = self.cb, self.h
@@ -240,6 +253,7 @@ class Host:
             plugin.params.append(Param(i, h.get_parameter_info(pid, i)["name"], rng["min"], rng["max"],
                                        bool(data["hints"] & cb.PARAMETER_IS_INTEGER),
                                        bool(data["hints"] & cb.PARAMETER_IS_BOOLEAN)))
+        plugin.param_indices = {prm.index for prm in plugin.params}
 
     def remove(self, plugin):
         self.h.remove_plugin(plugin.pid)
@@ -286,6 +300,10 @@ class Host:
 
     def show_ui(self, plugin, on=True):
         self.h.show_custom_ui(plugin.pid, on)
+
+    def prepare_for_save(self, plugin):
+        if self.loaded(plugin):
+            self.h.prepare_for_save(plugin.pid)
 
     def save_state(self, plugin, path):
         return self.h.save_plugin_state(plugin.pid, str(path))

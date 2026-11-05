@@ -16,13 +16,26 @@ import plugins
 
 from .model import Bus
 from .constants import (BG, BORDER, BUILTIN_LABELS, CLICK_ACCENT, CLICK_BEAT, CLICK_LABELS, DIM, EQ_LABELS,
-                        INTERNAL_LABELS, MONITOR_LABELS, PALETTE, PANEL, SLOTS, SPACE_LABELS, TEXT, WARN,
-                        XYFX_LABELS)
+                        INTERNAL_LABELS, MONITOR_LABELS, PALETTE, PANEL, PARAM_LOG, SLOTS, SPACE_LABELS, TEXT,
+                        WARN, XYFX_LABELS)
 from .eq import EqEditor
 from .gestures import Drag, Hold, ScrollOrTap, Slide
 from .ui import Panel, param_color, param_family, param_section, split
 
 
+def log_param(action, plugin, index, value, source):
+    """One line per parameter write and plugin-state event when TOUCHSEQ_PARAM_LOG names a file: what wrote
+    what, and why. `source` is "knob", "bar", "eq", "fader", "tempo", "xyfx", "restore", or "plugin" when the
+    plugin changed a parameter itself (its UI, a preset)."""
+    if not PARAM_LOG:
+        return
+    detail = f" #{index} = {value:.6g}" if index is not None else ""
+    try:
+        with open(PARAM_LOG, "a") as f:
+            f.write(f"{time.monotonic():.3f} {action:4} {plugin.ref.name} [{plugin.ref.label}]"
+                    f"{detail} ({source})\n")
+    except OSError:
+        pass
 
 
 def param_group(name):
@@ -140,6 +153,7 @@ class HostPanel(Panel):
         self.wiring.replace("patchbay", self.patch)  # from the last time; heal keeps them alive
         self.buffer = buffer  # the audio graph's buffer size in samples this machine was left on (0: system)
         self.states_dirty = False  # a parameter changed since the plugins' states were last saved
+        self.saving_states = False  # inside save_states: a plugin echoing a change must not ask for another save
         self.meters = {}  # Strip -> {"l", "r", "peak", "at"}: what its chain's output is doing
         self.monitor = None  # the monitor plugin's ref, looked up once (False: not installed)
         self.click_ref_cache = None  # the click plugin's ref, the same way
@@ -159,6 +173,7 @@ class HostPanel(Panel):
         except (RuntimeError, OSError, ImportError) as e:
             self.host, self.message = None, f"plugin host unavailable: {e}"
             return
+        self.host.on_parameter_changed = self.plugin_changed
         self.catalog = plugins.Catalog(cache_path)
         self.sink = self.current_sink()
         self.sink_changed = False
@@ -209,10 +224,19 @@ class HostPanel(Panel):
         if self.remember:
             self.remember("audio_out", name)
 
-    def set_param(self, plugin, index, value):
+    def set_param(self, plugin, index, value, source="app"):
         """A parameter turned in the app: the plugin's state is then worth saving with the project's autosave,
-        not just on the 30 s clock."""
+        not just on the 30 s clock. `source` says what wrote it, for TOUCHSEQ_PARAM_LOG."""
+        log_param("set", plugin, index, value, source)
         self.host.set_value(plugin, index, value)
+        self.states_dirty = True
+
+    def plugin_changed(self, plugin, index, value):
+        """A plugin changed one of its own parameters (its UI, a preset): its state is worth saving now, so a
+        project switch before the 30 s clock does not lose the preset."""
+        if self.saving_states:
+            return
+        log_param("set", plugin, index, value, "plugin")
         self.states_dirty = True
 
     # --- audio graph ----------------------------------------------------------
@@ -290,6 +314,7 @@ class HostPanel(Panel):
         if restore and not state.exists() and strip.legacy:
             state = self.state_file(strip, k, ref, strip.legacy)
         if restore and state.exists():
+            log_param("load", plugin, None, None, "project")
             self.host.load_state(plugin, state)
             self.host.refresh_params(plugin)
             self.restore_params(plugin, state)
@@ -430,16 +455,29 @@ class HostPanel(Panel):
         if not self.host or not self.loaded:
             return
         self.state_dir.mkdir(parents=True, exist_ok=True)
-        for (strip, k), plugin in self.loaded.items():
-            state = self.state_file(strip, k, plugin.ref)
-            self.host.save_state(plugin, state)
-            # some plugins keep their parameters outside their state blob (our own XYFX does), so the knob
-            # positions would come back at their defaults: keep them beside the state
-            params = {str(prm.index): self.host.value(plugin, prm.index) for prm in plugin.params}
-            state.with_suffix(".params.json").write_text(json.dumps(params))
+        self.saving_states = True
+        try:
+            for (strip, k), plugin in self.loaded.items():
+                state = self.state_file(strip, k, plugin.ref)
+                self.host.prepare_for_save(plugin)
+                self.host.save_state(plugin, state)
+                log_param("save", plugin, None, None, "state")
+                # Our own plugins keep their parameters outside their state blob (XYFX, Space, EQ, Click: none
+                # of them declares WANT_STATE), so the knob positions would come back at their defaults: keep
+                # them beside the state. A third-party plugin's own state already carries its parameters, and a
+                # sidecar there would override a preset loaded in the plugin's own UI on the next load.
+                if plugin.ref.label in BUILTIN_LABELS:
+                    params = {str(prm.index): self.host.value(plugin, prm.index) for prm in plugin.params}
+                    state.with_suffix(".params.json").write_text(json.dumps(params))
+        finally:
+            self.saving_states = False
 
     def restore_params(self, plugin, state):
-        """The parameter values saved next to a plugin's state, for what the state itself doesn't carry."""
+        """The parameter values saved next to a plugin's state, for what the state itself doesn't carry.
+        Only our own plugins need it: a third-party plugin's state already carries its parameters, and
+        applying a sidecar over it would undo a preset loaded in the plugin's own UI."""
+        if plugin.ref.label not in BUILTIN_LABELS:
+            return
         try:
             values = json.loads(state.with_suffix(".params.json").read_text())
         except (OSError, ValueError):
@@ -447,6 +485,7 @@ class HostPanel(Panel):
         for prm in plugin.params:
             value = values.get(str(prm.index))
             if isinstance(value, (int, float)):
+                log_param("set", plugin, prm.index, value, "restore")
                 self.host.set_value(plugin, prm.index, value)
 
     def close(self):
@@ -482,7 +521,7 @@ class HostPanel(Panel):
                 continue
             prm = next((q for q in plugin.params if q.name.lower() == "bpm"), None)
             if prm and round(self.host.value(plugin, prm.index)) != self.project.bpm:
-                self.set_param(plugin, prm.index, float(self.project.bpm))
+                self.set_param(plugin, prm.index, float(self.project.bpm), source="tempo")
 
     def animating(self):
         # knobs read the plugins' live values: their own LFOs and envelopes move them
@@ -512,7 +551,7 @@ class HostPanel(Panel):
         plugin, prm = self.link_param(link)
         if prm:
             v = prm.lo + norm * (prm.hi - prm.lo)
-            self.set_param(plugin, prm.index, round(v) if prm.integer or prm.boolean else v)
+            self.set_param(plugin, prm.index, round(v) if prm.integer or prm.boolean else v, source="fader")
 
     def link_to_fader(self, i):
         """Make CC fader i drive the parameter whose knob was held (self.assigning)."""
@@ -536,7 +575,7 @@ class HostPanel(Panel):
         if plugin:
             for prm in plugin.params:
                 if prm.name.lower() in values:
-                    self.set_param(plugin, prm.index, values[prm.name.lower()])
+                    self.set_param(plugin, prm.index, values[prm.name.lower()], source="xyfx")
 
     def xy_values(self):
         plugin = self.xyfx()
@@ -1103,7 +1142,7 @@ class HostPanel(Panel):
 
         def set_(norm):
             v = prm.lo + norm * (prm.hi - prm.lo)
-            self.set_param(plugin, prm.index, round(v) if prm.integer or prm.boolean else v)
+            self.set_param(plugin, prm.index, round(v) if prm.integer or prm.boolean else v, source="knob")
 
         if self.assigning == "pick":  # the ASSIGN button is on: this tap chooses the knob, it does not turn it
             self.box(p, r, QColor(0, 0, 0, 0), "#38d6ff", 1.2, radius=8)
@@ -1143,7 +1182,7 @@ class HostPanel(Panel):
 
         def set_(norm):
             v = prm.lo + norm * (prm.hi - prm.lo)
-            self.set_param(plugin, prm.index, round(v) if prm.integer or prm.boolean else v)
+            self.set_param(plugin, prm.index, round(v) if prm.integer or prm.boolean else v, source="bar")
 
         if self.assigning == "pick":  # ASSIGN: the tap chooses this parameter for a fader, it does not set it
             self.box(p, r, QColor(0, 0, 0, 0), "#38d6ff", 1.2, radius=6)

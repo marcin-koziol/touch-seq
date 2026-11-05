@@ -110,7 +110,7 @@ class EqEditor:
         k = index * 4
         for n, value in ((0, freq), (1, gain), (2, q), (3, kind)):
             if value is not None:
-                self.panel.set_param(self.plugin, k + n, value)
+                self.panel.set_param(self.plugin, k + n, value, source="eq")
 
     def forget(self):
         """The plugin went away (its slot was emptied or replaced): stop reading it."""

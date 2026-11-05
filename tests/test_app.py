@@ -1026,9 +1026,12 @@ class ParamCarla(FakeCarla):
         self.values[index] = value
     def text(self, plugin, index):
         return str(self.values.get(index, 0.0))
+    def prepare_for_save(self, plugin):
+        pass
     def save_state(self, plugin, path):
         Path(path).write_text("state")
-pp = FakePlugin("M.1 Reverb")
+pp = FakePlugin("M.1 XYFX")
+pp.ref.label = "touchseq.xyfx"  # our own plugins keep their parameters out of the state: the sidecar is theirs
 pp.params = [type("Pr", (), {"index": i})() for i in (7, 8)]
 pph = FakeHostPanel(ts.Project())
 pph.state_dir = OUT / "params.plugins"
@@ -1042,6 +1045,27 @@ pph.restore_params(pp, state)
 assert pph.host.values == {7: 0.25, 8: 0.75}, pph.host.values
 state.with_suffix(".params.json").unlink()  # no parameter file: nothing breaks
 pph.restore_params(pp, state)
+# a third-party plugin's state is its own: no sidecar, and an old one is never applied over it
+third = FakePlugin("M.2 Synth")
+third.ref.label = "vendor.synth"  # not ours: its state carries its parameters
+third.params = [type("Pr", (), {"index": i})() for i in (7, 8)]
+pph.loaded = {(pph.project.master, 0): third}
+pph.save_states()
+third_state = pph.state_file(pph.project.master, 0, third.ref)
+assert third_state.exists() and not third_state.with_suffix(".params.json").exists()
+third_state.with_suffix(".params.json").write_text('{"7": 0.9, "8": 0.9}')  # an old sidecar
+pph.host.values = {7: 0.0, 8: 0.0}
+pph.restore_params(third, third_state)
+assert pph.host.values == {7: 0.0, 8: 0.0}, "a third-party plugin's own state wins over a sidecar"
+pph.loaded = {(pph.project.master, 0): pp}
+# a plugin changing a parameter itself (its UI, a preset) marks the state for saving
+pph.states_dirty = False
+pph.plugin_changed(pp, 7, 0.3)
+assert pph.states_dirty
+pph.states_dirty, pph.saving_states = False, True
+pph.plugin_changed(pp, 7, 0.4)
+pph.saving_states = False
+assert not pph.states_dirty, "a change echoed during a save does not ask for another save"
 # a turned knob marks the states for saving, and the project's own autosave takes them along
 pph.host.values[7] = 0.0
 ts.HostPanel.set_param(pph, pp, 7, 0.5)
@@ -1114,7 +1138,7 @@ eqh.s = 1.0
 eqh.host = ParamCarla()
 eqh.host.values = {4 * i + n: v for i in range(8) for n, v in ((0, 1000.0), (1, 0.0), (2, 1.4), (3, 0))}
 touched = []
-eqh.set_param = lambda plugin, index, value: touched.append((index, round(value, 3)))
+eqh.set_param = lambda plugin, index, value, source="app": touched.append((index, round(value, 3)))
 ed = ts.EqEditor(eqh)
 ed.plugin = FakePlugin("M.1 EQ")
 ed.graph = graph
