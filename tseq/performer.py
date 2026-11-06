@@ -182,8 +182,7 @@ class Performer(Panel):
         self.arm_key = None  # (selected track, mode) the current recording was armed with
         self.choose_arp = lambda tr: None  # the rack: the arpeggiator's settings dialog
         self.pulse_at = None  # when the last external clock pulse came in
-        self.pulse_len = None  # its smoothed length (s)
-        self.pulses = 0  # pulses since the last tempo decision
+        self.clock_times = []  # the last few pulses, for a stable tempo over four beats
 
     # --- sound + recording -----------------------------------------------------
     def on(self, tr, note, vel):
@@ -295,22 +294,30 @@ class Performer(Panel):
             self.engine.stop()
 
     CLOCK = 24  # MIDI clock pulses per beat
+    CLOCK_WINDOW = 96  # pulses (four beats) averaged: a keyboard's USB jitter must not wobble the tempo
 
     def clock(self, when):
-        """Follow an external clock, so a keyboard's own tempo plays the sequencer. The pulse length is
-        smoothed and the tempo only moves once a beat, so a few late pulses don't make it wobble."""
+        """Follow an external clock, so a keyboard's own tempo plays the sequencer. The tempo is measured over
+        four beats, so USB timing jitter and a few late pulses don't make it wander; a real tempo change is
+        followed after that window."""
         last, self.pulse_at = self.pulse_at, when
         if last is None:
+            self.clock_times = [when]
             return
         gap = when - last
         if not 0.002 < gap < 0.25:  # the clock stopped (or was replugged): start measuring again
-            self.pulse_len = None
+            self.clock_times = [when]
             return
-        self.pulse_len = gap if self.pulse_len is None else self.pulse_len * 0.85 + gap * 0.15
-        self.pulses += 1
-        if self.pulses % self.CLOCK:  # decide once a beat, not on every pulse
+        times = self.clock_times
+        times.append(when)
+        if len(times) > self.CLOCK_WINDOW:
+            del times[0]
+        if len(times) < self.CLOCK_WINDOW:
             return
-        bpm = round(60.0 / (self.pulse_len * self.CLOCK))
+        span = times[-1] - times[0]
+        if span <= 0.0:
+            return
+        bpm = round(60.0 * (len(times) - 1) / (span * self.CLOCK))
         if bpm != self.project.bpm and BPM_MIN <= bpm <= BPM_MAX:
             self.project.bpm = bpm
 

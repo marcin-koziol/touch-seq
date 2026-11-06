@@ -168,8 +168,8 @@ while there is something unsaved (the time next to it is the last save of anythi
   need not be the selected one). Pitch bend and the mod wheel reach the instrument too. A note keeps the
   length you held it for, over the bar line included
 - the same keyboard is the **transport**: its play/stop buttons start and stop the sequencer (MIDI
-  Start/Continue/Stop, or CC 115/116), and its **clock** sets the tempo — 24 pulses per beat, smoothed, so
-  the project runs at the keyboard's bpm
+  Start/Continue/Stop, or CC 115/116), and its **clock** sets the tempo — 24 pulses per beat, averaged over
+  four beats, so USB jitter doesn't make the BPM wander
 - in EDIT, **▼ trans / ▲ trans** moves the whole pattern one scale degree down or up: the step comes from the
   project's key and scale, so the pattern stays in key (a chromatic note keeps its alteration, octaves wrap);
   drum tracks have fixed voices and don't offer it

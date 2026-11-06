@@ -1619,19 +1619,28 @@ print("clock tempo:", prb.bpm)
 phb.clock(t + 1.0)  # the clock stopped for a second: measure again, don't jump
 assert prb.bpm == 128, prb.bpm
 t += 1.0
-for _ in range(24 * 3):  # and a new tempo is followed
+for _ in range(24 * 5):  # and a new tempo is followed (four-beat window)
     phb.clock(t)
     t += 60.0 / 90 / 24
 assert prb.bpm == 90, prb.bpm
 # the same through a MIDI input, which is how it actually arrives
 prb.bpm = 100
-phb.pulse_at, phb.pulse_len, phb.pulses = None, None, 0
+phb.pulse_at, phb.clock_times = None, []
 tt = 2000.0
 for _ in range(48 * 2):
     phb.external("Arturia KeyStep MIDI 1", [0xF8], tt)
     tt += 60.0 / 140 / 24
 assert prb.bpm == 140, prb.bpm
 print("clock from MIDI OK")
+# USB timing jitter must not make the BPM wander (a KeyStep Pro at 130 used to show 127..131)
+prb.bpm = 100
+phb.pulse_at, phb.clock_times = None, []
+tt, jitter = 3000.0, (0.0, 0.0015, -0.0015, 0.001, -0.001, 0.0005, -0.0005)
+for i in range(96 * 2):
+    phb.external("Arturia KeyStep MIDI 1", [0xF8], tt)
+    tt += 60.0 / 130 / 24 + jitter[i % len(jitter)]
+assert prb.bpm == 130, prb.bpm
+print("clock jitter OK")
 
 # --- two Carla engines with one name get their clients renamed (and every link fails): take a free name ---
 assert plugins.free_engine_name("Touch-Seq", []) == "Touch-Seq"
