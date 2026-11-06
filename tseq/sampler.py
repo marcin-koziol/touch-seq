@@ -225,39 +225,44 @@ class MarkerDrag(Gesture):
 
 
 class WaveScroll(Gesture):
-    """One finger on the waveform: a drag pans the view, a tap adds a chop marker."""
+    """One finger on the waveform: a drag pans the view, a tap adds a chop marker. Two fingers pinch around
+    the point between them; lifting one keeps the zoom where it is and the remaining finger pans from there."""
 
     def __init__(self, editor, rect, pos):
         self.editor, self.rect = editor, rect
         self.x = self.x0 = pos.x()
         self.start0, self.end0 = editor.view_start, editor.view_end
         self.moved = False
+        others = [g for g in editor.panel.gestures.values()
+                  if isinstance(g, WaveScroll) and g is not self]
+        if others:  # the second finger: the pinch starts where the two are now
+            editor.begin_pinch(others[0], self, rect)
+            self.moved = others[0].moved = True
 
     def move(self, pos):
         self.x = pos.x()
         others = [g for g in self.editor.panel.gestures.values()
                   if isinstance(g, WaveScroll) and g is not self]
-        if others:  # two fingers: pinch to zoom, around the middle of the view
-            distance = abs(self.x - others[0].x)
-            if self.editor.pinch_last is None:
-                self.editor.pinch_last = distance
-            elif distance > 1:
-                self.editor.zoom(distance / self.editor.pinch_last)
-                self.editor.pinch_last = distance
+        if others:  # two fingers: zoom around the point between them
+            self.editor.pinch_move(self.rect)
             self.moved = True
+            for g in others:
+                g.moved = True
             return
+        if self.editor.pinch is not None:  # the other finger vanished without a release
+            self.editor.end_pinch()
         dx = self.x - self.x0
         if abs(dx) > 8:
             self.moved = True
             self.editor.pan(dx, self.rect.width(), self.start0, self.end0)
 
     def release(self, pos):
-        self.editor.pinch_last = None
+        self.editor.end_pinch(self)
         if not self.moved:
             self.editor.wave_tap(self.rect, pos)
 
     def cancel(self):
-        self.editor.pinch_last = None
+        self.editor.end_pinch(self)
 
 
 class PadHold(Gesture):
@@ -354,7 +359,7 @@ class SamplerEditor:
         self.peak_table = []
         self.peak_cache = {}
         self.MIN_VIEW = 64
-        self.pinch_last = None
+        self.pinch = None  # the two-finger zoom in progress
 
     # --- state ---------------------------------------------------------------
     def use(self, plugin, slot, manifest):
@@ -733,6 +738,47 @@ class SamplerEditor:
         width = max(self.MIN_VIEW, span * 3)
         center = (int(pad["start"]) + int(pad["end"])) / 2
         self.set_view(center - width / 2, center + width / 2)
+
+    def begin_pinch(self, a, b, rect):
+        """Start a two-finger zoom: remember the distance, the frame under the midpoint and the view span."""
+        if self.pinch is not None:
+            return
+        mid = (a.x + b.x) / 2
+        self.pinch = {
+            "d0": max(12.0, abs(a.x - b.x)),  # fingers on one spot must not divide by zero
+            "f0": self.frame_at(rect, QPointF(mid, rect.center().y())),
+            "span0": max(1, self.view_end - self.view_start),
+            "width": max(1.0, rect.width()),
+        }
+
+    def pinch_move(self, rect):
+        """Zoom around the midpoint between the fingers; the frame that was under it stays under it."""
+        gestures = [g for g in self.panel.gestures.values() if isinstance(g, WaveScroll)]
+        if len(gestures) < 2:
+            return
+        if self.pinch is None:
+            self.begin_pinch(gestures[0], gestures[1], rect)
+        state = self.pinch
+        if state is None:
+            return
+        a, b = gestures[0], gestures[1]
+        distance = max(12.0, abs(a.x - b.x))
+        mid = (a.x + b.x) / 2
+        span = max(self.MIN_VIEW, min(max(1, self.frames), state["span0"] * state["d0"] / distance))
+        left = state["f0"] - (mid - rect.left()) / state["width"] * span
+        self.set_view(left, left + span)
+
+    def end_pinch(self, released=None):
+        """A finger lifted: keep the view, and let the finger that stays pan from where it is now. With no
+        `released` finger every one of them is rebased (the other finger disappeared without a release)."""
+        if self.pinch is None:
+            return
+        self.pinch = None
+        for g in self.panel.gestures.values():
+            if isinstance(g, WaveScroll) and g is not released:
+                g.x0 = g.x
+                g.start0, g.end0 = self.view_start, self.view_end
+                g.moved = True
 
     def zoom(self, factor):
         if not self.frames:
@@ -1303,10 +1349,10 @@ class SamplerEditor:
                   lambda: self.pads[self.pad]["gain"], lambda v: self.pads[self.pad].__setitem__("gain", v))
         self.knob(p, pan, "PAN", pad["pan"], -1.0, 1.0, 1.5 * s, 0.01,
                   lambda: self.pads[self.pad]["pan"], lambda v: self.pads[self.pad].__setitem__("pan", v))
-        # 12 px per semitone (it was 4.8, which made 0..2 jump by 1..3); a drag near a whole semitone snaps
-        self.knob(p, pitch, "PITCH", pad["pitch"], self.PITCH_LO, self.PITCH_HI, 1.2 * s, 0.1,
+        # whole semitones: with the wide range, 0.1 steps skipped the note the finger was after
+        self.knob(p, pitch, "PITCH", pad["pitch"], self.PITCH_LO, self.PITCH_HI, 8 * s, 1.0,
                   lambda: self.pads[self.pad]["pitch"], lambda v: self.pads[self.pad].__setitem__("pitch", v),
-                  snap=self.snap_pitch)
+                  show=lambda v: f"{int(round(v)):+d}")
         gate = QRectF(buttons.left(), buttons.top(), buttons.width(), 18 * s)
         loop = QRectF(buttons.left(), gate.bottom() + 2 * s, buttons.width(), 18 * s)
         reverse = QRectF(buttons.left(), loop.bottom() + 2 * s, buttons.width(), 18 * s)
@@ -1337,13 +1383,6 @@ class SamplerEditor:
         pad["stretch"] = 0 if pad.get("stretch", 0) else 1
         self.say("stretch: pitch, same length" if pad["stretch"] else "resample: pitch changes the length")
         self.save_reload()
-
-    def snap_pitch(self):
-        pad = self.pads[self.pad]
-        if pad:
-            near = round(pad["pitch"])
-            if abs(pad["pitch"] - near) <= 0.08:
-                pad["pitch"] = float(near)
 
     def knob(self, p, rect, label, value, lo, hi, px, unit, get, set_, snap=None, show=None, compact=False):
         s = self.panel.s

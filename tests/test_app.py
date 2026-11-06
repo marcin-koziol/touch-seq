@@ -2465,8 +2465,8 @@ print("step bars OK")
 # --- sampler: WAV reading, the pad map the plugin reads, and 16 equal chops --------------------
 import struct
 import wave as wavelib
-from tseq.sampler import (PadDrag, SamplerEditor, chop_regions, import_sample, preset_folders, read_manifest,
-                          write_manifest)
+from tseq.sampler import (PadDrag, SamplerEditor, WaveScroll, chop_regions, import_sample, preset_folders,
+                          read_manifest, write_manifest)
 from tseq.wav import read_wav
 
 wav_path = OUT / "sampler-test.wav"
@@ -2529,6 +2529,25 @@ editor.fit()
 assert editor.view_start == 0 and editor.view_end == 4800
 editor.zoom(2)
 assert editor.view_end - editor.view_start < 4800
+editor.fit()
+# pinch: the frame between the fingers stays between them, and lifting one does not jump the view back
+pinch_rect = QRectF(100, 0, 600, 200)
+panel.gestures.clear()
+a = WaveScroll(editor, pinch_rect, QPointF(300, 100))
+panel.gestures[1] = a
+b = WaveScroll(editor, pinch_rect, QPointF(500, 100))  # the second finger starts the pinch
+panel.gestures[2] = b
+assert editor.pinch is not None and editor.view_start == 0 and editor.view_end == 4800
+a.move(QPointF(200, 100)); b.move(QPointF(700, 100))  # fingers spread: 200 px -> 500 px
+span = editor.view_end - editor.view_start
+anchor = editor.view_start + (450 - pinch_rect.left()) / pinch_rect.width() * span
+assert abs(span - 1920) <= 2, span
+assert abs(anchor - 2400) <= 2, anchor  # the frame under the midpoint is still under it
+panel.gestures.pop(2); b.release(QPointF(700, 100))  # the panel pops a finger before releasing it
+assert editor.view_start == 1280, "letting go of one finger keeps the zoom"
+a.move(QPointF(260, 100))  # the remaining finger pans from the zoomed view, not from before it
+assert editor.view_start == 1088, editor.view_start
+panel.gestures.clear()
 editor.fit()
 slice_rect = QRectF(0, 0, 480, 200)
 editor.set_slice("start", slice_rect, QPointF(48, 10))
@@ -2619,12 +2638,6 @@ for _ in range(ts.SAMPLER_GROUPS):
 assert editor.pads[0]["group"] == 0, "after group 8 comes off"
 editor.cycle_group()
 assert editor.pads[0]["group"] == 1, "and then group 1 again"
-editor.pads[0]["pitch"] = 1.94
-editor.snap_pitch()
-assert editor.pads[0]["pitch"] == 2.0, editor.pads[0]["pitch"]
-editor.pads[0]["pitch"] = 1.5
-editor.snap_pitch()
-assert editor.pads[0]["pitch"] == 1.5, "a half semitone is not snapped away"
 assert (SamplerEditor.PITCH_LO, SamplerEditor.PITCH_HI) == (-36.0, 12.0)
 editor.pads[0]["pitch"] = SamplerEditor.PITCH_LO
 editor.save_map()
@@ -2701,16 +2714,19 @@ editor.save_reload(full=True)
 assert calls[-2:] == [1, 2], calls  # Reload for the map, Load when the samples changed
 editor.plugin = fake_plugin
 panel.set_param = lambda *a, **k: None
-# the knobs move in their own units: gain past 1 (0..4) in 0.02 steps, pitch in 0.1 semitones
+# the knobs move in their own units: gain past 1 (0..4) in 0.02 steps, pitch in whole semitones
 gv = []
 gpd = PadDrag(QPointF(0, 0), lambda: 1.0, gv.append, 0.0, 4.0, 1.2, 0.02, lambda: None)
 gpd.move(QPointF(0, -10))   # past the drag threshold
 gpd.move(QPointF(0, -130))  # 120 px up: 100 steps of 0.02
 assert gv[-1] == 3.0, gv
 pitchv = []
-ppd = PadDrag(QPointF(0, 0), lambda: 0.0, pitchv.append, -12.0, 12.0, 1.2, 0.1, lambda: None)
-ppd.move(QPointF(0, -10)); ppd.move(QPointF(0, -34))  # 24 px: 2 semitones
-assert pitchv[-1] == 2.0, pitchv
+ppd = PadDrag(QPointF(0, 0), lambda: 0.0, pitchv.append, SamplerEditor.PITCH_LO, SamplerEditor.PITCH_HI,
+              8.0, 1.0, lambda: None)
+ppd.move(QPointF(0, -10)); ppd.move(QPointF(0, -74))  # 64 px: 8 whole semitones
+assert pitchv[-1] == 8.0, pitchv
+ppd.move(QPointF(0, -71))  # a 3 px wobble stays on the same note
+assert pitchv[-1] == 8.0, pitchv
 # the waveform is read in the background in the app: the editor can paint a spinner and poll for it
 panel2 = ts.Panel(); panel2.s = 1.0; panel2.state_dir = state; panel2.set_param = lambda *a, **k: None
 ed2 = SamplerEditor(panel2, background=True)

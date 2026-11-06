@@ -70,8 +70,8 @@ cursor, and change the arrangement **on the bar** instead of on the downbeat of 
   pad's envelopes and LFO along, as independent copies. The pads use the same fixed
   colors as the drum voices. Each pad has Gain (up to 4×), Pan, Pitch, Loop, Reverse and **Gate** (play while
   held vs one-shot) and a **GRP** playback group: pads in the same group cut each other, like MONO for that
-  group. **MONO** cuts the previous pad when a new one starts. **PITCH** moves at 12 px per semitone and snaps
-  to a whole semitone on release, from three octaves down (−36) to one up (+12); **STRETCH** shifts the pitch
+  group. **MONO** cuts the previous pad when a new one starts. **PITCH** moves in whole semitones,
+  from three octaves down (−36) to one up (+12); **STRETCH** shifts the pitch
   without changing the slice's length (a granular shift, not resampling). **STOP** silences every voice. **ADSR** turns the waveform into the amp or filter
   envelope editor: the slice's waveform is a dim ghost behind the curve. The times are fractions of the slice,
   so lengthening the slice stretches the envelope with it; a reversed pad mirrors the envelope, so it fires
