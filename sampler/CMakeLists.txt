@@ -56,7 +56,9 @@ dpf_add_plugin(touchseq-sampler
   TARGETS lv2 clap
   FILES_DSP SamplerPlugin.cpp SamplerCore.cpp)
 target_include_directories(touchseq-sampler PUBLIC ".")
-target_link_libraries(touchseq-sampler PRIVATE touchseq-rubberband)
+# PUBLIC, not PRIVATE: DPF compiles the DSP sources in a separate `-dsp` library that only inherits the
+# interface of this one, so a private header path would not reach it.
+target_link_libraries(touchseq-sampler PUBLIC touchseq-rubberband)
 
 # DSP test: ./sampler-test
 add_executable(sampler-test test.cpp SamplerCore.cpp)
