@@ -78,6 +78,10 @@ int main() {
     envelopes << "pad 0 tone.wav 0 48000 36 1.0 0.0 0 0 0 0 0 0 0.5 0 1 0 0 0 1 0 20000 0 0\n";  // slow attack
     envelopes << "pad 1 tone.wav 0 48000 37 1.0 0.0 0 0 0 0 0 0 0 0 1 0 0 0 1 0 200 0 0\n";    // 200 Hz low-pass
     envelopes.close();
+    std::ofstream lfos(root / "sampler" / "sampler-13.txt");
+    lfos << "mono 0\n";
+    lfos << "pad 0 tone.wav 0 48000 36 1.0 0.0 0 0 0 0 0 0 0 0 1 0 0 0 1 0 20000 0 0 0 10 1 0\n";
+    lfos.close();
 
     setenv("TOUCHSEQ_SAMPLER_DIR", root.c_str(), 1);
     SamplerCore core;
@@ -209,6 +213,20 @@ int main() {
     assert(filteredRms < 0.1);  // 440 Hz through a 200 Hz low-pass
     core.allNotesOff();
     std::puts("amp/filter envelope OK");
+
+    core.setSlot(13);  // an amp LFO at 10 Hz, full depth: a tremolo
+    core.noteOn(36, 127);
+    core.process(left.data(), right.data(), 48000);
+    double lfoLow = 1e9, lfoHigh = 0.0;
+    for (int w = 0; w + 2400 <= 48000; w += 2400) {
+        const double r = rms_range(left, w, w + 2400);
+        lfoLow = std::min(lfoLow, r);
+        lfoHigh = std::max(lfoHigh, r);
+    }
+    std::printf("lfo amp: %.4f..%.4f\n", lfoLow, lfoHigh);
+    assert(lfoHigh > lfoLow * 3.0);
+    core.allNotesOff();
+    std::puts("LFO OK");
 
     core.setSlot(8);  // no manifest for this slot
     core.noteOn(36, 127);

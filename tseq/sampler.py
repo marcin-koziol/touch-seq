@@ -109,6 +109,9 @@ def read_manifest(path):
                         pad["filter"] = [float(parts[k]) for k in (18, 19, 20, 21)]
                         pad["cutoff"], pad["reso"], pad["env"] = (float(parts[22]), float(parts[23]),
                                                                   float(parts[24]))
+                    if len(parts) >= 29:  # the LFO
+                        pad["lfo_wave"], pad["lfo_rate"] = int(parts[25]), float(parts[26])
+                        pad["lfo_depth"], pad["lfo_target"] = float(parts[27]), int(parts[28])
                     pads[index] = pad
     except (OSError, ValueError):
         pass
@@ -132,7 +135,9 @@ def write_manifest(path, current, pads, mono=0):
                          + " ".join(f"{v:.6f}" for v in (pad.get("amp") or (0, 0, 1, 0)))
                          + " " + " ".join(f"{v:.6f}" for v in (pad.get("filter") or (0, 0, 1, 0)))
                          + f" {pad.get('cutoff', 20000.0):.3f} {pad.get('reso', 0.0):.6f} "
-                           f"{pad.get('env', 0.0):.6f}")
+                           f"{pad.get('env', 0.0):.6f} {int(pad.get('lfo_wave', 0))} "
+                           f"{pad.get('lfo_rate', 2.0):.6f} {pad.get('lfo_depth', 0.0):.6f} "
+                           f"{int(pad.get('lfo_target', 0))}")
     # write beside it and rename: the plugin reads the manifest from the audio thread, and a half-written file
     # (or a light map update during a slice drag) would make pads vanish for a moment
     temporary = path.with_suffix(path.suffix + ".tmp")
@@ -557,7 +562,8 @@ class SamplerEditor:
         return {"file": self.current, "start": int(start), "end": int(end), "root": int(root),
                 "gain": 1.0, "pan": 0.0, "pitch": 0.0, "loop": 0, "reverse": 0, "gate": 0, "group": 0,
                 "stretch": 0, "amp": [0.0, 0.0, 1.0, 0.0], "filter": [0.0, 0.0, 1.0, 0.0],
-                "cutoff": 20000.0, "reso": 0.0, "env": 0.0}
+                "cutoff": 20000.0, "reso": 0.0, "env": 0.0,
+                "lfo_wave": 0, "lfo_rate": 2.0, "lfo_depth": 0.0, "lfo_target": 0}
 
     def copy_pad(self):
         """Arm a copy: the next pad tapped gets this slice and its settings. The target keeps its own note as
@@ -951,16 +957,42 @@ class SamplerEditor:
                         "drag to pan · yellow lines chop · white handles resize · the white bar moves the slice",
                         DIM, 10, Qt.AlignLeft | Qt.AlignVCenter, elide=True)
 
+    LFO_WAVES = ("SINE", "TRI", "SQUARE", "SAW")
+    LFO_TARGETS = ("AMP", "FILTER", "PITCH")
+
+    @staticmethod
+    def lfo_value(wave, phase):
+        if wave == 1:
+            return 1.0 - 4.0 * abs(phase - 0.5)  # triangle
+        if wave == 2:
+            return 1.0 if phase < 0.5 else -1.0  # square
+        if wave == 3:
+            return 2.0 * phase - 1.0  # saw
+        return math.sin(2.0 * math.pi * phase)
+
+    def cycle_lfo_wave(self):
+        pad = self.pads[self.pad]
+        if pad:
+            pad["lfo_wave"] = (int(pad.get("lfo_wave", 0)) + 1) % len(self.LFO_WAVES)
+            self.save_reload()
+
+    def cycle_lfo_target(self):
+        pad = self.pads[self.pad]
+        if pad:
+            pad["lfo_target"] = (int(pad.get("lfo_target", 0)) + 1) % len(self.LFO_TARGETS)
+            self.save_reload()
+
     def draw_envelope(self, p, rect):
-        """The amp/filter envelopes over the selected slice. The slice's waveform is a dim ghost behind the
-        curve, and a reversed pad mirrors the envelope so it fires from the slice's end."""
+        """The amp/filter envelopes or the LFO over the selected slice, with the slice as a dim ghost."""
         s = self.panel.s
         pad = self.pads[self.pad]
         header = QRectF(rect.left() + 10 * s, rect.top() + 6 * s, rect.width() - 20 * s, 28 * s)
-        amp, filt, trigger, _, wave = split(header, [62 * s, 66 * s, 86 * s, 0, 58 * s], 6 * s)
+        amp, filt, lfo, trigger, _, wave = split(
+            header, [58 * s, 62 * s, 44 * s, 86 * s, 0, 58 * s], 6 * s)
         self.panel.button(p, amp, "AMP", lambda: setattr(self, "env_tab", "amp"), on=self.env_tab == "amp")
         self.panel.button(p, filt, "FILTER", lambda: setattr(self, "env_tab", "filter"),
                           on=self.env_tab == "filter")
+        self.panel.button(p, lfo, "LFO", lambda: setattr(self, "env_tab", "lfo"), on=self.env_tab == "lfo")
         self.panel.box(p, trigger, PANEL, "#4ade80", radius=6)
         self.panel.text(p, trigger, "TRIGGER", "#4ade80", 14, bold=True)
         self.panel.region(trigger, lambda pos: PadHold(self, self.pad))
@@ -969,11 +1001,11 @@ class SamplerEditor:
             self.panel.text(p, QRectF(rect.left(), header.bottom(), rect.width(), rect.bottom() - header.bottom()),
                             "select a pad with a slice first", DIM, 14)
             return
-        env = pad.get("amp" if self.env_tab == "amp" else "filter") or [0.0, 0.0, 1.0, 0.0]
+        tab = self.env_tab
         area = QRectF(rect.left() + 10 * s, header.bottom() + 8 * s, rect.width() - 20 * s,
                       rect.height() - header.bottom() - 18 * s)
         side = None
-        if self.env_tab == "filter":
+        if tab in ("filter", "lfo"):
             side = QRectF(area.right() - 138 * s, area.top(), 138 * s, area.height())
             area = QRectF(area.left(), area.top(), area.width() - 148 * s, area.height())
         mirror = bool(pad.get("reverse"))
@@ -988,8 +1020,6 @@ class SamplerEditor:
             self.peak_cache[key] = values
 
         self.panel.box(p, area, "#0e1116", BORDER, radius=6)
-        # the slice itself, behind everything: the range the envelope is drawn over. A quiet slice is scaled
-        # up so it stays visible as a ghost rather than a flat line.
         peak = max((max(abs(low), abs(high)) for low, high in values), default=0.0)
         gain = min(6.0, 0.9 / max(0.03, peak))
         p.setPen(QPen(QColor(56, 214, 255, 80), 1.0 * s))
@@ -1005,13 +1035,19 @@ class SamplerEditor:
             y = area.bottom() - value * area.height()
             p.setPen(QPen(QColor(255, 255, 255, 25), 1))
             p.drawLine(QPointF(area.left(), y), QPointF(area.right(), y))
+
+        if tab == "lfo":
+            self.draw_lfo(p, area, side, pad, start, end, mirror)
+            return
+
+        env = pad.get("amp" if tab == "amp" else "filter") or [0.0, 0.0, 1.0, 0.0]
         points = []
         steps = 160
         for i in range(steps + 1):
             t = i / steps
             x = area.left() + ((1.0 - t) if mirror else t) * area.width()
             points.append(QPointF(x, area.bottom() - self.env_value(env, t) * area.height()))
-        colour = "#4ade80" if self.env_tab == "amp" else "#38d6ff"
+        colour = "#4ade80" if tab == "amp" else "#38d6ff"
         p.setPen(QPen(QColor(colour), 2 * s))
         p.setBrush(Qt.NoBrush)
         p.drawPolyline(QPolygonF(points))
@@ -1049,6 +1085,51 @@ class SamplerEditor:
                 r_ = QRectF(side.left(), side.top() + n * (knob_h + 6 * s), side.width(), knob_h)
                 self.knob(p, r_, label, value, 0, 1 if label != "ENV" else 8, 1.5 * s,
                           0.01 if label != "ENV" else 0.05, get_, set_, show=show)
+
+    def draw_lfo(self, p, area, side, pad, start, end, mirror):
+        """The LFO curve over the slice, and its wave/rate/depth/target controls on the side."""
+        s = self.panel.s
+        wave = int(pad.get("lfo_wave", 0))
+        rate = float(pad.get("lfo_rate", 2.0))
+        depth = max(0.0, min(1.0, float(pad.get("lfo_depth", 0.0))))
+        target = int(pad.get("lfo_target", 0))
+        seconds = max(1e-6, (end - start) / max(1.0, float(self.rate)))
+        cycles = min(64.0, rate * seconds)  # a very long slice would draw as a solid band
+        steps = 240
+        points = []
+        for i in range(steps + 1):
+            t = i / steps
+            phase = (t * cycles) % 1.0
+            x = area.left() + ((1.0 - t) if mirror else t) * area.width()
+            y = area.center().y() - self.lfo_value(wave, phase) * depth * area.height() * 0.42
+            points.append(QPointF(x, y))
+        p.setPen(QPen(QColor(255, 255, 255, 30), 1))
+        p.drawLine(QPointF(area.left(), area.center().y()), QPointF(area.right(), area.center().y()))
+        p.setPen(QPen(QColor("#facc15"), 2 * s))
+        p.setBrush(Qt.NoBrush)
+        p.drawPolyline(QPolygonF(points))
+        self.panel.text(p, QRectF(area.left(), area.top() + 2 * s, area.width(), 14 * s),
+                        f"{self.LFO_WAVES[wave]}  ·  {rate:.2f} Hz  ·  depth {depth * 100:.0f}%  ·  "
+                        f"{self.LFO_TARGETS[target]}", DIM, 10, Qt.AlignRight | Qt.AlignTop)
+
+        if side is None:
+            return
+        row = side.height() / 4
+        wave_btn = QRectF(side.left(), side.top(), side.width(), min(34 * s, row - 4 * s))
+        self.panel.button(p, wave_btn, self.LFO_WAVES[wave], self.cycle_lfo_wave)
+        rate_knob = QRectF(side.left(), wave_btn.bottom() + 6 * s, side.width(), row - 6 * s)
+        self.knob(p, rate_knob, "RATE", math.log(max(0.05, rate) / 0.05) / math.log(400.0),
+                  0, 1, 1.5 * s, 0.01,
+                  lambda: math.log(max(0.05, self.pads[self.pad].get("lfo_rate", 2.0)) / 0.05) / math.log(400.0),
+                  lambda v: self.pads[self.pad].__setitem__("lfo_rate", 0.05 * 400.0 ** v),
+                  show=lambda v: f"{0.05 * 400.0 ** v:.2f} Hz")
+        depth_knob = QRectF(side.left(), rate_knob.bottom() + 6 * s, side.width(), row - 6 * s)
+        self.knob(p, depth_knob, "DEPTH", depth, 0, 1, 1.5 * s, 0.01,
+                  lambda: self.pads[self.pad].get("lfo_depth", 0.0),
+                  lambda v: self.pads[self.pad].__setitem__("lfo_depth", v),
+                  show=lambda v: f"{v * 100:.0f}%")
+        target_btn = QRectF(side.left(), side.bottom() - row + 4 * s, side.width(), min(34 * s, row - 8 * s))
+        self.panel.button(p, target_btn, f"TGT {self.LFO_TARGETS[target]}", self.cycle_lfo_target)
 
     def draw_spinner(self, p, rect):
         """A turning arc while a sample is read in the background."""

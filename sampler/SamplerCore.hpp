@@ -57,6 +57,10 @@ struct SamplerPad {
     float cutoff = 20000.0f;  // low-pass, Hz
     float reso = 0.0f;        // 0..1
     float envAmount = 0.0f;   // filter envelope depth, octaves
+    int lfoWave = 0;          // 0 sine, 1 triangle, 2 square, 3 saw
+    float lfoRate = 2.0f;     // Hz
+    float lfoDepth = 0.0f;    // 0..1
+    int lfoTarget = 0;        // 0 amp, 1 filter, 2 pitch
 
     bool loaded() const { return data && end > start && end <= data->size(); }
 };
@@ -109,6 +113,7 @@ private:
         double grainAge[2] = {0.0, 0.0};
         double grainLen = 1.0;
         double clock = 0.0;          // output frames since note-on, for the envelope
+        double lfoPhase = 0.0;       // 0..1, reset on note-on
         float ic1eq = 0.0f, ic2eq = 0.0f;  // the voice's low-pass state
     };
 

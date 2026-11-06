@@ -2651,6 +2651,18 @@ img.save(str(OUT / "sampler_adsr.png"))
 editor.env_tab = "filter"
 img.fill(0); q = QPainter(img); editor.draw(q, QRectF(0, 0, 700, 400), fake_plugin, 5, manifest); q.end()
 img.save(str(OUT / "sampler_adsr_filter.png"))
+# LFO: wave/rate/depth/target, stored with the pad and drawn over the slice
+editor.env_tab = "lfo"
+editor.pads[0].update({"lfo_wave": 2, "lfo_rate": 5.0, "lfo_depth": 0.6, "lfo_target": 1})
+editor.save_map()
+_, lfosaved, _ = read_manifest(manifest)
+assert (lfosaved[0]["lfo_wave"], lfosaved[0]["lfo_target"]) == (2, 1)
+assert abs(lfosaved[0]["lfo_rate"] - 5.0) < 1e-6 and abs(lfosaved[0]["lfo_depth"] - 0.6) < 1e-6
+assert abs(editor.lfo_value(2, 0.25) - 1.0) < 1e-9 and abs(editor.lfo_value(2, 0.75) + 1.0) < 1e-9
+editor.cycle_lfo_wave(); assert editor.pads[0]["lfo_wave"] == 3
+editor.cycle_lfo_target(); assert editor.pads[0]["lfo_target"] == 2
+img.fill(0); q = QPainter(img); editor.draw(q, QRectF(0, 0, 700, 400), fake_plugin, 5, manifest); q.end()
+img.save(str(OUT / "sampler_lfo.png"))
 editor.env_open = False
 # the editor tells the plugin which kind of reload an edit needs: a light map update or a full sample load
 class _Param:

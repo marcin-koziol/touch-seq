@@ -31,6 +31,22 @@ static std::shared_ptr<const std::vector<float>> readSample(const std::string& p
     return samples;
 }
 
+static float lfoValue(int wave, double phase) {
+    switch (wave) {
+    case 1: return float(1.0 - 4.0 * std::fabs(phase - 0.5));  // triangle
+    case 2: return phase < 0.5 ? 1.0f : -1.0f;                  // square
+    case 3: return float(2.0 * phase - 1.0);                    // saw
+    default: return float(std::sin(2.0 * 3.141592653589793 * phase));
+    }
+}
+
+static void setPadLfo(SamplerPad& pad, int wave, float rate, float depth, int target) {
+    pad.lfoWave = std::max(0, std::min(3, wave));
+    pad.lfoRate = std::max(0.01f, std::min(50.0f, rate));
+    pad.lfoDepth = std::max(0.0f, std::min(1.0f, depth));
+    pad.lfoTarget = std::max(0, std::min(2, target));
+}
+
 static void setPadEnvelope(SamplerPad& pad, float aA, float aD, float aS, float aR,
                            float fA, float fD, float fS, float fR,
                            float cutoff, float reso, float envAmount) {
@@ -94,12 +110,15 @@ void SamplerCore::load() {
         float ampA = 0.0f, ampD = 0.0f, ampS = 1.0f, ampR = 0.0f;
         float fA = 0.0f, fD = 0.0f, fS = 1.0f, fR = 0.0f;
         float cutoff = 20000.0f, reso = 0.0f, envAmt = 0.0f;
+        int lfoWave = 0, lfoTarget = 0;
+        float lfoRate = 2.0f, lfoDepth = 0.0f;
         if (!(in >> index >> name >> start >> end >> rootNote >> gain >> pan >> pitch >> loop >> reverse))
             continue;
         in >> gate;     // older manifests have no gate field: one-shot
         in >> group;    // and no group field: no playback group
         in >> stretch;  // and no stretch field: resample (the pitch changes the length)
         in >> ampA >> ampD >> ampS >> ampR >> fA >> fD >> fS >> fR >> cutoff >> reso >> envAmt;
+        in >> lfoWave >> lfoRate >> lfoDepth >> lfoTarget;
         if (index < 0 || index >= kPads)
             continue;
 
@@ -127,6 +146,7 @@ void SamplerCore::load() {
         pad.gate = gate != 0;
         pad.stretch = stretch != 0;
         setPadEnvelope(pad, ampA, ampD, ampS, ampR, fA, fD, fS, fR, cutoff, reso, envAmt);
+        setPadLfo(pad, lfoWave, lfoRate, lfoDepth, lfoTarget);
     }
 
     std::atomic_store(&bank, std::shared_ptr<const SamplerBank>(next));
@@ -209,12 +229,15 @@ void SamplerCore::applyMap() {
         float ampA = 0.0f, ampD = 0.0f, ampS = 1.0f, ampR = 0.0f;
         float fA = 0.0f, fD = 0.0f, fS = 1.0f, fR = 0.0f;
         float cutoff = 20000.0f, reso = 0.0f, envAmt = 0.0f;
+        int lfoWave = 0, lfoTarget = 0;
+        float lfoRate = 2.0f, lfoDepth = 0.0f;
         if (!(in >> index >> name >> start >> end >> rootNote >> gain >> pan >> pitch >> loop >> reverse))
             continue;
         in >> gate;
         in >> group;
         in >> stretch;
         in >> ampA >> ampD >> ampS >> ampR >> fA >> fD >> fS >> fR >> cutoff >> reso >> envAmt;
+        in >> lfoWave >> lfoRate >> lfoDepth >> lfoTarget;
         if (index < 0 || index >= kPads)
             continue;
         SamplerPad& pad = next->pads[index];
@@ -229,6 +252,7 @@ void SamplerCore::applyMap() {
         pad.gate = gate != 0;
         pad.stretch = stretch != 0;
         setPadEnvelope(pad, ampA, ampD, ampS, ampR, fA, fD, fS, fR, cutoff, reso, envAmt);
+        setPadLfo(pad, lfoWave, lfoRate, lfoDepth, lfoTarget);
         if (current && current->pads[index].file == name && current->pads[index].data) {
             pad.data = current->pads[index].data;  // the same sample: keep it, no gap
             pad.fileRate = current->pads[index].fileRate;
@@ -303,6 +327,7 @@ void SamplerCore::noteOn(int note, int velocity) {
     voice->releasing = false;
     voice->release = 1.0f;
     voice->clock = 0.0;
+    voice->lfoPhase = 0.0;
     voice->ic1eq = voice->ic2eq = 0.0f;
     voice->active = true;
     voice->age = ++nextAge;
@@ -377,6 +402,10 @@ void SamplerCore::process(float* left, float* right, uint32_t frames) {
 
             const std::vector<float>& data = *pad.data;
             const int size = int(data.size());
+            const float lfo = pad.lfoDepth > 0.0f ? lfoValue(pad.lfoWave, voice.lfoPhase) : 0.0f;
+            double readStep = voice.stretch ? voice.grainStep : voice.step;
+            if (pad.lfoTarget == 2 && pad.lfoDepth > 0.0f)  // pitch LFO, in semitones
+                readStep *= std::exp2(double(pad.lfoDepth) * 2.0 * double(lfo) / 12.0);
             float sample = 0.0f;
             if (voice.stretch) {  // two overlapping grains: the pitch moves, the timeline keeps its length
                 for (int g = 0; g < 2; ++g) {
@@ -399,7 +428,7 @@ void SamplerCore::process(float* left, float* right, uint32_t frames) {
                             const float w = window[int((age / voice.grainLen) * 1024.0) & 1023];
                             sample += s * w;
                         }
-                        voice.grainPos[g] += voice.grainStep;
+                        voice.grainPos[g] += readStep;
                         voice.grainAge[g] = age + 1.0;
                     }
                     if (voice.grainAge[g] >= voice.grainLen) {
@@ -417,7 +446,12 @@ void SamplerCore::process(float* left, float* right, uint32_t frames) {
                 sample = data[index];
                 if (index + 1 < size)
                     sample += (data[index + 1] - sample) * float(voice.pos - index);
-                voice.pos += voice.step;
+                voice.pos += readStep;
+            }
+            if (pad.lfoDepth > 0.0f) {
+                voice.lfoPhase += double(pad.lfoRate) / rate;
+                if (voice.lfoPhase >= 1.0)
+                    voice.lfoPhase -= 1.0;
             }
 
             if (voice.loop) {
@@ -441,10 +475,16 @@ void SamplerCore::process(float* left, float* right, uint32_t frames) {
             const double span = double(pad.end - pad.start);
             const float t = span > 0.0 ? float(voice.clock * stepAbs / span) : 0.0f;
             const bool withRelease = !voice.loop;  // a loop holds sustain; a one-shot releases at its end
-            const float amp = pad.amp.value(t, withRelease);
-            if (pad.cutoff < 19900.0f || pad.envAmount > 0.001f) {
+            float amp = pad.amp.value(t, withRelease);
+            if (pad.lfoTarget == 0 && pad.lfoDepth > 0.0f)  // tremolo, never below silence
+                amp *= 1.0f - 0.5f * pad.lfoDepth + 0.5f * pad.lfoDepth * lfo;
+            if (pad.cutoff < 19900.0f || pad.envAmount > 0.001f ||
+                (pad.lfoTarget == 1 && pad.lfoDepth > 0.0f)) {
                 const float fenv = pad.filter.value(t, withRelease);
-                float cutoff = pad.cutoff * std::pow(2.0f, pad.envAmount * fenv);
+                float octaves = pad.envAmount * fenv;
+                if (pad.lfoTarget == 1 && pad.lfoDepth > 0.0f)
+                    octaves += 2.0f * pad.lfoDepth * lfo;  // up to two octaves each way
+                float cutoff = pad.cutoff * std::pow(2.0f, octaves);
                 cutoff = std::max(20.0f, std::min(20000.0f, cutoff));
                 const float g = std::tan(3.141592653589793f * cutoff / float(rate));
                 const float k = 1.0f / (0.707f + 9.3f * pad.reso);  // Q from 0.707 to 10
