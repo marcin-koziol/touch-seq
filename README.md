@@ -71,9 +71,10 @@ cursor, and change the arrangement **on the bar** instead of on the downbeat of 
   group. **MONO** cuts the previous pad when a new one starts. **PITCH** moves at 12 px per semitone and snaps
   to a whole semitone on release; **STRETCH** shifts the pitch without changing the slice's length (a granular
   shift, not resampling). **STOP** silences every voice. **ADSR** turns the waveform into the amp or filter
-  envelope editor: the slice's waveform is a dim ghost and the curve is drawn above it. The times are fractions
-  of the slice, so lengthening the slice stretches the envelope with it; the filter tab also has **Cutoff**,
-  **Reso** and the envelope depth. The editor's pads play while held, like PLAY-12's, so
+  envelope editor: the slice's waveform is a dim ghost behind the curve. The times are fractions of the slice,
+  so lengthening the slice stretches the envelope with it; a reversed pad mirrors the envelope, so it fires
+  from the slice's end. **TRIGGER** holds the pad for auditioning, exactly like tapping it, and the filter tab
+  also has **Cutoff**, **Reso** and the envelope depth. The editor's pads play while held, like PLAY-12's, so
   GATE and LOOP are heard; dragging the slice handles or the **↔** bar updates a held loop as you drag, with no
   gap. **LOCATE** centres the waveform on the selected pad's slice, zoomed so it fills about a third of the
   view. **PRESETS**
@@ -248,9 +249,9 @@ the first free name (*Touch-Seq 2*, …) and says so in HOST-4's status line: bo
   **↔** bar moves the whole slice. Each pad has Gain (up to 4×), Pan, Pitch, Loop, Reverse and **Gate** and a **GRP**
   playback group: pads in the same group cut each other; the pads take the drum voices' fixed colors.
   **MONO** cuts the previous pad when a new one starts; **STRETCH** shifts the pitch without changing the
-  length, and **STOP** silences every voice. **ADSR** shows the amp/filter envelope over the slice as a ghost,
-  scaled to the slice (so it stretches when the slice does); the filter tab adds a low-pass with Cutoff, Reso
-  and envelope depth. The editor's pads play while held, so GATE/LOOP work as in
+  length, and **STOP** silences every voice. **ADSR** draws the amp/filter envelope over the slice's ghost,
+  scaled to the slice (so it stretches when the slice does; a reversed pad mirrors it) with a **TRIGGER** to
+  audition; the filter tab adds a low-pass with Cutoff, Reso and envelope depth. The editor's pads play while held, so GATE/LOOP work as in
   PLAY-12, and slice edits are heard on a held loop as it is dragged. **PRESETS** saves the pads and the
   samples they use on the machine (not in the project's plugin folder): a track or project deleted later
   leaves the preset intact, and one preset can be loaded into another project; SAVE asks for the name on the

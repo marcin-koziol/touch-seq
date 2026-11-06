@@ -267,12 +267,14 @@ class PadHold(Gesture):
 class EnvDrag(Gesture):
     """A point of the amp/filter envelope: sideways moves its time, up/down sets the sustain level."""
 
-    def __init__(self, editor, rect, which, pos):
-        self.editor, self.rect, self.which = editor, rect, which
+    def __init__(self, editor, rect, which, pos, mirror=False):
+        self.editor, self.rect, self.which, self.mirror = editor, rect, which, mirror
         self.move(pos)
 
     def move(self, pos):
         t = max(0.0, min(1.0, (pos.x() - self.rect.left()) / max(1.0, self.rect.width())))
+        if self.mirror:
+            t = 1.0 - t
         v = max(0.0, min(1.0, (self.rect.bottom() - pos.y()) / max(1.0, self.rect.height())))
         self.editor.set_env(self.which, t, v)
         self.editor.save_live()
@@ -950,48 +952,52 @@ class SamplerEditor:
                         DIM, 10, Qt.AlignLeft | Qt.AlignVCenter, elide=True)
 
     def draw_envelope(self, p, rect):
-        """The amp/filter envelopes over the selected slice, with the slice's waveform as a dim ghost."""
+        """The amp/filter envelopes over the selected slice. The slice's waveform is a dim ghost behind the
+        curve, and a reversed pad mirrors the envelope so it fires from the slice's end."""
         s = self.panel.s
         pad = self.pads[self.pad]
         header = QRectF(rect.left() + 10 * s, rect.top() + 6 * s, rect.width() - 20 * s, 28 * s)
-        amp, filt, _, wave = split(header, [62 * s, 66 * s, 0, 58 * s], 6 * s)
+        amp, filt, trigger, _, wave = split(header, [62 * s, 66 * s, 86 * s, 0, 58 * s], 6 * s)
         self.panel.button(p, amp, "AMP", lambda: setattr(self, "env_tab", "amp"), on=self.env_tab == "amp")
         self.panel.button(p, filt, "FILTER", lambda: setattr(self, "env_tab", "filter"),
                           on=self.env_tab == "filter")
+        self.panel.box(p, trigger, PANEL, "#4ade80", radius=6)
+        self.panel.text(p, trigger, "TRIGGER", "#4ade80", 14, bold=True)
+        self.panel.region(trigger, lambda pos: PadHold(self, self.pad))
         self.panel.button(p, wave, "WAVE", self.toggle_env)
         if not pad or not self.frames or pad.get("file") != self.current:
             self.panel.text(p, QRectF(rect.left(), header.bottom(), rect.width(), rect.bottom() - header.bottom()),
                             "select a pad with a slice first", DIM, 14)
             return
         env = pad.get("amp" if self.env_tab == "amp" else "filter") or [0.0, 0.0, 1.0, 0.0]
-        body = QRectF(rect.left() + 10 * s, header.bottom() + 8 * s, rect.width() - 20 * s,
+        area = QRectF(rect.left() + 10 * s, header.bottom() + 8 * s, rect.width() - 20 * s,
                       rect.height() - header.bottom() - 18 * s)
-        ghost_h = body.height() * 0.26
-        ghost = QRectF(body.left(), body.bottom() - ghost_h, body.width(), ghost_h)
-        area = QRectF(body.left(), body.top(), body.width(), body.height() - ghost_h - 8 * s)
         side = None
         if self.env_tab == "filter":
             side = QRectF(area.right() - 138 * s, area.top(), 138 * s, area.height())
             area = QRectF(area.left(), area.top(), area.width() - 148 * s, area.height())
+        mirror = bool(pad.get("reverse"))
 
         start = max(0, min(self.frames, int(pad["start"])))
         end = max(start + 1, min(self.frames, int(pad["end"])))
-        columns = max(1, int(ghost.width() / (2 * s)))
+        columns = max(1, int(area.width() / (2 * s)))
         key = ("env", self.current, start, end, columns)
         values = self.peak_cache.get(key)
         if values is None:
             values = peaks_range(self.samples, start, end, columns)
             self.peak_cache[key] = values
-        p.setPen(QPen(QColor(56, 214, 255, 95), 1.0 * s))
-        for n, (low, high) in enumerate(values):
-            x = ghost.left() + (n + 0.5) * ghost.width() / max(1, len(values))
-            y0 = ghost.center().y() - high * ghost.height() * 0.45
-            y1 = ghost.center().y() - low * ghost.height() * 0.45
-            p.drawLine(QPointF(x, y0), QPointF(x, y1))
-        self.panel.text(p, ghost.adjusted(2 * s, 0, 0, 0), "slice", QColor(56, 214, 255, 140), 10,
-                        Qt.AlignLeft | Qt.AlignTop)
 
         self.panel.box(p, area, "#0e1116", BORDER, radius=6)
+        # the slice itself, behind everything, dim: the range the envelope is drawn over
+        p.setPen(QPen(QColor(56, 214, 255, 80), 1.0 * s))
+        for n, (low, high) in enumerate(values):
+            x = area.left() + (n + 0.5) * area.width() / max(1, len(values))
+            y0 = area.center().y() - high * area.height() * 0.42
+            y1 = area.center().y() - low * area.height() * 0.42
+            p.drawLine(QPointF(x, y0), QPointF(x, y1))
+        self.panel.text(p, area.adjusted(4 * s, 0, 0, -2 * s), "slice",
+                        QColor(56, 214, 255, 150), 10, Qt.AlignLeft | Qt.AlignBottom)
+
         for value in (0.0, 0.5, 1.0):
             y = area.bottom() - value * area.height()
             p.setPen(QPen(QColor(255, 255, 255, 25), 1))
@@ -1000,8 +1006,8 @@ class SamplerEditor:
         steps = 160
         for i in range(steps + 1):
             t = i / steps
-            points.append(QPointF(area.left() + t * area.width(),
-                                  area.bottom() - self.env_value(env, t) * area.height()))
+            x = area.left() + ((1.0 - t) if mirror else t) * area.width()
+            points.append(QPointF(x, area.bottom() - self.env_value(env, t) * area.height()))
         colour = "#4ade80" if self.env_tab == "amp" else "#38d6ff"
         p.setPen(QPen(QColor(colour), 2 * s))
         p.setBrush(Qt.NoBrush)
@@ -1009,12 +1015,13 @@ class SamplerEditor:
         a, d, sus, r = env
         for which, t, v in (("attack", a, 1.0), ("decay", min(1.0, a + d), sus),
                             ("release", max(0.0, 1.0 - r), sus)):
-            c = QPointF(area.left() + t * area.width(), area.bottom() - v * area.height())
+            x = area.left() + ((1.0 - t) if mirror else t) * area.width()
+            c = QPointF(x, area.bottom() - v * area.height())
             p.setBrush(QColor("#ffffff"))
             p.setPen(QPen(QColor("#0e1116"), 1.5 * s))
             p.drawEllipse(c, 6 * s, 6 * s)
             self.panel.region(QRectF(c.x() - 14 * s, c.y() - 14 * s, 28 * s, 28 * s),
-                              lambda pos, which=which: EnvDrag(self, area, which, pos))
+                              lambda pos, which=which: EnvDrag(self, area, which, pos, mirror))
         self.panel.text(p, QRectF(area.left(), area.top() + 2 * s, area.width(), 14 * s),
                         f"A {a * 100:.0f}%  D {d * 100:.0f}%  S {sus * 100:.0f}%  R {r * 100:.0f}%",
                         DIM, 10, Qt.AlignRight | Qt.AlignTop)

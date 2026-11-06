@@ -2652,6 +2652,17 @@ editor.env_tab = "filter"
 img.fill(0); q = QPainter(img); editor.draw(q, QRectF(0, 0, 700, 400), fake_plugin, 5, manifest); q.end()
 img.save(str(OUT / "sampler_adsr_filter.png"))
 editor.env_open = False
+# the editor tells the plugin which kind of reload an edit needs: a light map update or a full sample load
+class _Param:
+    def __init__(self, name, index): self.name, self.index = name, index
+calls = []
+editor.plugin = types.SimpleNamespace(params=[_Param("Slot", 0), _Param("Reload", 1), _Param("Load", 2)])
+panel.set_param = lambda plugin, index, value, source=None: calls.append(index)
+editor.save_reload()
+editor.save_reload(full=True)
+assert calls[-2:] == [1, 2], calls  # Reload for the map, Load when the samples changed
+editor.plugin = fake_plugin
+panel.set_param = lambda *a, **k: None
 # the knobs move in their own units: gain past 1 (0..4) in 0.02 steps, pitch in 0.1 semitones
 gv = []
 gpd = PadDrag(QPointF(0, 0), lambda: 1.0, gv.append, 0.0, 4.0, 1.2, 0.02, lambda: None)
