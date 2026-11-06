@@ -72,7 +72,8 @@ cursor, and change the arrangement **on the bar** instead of on the downbeat of 
   held vs one-shot) and a **GRP** playback group: pads in the same group cut each other, like MONO for that
   group. **MONO** cuts the previous pad when a new one starts. **PITCH** moves in whole semitones,
   from three octaves down (−36) to one up (+12); **STRETCH** shifts the pitch
-  without changing the slice's length (Rubber Band, not resampling). **STOP** silences every voice. **ADSR** turns the waveform into the amp or filter
+  without changing the slice's length (Rubber Band, not resampling), at the cost of the shifter's latency (more
+  for deep shifts: it suits pads and pre-made material rather than tight live playing). **STOP** silences every voice. **ADSR** turns the waveform into the amp or filter
   envelope editor: the slice's waveform is a dim ghost behind the curve. The times are fractions of the slice,
   so lengthening the slice stretches the envelope with it; a reversed pad mirrors the envelope, so it fires
   from the slice's end. **TRIGGER** (under the curve) holds the pad for auditioning, exactly like tapping it.
