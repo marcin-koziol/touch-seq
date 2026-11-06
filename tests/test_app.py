@@ -2538,6 +2538,8 @@ assert editor.pads[0]["start"] == 960 and editor.pads[0]["end"] == 2880, editor.
 # COPY: the same chop on another pad, with its own pitch (one slice, two notes)
 editor.select_pad(0)
 editor.pads[0]["pitch"] = 5.0
+editor.pads[0]["amp"] = [0.1, 0.2, 0.7, 0.3]
+editor.pads[0]["lfo_rate"] = 4.0
 editor.copy_pad()
 assert editor.copy_src == 0, editor.copy_src
 editor.select_pad(7)
@@ -2545,6 +2547,10 @@ cp = editor.pads[7]
 assert cp and cp["file"] == editor.pads[0]["file"], cp
 assert (cp["start"], cp["end"]) == (editor.pads[0]["start"], editor.pads[0]["end"]), cp
 assert cp["root"] == 36 + 7 and cp["pitch"] == 5.0, cp  # the target's own note as root: it sounds the same
+assert cp["amp"] == [0.1, 0.2, 0.7, 0.3] and cp["lfo_rate"] == 4.0, "the copy keeps the envelopes and LFO"
+assert cp["amp"] is not editor.pads[0]["amp"], "but its envelope lists are its own"
+cp["amp"][0] = 0.9
+assert editor.pads[0]["amp"][0] == 0.1
 assert editor.copy_src is None and editor.pad == 7
 editor.pads[7]["pitch"] = 12.0
 assert editor.pads[0]["pitch"] == 5.0, "the two pads have independent pitch"

@@ -1,6 +1,7 @@
 """The sampler editor: a WAV waveform, chop markers, 16 MPC-style pads and the selected pad's controls. It
 draws in HOST-4's parameter area (the sampler has no window of its own) and keeps the pad map in the project's
 plugins folder, where the sampler plugin reads it."""
+import copy
 import math
 import os
 import re
@@ -588,7 +589,7 @@ class SamplerEditor:
         pad = self.pads[src]
         if not pad or index == src:
             return False
-        self.pads[index] = {**pad, "root": SAMPLER_NOTE_BASE + index}
+        self.pads[index] = {**copy.deepcopy(pad), "root": SAMPLER_NOTE_BASE + index}
         self.say(f"copied P{src + 1} → P{index + 1}")
         self.save_reload()
         return True
@@ -809,6 +810,10 @@ class SamplerEditor:
     def draw(self, p, r, plugin, slot, manifest):
         self.use(plugin, slot, manifest)
         s = self.panel.s
+        if self.env_open:  # the envelope editor is a mode of its own: LOAD/CHOP/TO PAD are not usable here
+            self.draw_wave(p, r)
+            self.draw_message(p, r, r)
+            return
         header = QRectF(r.left(), r.top(), r.width(), 40 * s)
         load, chop, clear, assign, copy, mono, name = split(
             header, [78 * s, 78 * s, 78 * s, 86 * s, 78 * s, 64 * s, 0], 6 * s)
@@ -821,10 +826,6 @@ class SamplerEditor:
         self.panel.text(p, name, self.current or "no sample", DIM, 12, elide=True)
 
         body = QRectF(r.left(), header.bottom() + 6 * s, r.width(), r.bottom() - header.bottom() - 6 * s)
-        if self.env_open:  # the envelope editor takes the whole area: the pads stay out of its way
-            self.draw_wave(p, body)
-            self.draw_message(p, body, r)
-            return
         wave_h = body.height() * 0.46
         wave = QRectF(body.left(), body.top(), body.width(), wave_h)
         lower = QRectF(body.left(), wave.bottom() + 8 * s, body.width(), body.bottom() - wave.bottom() - 8 * s)
@@ -850,8 +851,8 @@ class SamplerEditor:
         toast = QRectF(0, 0, width, 30 * s)
         if self.presets_open and area is not None:
             toast.moveCenter(QPointF(area.center().x(), area.bottom() - 26 * s))
-        elif self.env_open:  # the curve owns the middle
-            toast.moveCenter(QPointF(wave.center().x(), wave.bottom() - 24 * s))
+        elif self.env_open:  # over the curve's top: the pad strip at the bottom stays clear
+            toast.moveCenter(QPointF(wave.center().x(), wave.top() + 44 * s))
         elif self.loading:  # the spinner owns the middle
             toast.moveCenter(QPointF(wave.center().x(), wave.bottom() - 24 * s))
         else:
@@ -1036,9 +1037,22 @@ class SamplerEditor:
         tab = self.env_tab
         body = QRectF(rect.left() + 10 * s, header.bottom() + 8 * s, rect.width() - 20 * s,
                       rect.height() - header.bottom() - 18 * s)
-        bottom_h = min(58 * s, max(36 * s, body.height() * 0.20))
-        bottom = QRectF(body.left(), body.bottom() - bottom_h, body.width(), bottom_h)
-        work = QRectF(body.left(), body.top(), body.width(), body.height() - bottom_h - 8 * s)
+        strip_h = min(36 * s, max(26 * s, body.height() * 0.11))
+        strip = QRectF(body.left(), body.bottom() - strip_h, body.width(), strip_h)
+        bottom_h = min(58 * s, max(36 * s, body.height() * 0.18))
+        bottom = QRectF(body.left(), strip.top() - bottom_h - 6 * s, body.width(), bottom_h)
+        work = QRectF(body.left(), body.top(), body.width(), bottom.top() - body.top() - 6 * s)
+        # every pad stays reachable while editing an envelope: no trip through WAVE to choose another one
+        for index, cell in enumerate(split(strip, [0] * SAMPLER_PADS, 4 * s)):
+            slot_pad = self.pads[index]
+            chosen = index == self.pad
+            colour = self.pad_color(index) if slot_pad else "#242a36"
+            fill = QColor(colour)
+            fill.setAlpha(45)
+            self.panel.box(p, cell, fill if slot_pad else "#11141b",
+                           "#ffffff" if chosen else colour, 2 if chosen else 1, radius=5)
+            self.panel.text(p, cell, f"P{index + 1}", TEXT if chosen else DIM, 10, bold=chosen)
+            self.panel.on_press(cell, lambda index=index: self.select_pad(index))
         trigger = QRectF(bottom.left(), bottom.top(), min(104 * s, bottom.width() * 0.22), bottom.height())
         self.panel.box(p, trigger, PANEL, "#4ade80", radius=6)
         self.panel.text(p, trigger, "TRIGGER", "#4ade80", 14, bold=True)
@@ -1172,11 +1186,11 @@ class SamplerEditor:
                       0, 1, 1.5 * s, 0.01,
                       lambda: math.log(max(0.05, self.pads[self.pad].get("lfo_rate", 2.0)) / 0.05) / math.log(400.0),
                       lambda v: self.pads[self.pad].__setitem__("lfo_rate", 0.05 * 400.0 ** v),
-                      show=lambda v: f"{0.05 * 400.0 ** v:.2f} Hz")
+                      show=lambda v: f"{0.05 * 400.0 ** v:.2f} Hz", compact=True)
         self.knob(p, cells[3], "DEPTH", depth, 0, 1, 1.5 * s, 0.01,
                   lambda: self.pads[self.pad].get("lfo_depth", 0.0),
                   lambda v: self.pads[self.pad].__setitem__("lfo_depth", v),
-                  show=lambda v: f"{v * 100:.0f}%")
+                  show=lambda v: f"{v * 100:.0f}%", compact=True)
         self.panel.button(p, cells[4], f"TGT {self.LFO_TARGETS[target]}", self.cycle_lfo_target)
 
     def draw_spinner(self, p, rect):
@@ -1330,12 +1344,18 @@ class SamplerEditor:
             if abs(pad["pitch"] - near) <= 0.08:
                 pad["pitch"] = float(near)
 
-    def knob(self, p, rect, label, value, lo, hi, px, unit, get, set_, snap=None, show=None):
+    def knob(self, p, rect, label, value, lo, hi, px, unit, get, set_, snap=None, show=None, compact=False):
         s = self.panel.s
         self.panel.box(p, rect, PANEL, BORDER, radius=8)
-        self.panel.text(p, rect.adjusted(0, 3 * s, 0, 0), label, DIM, 10, Qt.AlignHCenter | Qt.AlignTop)
-        self.panel.text(p, rect.adjusted(0, 16 * s, 0, 0), show(value) if show else f"{value:.2f}", TEXT, 15,
-                        bold=True)
+        shown = show(value) if show else f"{value:.2f}"
+        if compact:  # one line: no room for the stacked label and value in a short row
+            self.panel.text(p, rect.adjusted(8 * s, 0, -8 * s, 0), label, DIM, 10,
+                            Qt.AlignLeft | Qt.AlignVCenter)
+            self.panel.text(p, rect.adjusted(8 * s, 0, -8 * s, 0), shown, TEXT, 12,
+                            Qt.AlignRight | Qt.AlignVCenter, bold=True)
+        else:
+            self.panel.text(p, rect.adjusted(0, 3 * s, 0, 0), label, DIM, 10, Qt.AlignHCenter | Qt.AlignTop)
+            self.panel.text(p, rect.adjusted(0, 16 * s, 0, 0), shown, TEXT, 15, bold=True)
         self.panel.region(rect, lambda pos: PadDrag(pos, get, set_, lo, hi, px, unit, self.save_reload, snap,
                                                     self.save_live))
 

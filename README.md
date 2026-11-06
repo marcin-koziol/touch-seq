@@ -65,7 +65,8 @@ cursor, and change the arrangement **on the bar** instead of on the downbeat of 
   format), see its waveform (pan, **+ / − / FIT**, pinch), tap to add chop markers, **CHOP** into 16 slices,
   select a pad and **TO PAD** a slice. **COPY** then a tap on another pad puts the same slice there, so one
   chop can sit on several pads — each with its own **PITCH** (the copy starts at the source's pitch and keeps
-  the target pad's note as its root, so it sounds identical until you change it). The pads use the same fixed
+  the target pad's note as its root, so it sounds identical until you change it). **COPY** also brings the
+  pad's envelopes and LFO along, as independent copies. The pads use the same fixed
   colors as the drum voices. Each pad has Gain (up to 4×), Pan, Pitch, Loop, Reverse and **Gate** (play while
   held vs one-shot) and a **GRP** playback group: pads in the same group cut each other, like MONO for that
   group. **MONO** cuts the previous pad when a new one starts. **PITCH** moves at 12 px per semitone and snaps
@@ -73,8 +74,10 @@ cursor, and change the arrangement **on the bar** instead of on the downbeat of 
   shift, not resampling). **STOP** silences every voice. **ADSR** turns the waveform into the amp or filter
   envelope editor: the slice's waveform is a dim ghost behind the curve. The times are fractions of the slice,
   so lengthening the slice stretches the envelope with it; a reversed pad mirrors the envelope, so it fires
-  from the slice's end. **TRIGGER** (under the curve) holds the pad for auditioning, exactly like tapping it,
-  and the filter tab also has **Cutoff**, **Reso** and the envelope depth. The third tab is an **LFO**:
+  from the slice's end. **TRIGGER** (under the curve) holds the pad for auditioning, exactly like tapping it.
+  The envelope editor takes the whole panel (LOAD/CHOP/TO PAD step aside) and keeps **all 16 pads** in a strip
+  at the bottom, so choosing another pad never means going back through WAVE. The filter tab also has
+  **Cutoff**, **Reso** and the envelope depth. The third tab is an **LFO**:
   SINE/TRI/SQUARE/SAW, 0.05–20 Hz or **SYNC** to the project tempo (1/1 … 1/16T), depth and a target — AMP
   (tremolo), FILTER (±2 octaves) or PITCH (±2 semitones); it retriggers with every note. The LFO view keeps
   the filter's Cutoff/Reso/Env at the bottom, so both can be shaped without changing tabs. The editor's pads play while held, like PLAY-12's, so
@@ -254,7 +257,8 @@ the first free name (*Touch-Seq 2*, …) and says so in HOST-4's status line: bo
   **MONO** cuts the previous pad when a new one starts; **STRETCH** shifts the pitch without changing the
   length, and **STOP** silences every voice. **ADSR** draws the amp/filter envelope over the slice's ghost,
   scaled to the slice (so it stretches when the slice does; a reversed pad mirrors it) with a **TRIGGER** to
-  audition; the filter tab adds a low-pass with Cutoff, Reso and envelope depth. The **LFO** tab has the same
+  audition, and all 16 pads along the bottom to switch without leaving; the filter tab adds a low-pass with
+  Cutoff, Reso and envelope depth. The **LFO** tab has the same
   four waves, a free rate or **SYNC** to the project tempo (1/1 … 1/16T), depth and an AMP/FILTER/PITCH target,
   with the filter controls at the bottom. The editor's pads play while held, so GATE/LOOP work as in
   PLAY-12, and slice edits are heard on a held loop as it is dragged. **PRESETS** saves the pads and the
