@@ -962,6 +962,7 @@ class SamplerEditor:
                         "drag to pan · yellow lines chop · white handles resize · the white bar moves the slice",
                         DIM, 10, Qt.AlignLeft | Qt.AlignVCenter, elide=True)
 
+    PITCH_LO, PITCH_HI = -36.0, 12.0  # three octaves down, one up
     LFO_WAVES = ("SINE", "TRI", "SQUARE", "SAW")
     LFO_TARGETS = ("AMP", "FILTER", "PITCH")
     LFO_DIVS = (("1/1", 0.25), ("1/2", 0.5), ("1/4", 1.0), ("1/8", 2.0), ("1/16", 4.0),
@@ -1303,7 +1304,7 @@ class SamplerEditor:
         self.knob(p, pan, "PAN", pad["pan"], -1.0, 1.0, 1.5 * s, 0.01,
                   lambda: self.pads[self.pad]["pan"], lambda v: self.pads[self.pad].__setitem__("pan", v))
         # 12 px per semitone (it was 4.8, which made 0..2 jump by 1..3); a drag near a whole semitone snaps
-        self.knob(p, pitch, "PITCH", pad["pitch"], -12.0, 12.0, 1.2 * s, 0.1,
+        self.knob(p, pitch, "PITCH", pad["pitch"], self.PITCH_LO, self.PITCH_HI, 1.2 * s, 0.1,
                   lambda: self.pads[self.pad]["pitch"], lambda v: self.pads[self.pad].__setitem__("pitch", v),
                   snap=self.snap_pitch)
         gate = QRectF(buttons.left(), buttons.top(), buttons.width(), 18 * s)

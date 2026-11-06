@@ -2625,6 +2625,11 @@ assert editor.pads[0]["pitch"] == 2.0, editor.pads[0]["pitch"]
 editor.pads[0]["pitch"] = 1.5
 editor.snap_pitch()
 assert editor.pads[0]["pitch"] == 1.5, "a half semitone is not snapped away"
+assert (SamplerEditor.PITCH_LO, SamplerEditor.PITCH_HI) == (-36.0, 12.0)
+editor.pads[0]["pitch"] = SamplerEditor.PITCH_LO
+editor.save_map()
+_, lowpitched, _ = read_manifest(manifest)
+assert lowpitched[0]["pitch"] == -36.0, lowpitched[0]["pitch"]
 # STRETCH: pitch without changing the slice's length, stored in the map
 editor.toggle_stretch()
 assert editor.pads[0]["stretch"] == 1
