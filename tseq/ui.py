@@ -285,6 +285,7 @@ class Window(QWidget):
         self.dialog = None  # (name, description, panel) shown over everything
         self.dialog_rect = QRectF()
         self.owner = {}  # touch id -> panel
+        self.mouse = False  # the app sets this when no touchscreen was found: the pointer works everywhere
         self.dirty = False  # something may have been edited since the last save
         self.broken = set()  # panels whose tick raised: reported once, the clock keeps going
         self.broken_paint = set()  # panels whose draw raised: drawn as an error, the rest still paints
@@ -376,15 +377,15 @@ class Window(QWidget):
         return super().event(e)
 
     def mousePressEvent(self, e):
-        if e.source() == Qt.MouseEventNotSynthesized:
+        if self.mouse or e.source() == Qt.MouseEventNotSynthesized:
             self.press(MOUSE_ID, e.position())
 
     def mouseMoveEvent(self, e):
-        if e.source() == Qt.MouseEventNotSynthesized:
+        if self.mouse or e.source() == Qt.MouseEventNotSynthesized:
             self.move(MOUSE_ID, e.position())
 
     def mouseReleaseEvent(self, e):
-        if e.source() == Qt.MouseEventNotSynthesized:
+        if self.mouse or e.source() == Qt.MouseEventNotSynthesized:
             self.release(MOUSE_ID, e.position())
 
     def keyPressEvent(self, e):

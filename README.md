@@ -31,7 +31,8 @@ the set on **one screen**, sized for fingers, so you can play standing up, look 
 cursor, and change the arrangement **on the bar** instead of on the downbeat of a mistake.
 
 - **Play it, don't point at it.** Multi-touch modules, hold-then-drag for anything destructive, no tiny
-  window furniture. A mouse works too — it is just less fun.
+  window furniture. A mouse works too: if no touchscreen is detected, the app shows the pointer and accepts
+  mouse events, so a desktop can run it — it is just less fun.
 - **Your plugins, not ours.** Carla hosts CLAP, LV2 and VST3 inside the app: per-track chains, effect
   buses, a mixer with real metering, and a patchbay made of cables you draw with a tap. Plugin GUIs open
   in their own windows only if you ask them to.

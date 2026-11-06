@@ -8,6 +8,7 @@ import traceback
 from pathlib import Path
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QInputDevice
 from PySide6.QtWidgets import QApplication
 
 from .dialogs import Chooser
@@ -37,6 +38,15 @@ DEFAULT_CONFIG = {
 
 
 ERROR_LOG = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "touch-seq" / "errors.log"
+
+
+def touch_screen():
+    """Whether the machine reports a touchscreen. Without one the pointer is shown and mouse events are
+    accepted even when Qt marks them as synthesized (a desktop running the app in a window)."""
+    try:
+        return any(device.type() == QInputDevice.DeviceType.TouchScreen for device in QInputDevice.devices())
+    except Exception:  # no input-device API, or a platform that does not answer: assume a desktop
+        return False
 
 
 def log_errors():
@@ -97,7 +107,11 @@ def main(version):
         signal.signal(signal.SIGINT, lambda *_: w.close())
         w.setScreen(screen)
         w.setGeometry(screen.geometry())
-        w.setCursor(Qt.BlankCursor)
+        touch = touch_screen()
+        w.mouse = not touch
+        w.setCursor(Qt.BlankCursor if touch else Qt.ArrowCursor)
+        if not touch:
+            w.setMouseTracking(True)
         w.showFullScreen()
 
     racks = []
