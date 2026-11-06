@@ -988,12 +988,15 @@ class SamplerEditor:
             self.peak_cache[key] = values
 
         self.panel.box(p, area, "#0e1116", BORDER, radius=6)
-        # the slice itself, behind everything, dim: the range the envelope is drawn over
+        # the slice itself, behind everything: the range the envelope is drawn over. A quiet slice is scaled
+        # up so it stays visible as a ghost rather than a flat line.
+        peak = max((max(abs(low), abs(high)) for low, high in values), default=0.0)
+        gain = min(6.0, 0.9 / max(0.03, peak))
         p.setPen(QPen(QColor(56, 214, 255, 80), 1.0 * s))
         for n, (low, high) in enumerate(values):
             x = area.left() + (n + 0.5) * area.width() / max(1, len(values))
-            y0 = area.center().y() - high * area.height() * 0.42
-            y1 = area.center().y() - low * area.height() * 0.42
+            y0 = area.center().y() - max(-1.0, min(1.0, high * gain)) * area.height() * 0.42
+            y1 = area.center().y() - max(-1.0, min(1.0, low * gain)) * area.height() * 0.42
             p.drawLine(QPointF(x, y0), QPointF(x, y1))
         self.panel.text(p, area.adjusted(4 * s, 0, 0, -2 * s), "slice",
                         QColor(56, 214, 255, 150), 10, Qt.AlignLeft | Qt.AlignBottom)
