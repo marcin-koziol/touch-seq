@@ -6,6 +6,7 @@
 #ifndef SAMPLER_CORE_HPP_INCLUDED
 #define SAMPLER_CORE_HPP_INCLUDED
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cmath>
@@ -15,6 +16,27 @@
 #include <vector>
 
 #include "dr_wav.h"
+
+struct Envelope {
+    float attack = 0.0f, decay = 0.0f, sustain = 1.0f, release = 0.0f;  // fractions of the slice
+
+    // The value at `t` (0..1 through the slice). A loop never runs the release segment: it holds sustain.
+    float value(float t, bool withRelease) const {
+        if (t <= 0.0f)
+            return attack > 0.0f ? 0.0f : 1.0f;
+        if (attack > 0.0f && t < attack)
+            return t / attack;
+        const float d = attack + decay;
+        if (decay > 0.0f && t < d)
+            return 1.0f - (1.0f - sustain) * (t - attack) / decay;
+        if (withRelease && release > 0.0f) {
+            const float r = 1.0f - release;
+            if (t >= r)
+                return sustain * std::max(0.0f, 1.0f - (t - r) / release);
+        }
+        return sustain;
+    }
+};
 
 struct SamplerPad {
     std::shared_ptr<const std::vector<float>> data;  // mono, the whole file (shared by light map updates)
@@ -31,6 +53,10 @@ struct SamplerPad {
     bool reverse = false;
     bool gate = false;  // play only while the note is held; one-shot plays to the end
     bool stretch = false;  // keep the slice's length when PITCH changes (granular pitch shift)
+    Envelope amp, filter;  // amp and filter envelopes, both over the slice
+    float cutoff = 20000.0f;  // low-pass, Hz
+    float reso = 0.0f;        // 0..1
+    float envAmount = 0.0f;   // filter envelope depth, octaves
 
     bool loaded() const { return data && end > start && end <= data->size(); }
 };
@@ -82,6 +108,8 @@ private:
         double grainPos[2] = {0.0, 0.0};
         double grainAge[2] = {0.0, 0.0};
         double grainLen = 1.0;
+        double clock = 0.0;          // output frames since note-on, for the envelope
+        float ic1eq = 0.0f, ic2eq = 0.0f;  // the voice's low-pass state
     };
 
     void load();

@@ -70,7 +70,10 @@ cursor, and change the arrangement **on the bar** instead of on the downbeat of 
   held vs one-shot) and a **GRP** playback group: pads in the same group cut each other, like MONO for that
   group. **MONO** cuts the previous pad when a new one starts. **PITCH** moves at 12 px per semitone and snaps
   to a whole semitone on release; **STRETCH** shifts the pitch without changing the slice's length (a granular
-  shift, not resampling). **STOP** silences every voice. The editor's pads play while held, like PLAY-12's, so
+  shift, not resampling). **STOP** silences every voice. **ADSR** turns the waveform into the amp or filter
+  envelope editor: the slice's waveform is a dim ghost and the curve is drawn above it. The times are fractions
+  of the slice, so lengthening the slice stretches the envelope with it; the filter tab also has **Cutoff**,
+  **Reso** and the envelope depth. The editor's pads play while held, like PLAY-12's, so
   GATE and LOOP are heard; dragging the slice handles or the **↔** bar updates a held loop as you drag, with no
   gap. **LOCATE** centres the waveform on the selected pad's slice, zoomed so it fills about a third of the
   view. **PRESETS**
@@ -245,7 +248,9 @@ the first free name (*Touch-Seq 2*, …) and says so in HOST-4's status line: bo
   **↔** bar moves the whole slice. Each pad has Gain (up to 4×), Pan, Pitch, Loop, Reverse and **Gate** and a **GRP**
   playback group: pads in the same group cut each other; the pads take the drum voices' fixed colors.
   **MONO** cuts the previous pad when a new one starts; **STRETCH** shifts the pitch without changing the
-  length, and **STOP** silences every voice. The editor's pads play while held, so GATE/LOOP work as in
+  length, and **STOP** silences every voice. **ADSR** shows the amp/filter envelope over the slice as a ghost,
+  scaled to the slice (so it stretches when the slice does); the filter tab adds a low-pass with Cutoff, Reso
+  and envelope depth. The editor's pads play while held, so GATE/LOOP work as in
   PLAY-12, and slice edits are heard on a held loop as it is dragged. **PRESETS** saves the pads and the
   samples they use on the machine (not in the project's plugin folder): a track or project deleted later
   leaves the preset intact, and one preset can be loaded into another project; SAVE asks for the name on the
@@ -280,6 +285,7 @@ the first free name (*Touch-Seq 2*, …) and says so in HOST-4's status line: bo
 | ![Space: the delay and reverb in one, its knobs in HOST-4](docs/screenshots/space.png) | ![Mixer](docs/screenshots/mixer.png) |
 | ![The sampler: Project 6's choir chopped into 16 pads, with playback groups and the drum colors](docs/screenshots/sampler.png) | ![The sampler's presets: the pads and their samples kept outside the project](docs/screenshots/sampler-presets.png) |
 | ![PLAY-12: the sampler's 16 pads in the drum colors](docs/screenshots/sampler-pads.png) | ![The playhead: a green line through the playing pad's slice](docs/screenshots/sampler-playhead.png) |
+| ![The amp envelope over the slice ghost](docs/screenshots/sampler-adsr.png) | ![The filter envelope and its low-pass](docs/screenshots/sampler-adsr-filter.png) |
 | ![The plugin browser on BUILTIN: our own plugins first](docs/screenshots/builtin.png) | |
 | ![Plugin knobs grouped by section: OSC, ENVELOPE, FILTER, DELAY, each in its own box](docs/screenshots/knobs.png) | ![A sequence of parameters as bars: Sideous' 16 LFO steps, bipolar around the middle line](docs/screenshots/steps.png) |
 

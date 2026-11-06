@@ -73,6 +73,11 @@ int main() {
     stretch << "pad 1 tone.wav 0 48000 37 1.0 0.0 12 0 0 0 0 1\n";   // +12, stretch: same length
     stretch << "pad 2 tone.wav 0 48000 38 1.0 0.0 12 0 0 0 0 0\n";   // +12, resample: half the length
     stretch.close();
+    std::ofstream envelopes(root / "sampler" / "sampler-12.txt");
+    envelopes << "mono 0\n";
+    envelopes << "pad 0 tone.wav 0 48000 36 1.0 0.0 0 0 0 0 0 0 0.5 0 1 0 0 0 1 0 20000 0 0\n";  // slow attack
+    envelopes << "pad 1 tone.wav 0 48000 37 1.0 0.0 0 0 0 0 0 0 0 0 1 0 0 0 1 0 200 0 0\n";    // 200 Hz low-pass
+    envelopes.close();
 
     setenv("TOUCHSEQ_SAMPLER_DIR", root.c_str(), 1);
     SamplerCore core;
@@ -189,6 +194,21 @@ int main() {
     assert(core.activeVoices() == 0);
     core.allNotesOff();
     std::puts("stretch OK");
+
+    core.setSlot(12);  // amp/filter envelopes and the low-pass
+    core.noteOn(36, 127);
+    core.process(left.data(), right.data(), 48000);
+    const double attackRms = rms_range(left, 0, 2000), sustainRms = rms_range(left, 20000, 22000);
+    std::printf("amp envelope: %.4f -> %.4f\n", attackRms, sustainRms);
+    assert(attackRms < sustainRms * 0.3);
+    core.allNotesOff();
+    core.noteOn(37, 127);
+    core.process(left.data(), right.data(), 48000);
+    const double filteredRms = rms_range(left, 20000, 22000);
+    std::printf("filter: RMS %.4f\n", filteredRms);
+    assert(filteredRms < 0.1);  // 440 Hz through a 200 Hz low-pass
+    core.allNotesOff();
+    std::puts("amp/filter envelope OK");
 
     core.setSlot(8);  // no manifest for this slot
     core.noteOn(36, 127);

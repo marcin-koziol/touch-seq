@@ -2627,6 +2627,31 @@ view = editor.view_end - editor.view_start
 assert 2.5 <= view / 300 <= 3.5, view
 assert abs((editor.view_start + editor.view_end) / 2 - 1150) <= 60, (editor.view_start, editor.view_end)
 editor.pads[0]["start"], editor.pads[0]["end"] = old_start, old_end
+# the ADSR editor: amp/filter envelopes, stored with the pad and stretched with its slice
+editor.pad = 0
+editor.env_tab = "amp"
+editor.pads[0]["amp"] = [0.0, 0.0, 1.0, 0.0]
+editor.set_env("attack", 0.25, 1.0)
+editor.set_env("decay", 0.5, 0.5)
+assert editor.pads[0]["amp"] == [0.25, 0.25, 0.5, 0.0], editor.pads[0]["amp"]
+assert abs(editor.env_value(editor.pads[0]["amp"], 0.25) - 1.0) < 1e-6
+assert abs(editor.env_value(editor.pads[0]["amp"], 0.5) - 0.5) < 1e-6
+editor.set_env("release", 0.8, 0.5)
+assert abs(editor.pads[0]["amp"][3] - 0.2) < 1e-6, editor.pads[0]["amp"]
+editor.pads[0]["cutoff"], editor.pads[0]["reso"], editor.pads[0]["env"] = 1000.0, 0.3, 2.0
+editor.save_map()
+_, envsaved, _ = read_manifest(manifest)
+assert all(abs(a - b) < 1e-6 for a, b in zip(envsaved[0]["amp"], editor.pads[0]["amp"]))
+assert all(abs(a - b) < 1e-6 for a, b in zip(envsaved[0]["filter"], editor.pads[0]["filter"]))
+assert abs(envsaved[0]["cutoff"] - 1000.0) < 1e-3 and abs(envsaved[0]["reso"] - 0.3) < 1e-6
+assert abs(envsaved[0]["env"] - 2.0) < 1e-6
+editor.env_open = True
+img.fill(0); q = QPainter(img); editor.draw(q, QRectF(0, 0, 700, 400), fake_plugin, 5, manifest); q.end()
+img.save(str(OUT / "sampler_adsr.png"))
+editor.env_tab = "filter"
+img.fill(0); q = QPainter(img); editor.draw(q, QRectF(0, 0, 700, 400), fake_plugin, 5, manifest); q.end()
+img.save(str(OUT / "sampler_adsr_filter.png"))
+editor.env_open = False
 # the knobs move in their own units: gain past 1 (0..4) in 0.02 steps, pitch in 0.1 semitones
 gv = []
 gpd = PadDrag(QPointF(0, 0), lambda: 1.0, gv.append, 0.0, 4.0, 1.2, 0.02, lambda: None)

@@ -1,6 +1,7 @@
 """The sampler editor: a WAV waveform, chop markers, 16 MPC-style pads and the selected pad's controls. It
 draws in HOST-4's parameter area (the sampler has no window of its own) and keeps the pad map in the project's
 plugins folder, where the sampler plugin reads it."""
+import math
 import os
 import re
 import shutil
@@ -97,12 +98,18 @@ def read_manifest(path):
             elif parts[0] == "pad" and len(parts) >= 11:
                 index = int(parts[1])
                 if 0 <= index < SAMPLER_PADS:
-                    pads[index] = {"file": parts[2], "start": int(parts[3]), "end": int(parts[4]),
-                                   "root": int(parts[5]), "gain": float(parts[6]), "pan": float(parts[7]),
-                                   "pitch": float(parts[8]), "loop": int(parts[9]), "reverse": int(parts[10]),
-                                   "gate": int(parts[11]) if len(parts) >= 12 else 0,
-                                   "group": int(parts[12]) if len(parts) >= 13 else 0,
-                                   "stretch": int(parts[13]) if len(parts) >= 14 and parts[13].isdigit() else 0}
+                    pad = {"file": parts[2], "start": int(parts[3]), "end": int(parts[4]),
+                           "root": int(parts[5]), "gain": float(parts[6]), "pan": float(parts[7]),
+                           "pitch": float(parts[8]), "loop": int(parts[9]), "reverse": int(parts[10]),
+                           "gate": int(parts[11]) if len(parts) >= 12 else 0,
+                           "group": int(parts[12]) if len(parts) >= 13 else 0,
+                           "stretch": int(parts[13]) if len(parts) >= 14 and parts[13].isdigit() else 0}
+                    if len(parts) >= 25:  # envelopes and the filter
+                        pad["amp"] = [float(parts[k]) for k in (14, 15, 16, 17)]
+                        pad["filter"] = [float(parts[k]) for k in (18, 19, 20, 21)]
+                        pad["cutoff"], pad["reso"], pad["env"] = (float(parts[22]), float(parts[23]),
+                                                                  float(parts[24]))
+                    pads[index] = pad
     except (OSError, ValueError):
         pass
     if not current:
@@ -121,7 +128,11 @@ def write_manifest(path, current, pads, mono=0):
             lines.append(f"pad {index} {pad['file']} {int(pad['start'])} {int(pad['end'])} {int(pad['root'])} "
                          f"{pad['gain']:.6f} {pad['pan']:.6f} {pad['pitch']:.6f} "
                          f"{int(pad['loop'])} {int(pad['reverse'])} {int(pad.get('gate', 0))} "
-                         f"{int(pad.get('group', 0))} {int(pad.get('stretch', 0))}")
+                         f"{int(pad.get('group', 0))} {int(pad.get('stretch', 0))} "
+                         + " ".join(f"{v:.6f}" for v in (pad.get("amp") or (0, 0, 1, 0)))
+                         + " " + " ".join(f"{v:.6f}" for v in (pad.get("filter") or (0, 0, 1, 0)))
+                         + f" {pad.get('cutoff', 20000.0):.3f} {pad.get('reso', 0.0):.6f} "
+                           f"{pad.get('env', 0.0):.6f}")
     # write beside it and rename: the plugin reads the manifest from the audio thread, and a half-written file
     # (or a light map update during a slice drag) would make pads vanish for a moment
     temporary = path.with_suffix(path.suffix + ".tmp")
@@ -253,6 +264,23 @@ class PadHold(Gesture):
             self.stop = None
 
 
+class EnvDrag(Gesture):
+    """A point of the amp/filter envelope: sideways moves its time, up/down sets the sustain level."""
+
+    def __init__(self, editor, rect, which, pos):
+        self.editor, self.rect, self.which = editor, rect, which
+        self.move(pos)
+
+    def move(self, pos):
+        t = max(0.0, min(1.0, (pos.x() - self.rect.left()) / max(1.0, self.rect.width())))
+        v = max(0.0, min(1.0, (self.rect.bottom() - pos.y()) / max(1.0, self.rect.height())))
+        self.editor.set_env(self.which, t, v)
+        self.editor.save_live()
+
+    def release(self, pos):
+        self.editor.save_reload()
+
+
 class RangeDrag(Gesture):
     """The white bar between the pad's handles: sideways moves the whole slice."""
 
@@ -296,6 +324,8 @@ class SamplerEditor:
         self.presets_open = False  # the preset list drawn over the editor
         self.preset_scroll = 0.0
         self.naming = None  # the keyboard naming a preset
+        self.env_open = False  # the waveform shows the amp/filter envelopes instead
+        self.env_tab = "amp"  # "amp" or "filter"
         self.message = ""
         self.message_at = 0.0
         self.message_color = TEXT
@@ -524,7 +554,8 @@ class SamplerEditor:
     def new_pad(self, start, end, root):
         return {"file": self.current, "start": int(start), "end": int(end), "root": int(root),
                 "gain": 1.0, "pan": 0.0, "pitch": 0.0, "loop": 0, "reverse": 0, "gate": 0, "group": 0,
-                "stretch": 0}
+                "stretch": 0, "amp": [0.0, 0.0, 1.0, 0.0], "filter": [0.0, 0.0, 1.0, 0.0],
+                "cutoff": 20000.0, "reso": 0.0, "env": 0.0}
 
     def copy_pad(self):
         """Arm a copy: the next pad tapped gets this slice and its settings. The target keeps its own note as
@@ -778,6 +809,10 @@ class SamplerEditor:
         self.panel.text(p, name, self.current or "no sample", DIM, 12, elide=True)
 
         body = QRectF(r.left(), header.bottom() + 6 * s, r.width(), r.bottom() - header.bottom() - 6 * s)
+        if self.env_open:  # the envelope editor takes the whole area: the pads stay out of its way
+            self.draw_wave(p, body)
+            self.draw_message(p, body, r)
+            return
         wave_h = body.height() * 0.46
         wave = QRectF(body.left(), body.top(), body.width(), wave_h)
         lower = QRectF(body.left(), wave.bottom() + 8 * s, body.width(), body.bottom() - wave.bottom() - 8 * s)
@@ -803,6 +838,8 @@ class SamplerEditor:
         toast = QRectF(0, 0, width, 30 * s)
         if self.presets_open and area is not None:
             toast.moveCenter(QPointF(area.center().x(), area.bottom() - 26 * s))
+        elif self.env_open:  # the curve owns the middle
+            toast.moveCenter(QPointF(wave.center().x(), wave.bottom() - 24 * s))
         elif self.loading:  # the spinner owns the middle
             toast.moveCenter(QPointF(wave.center().x(), wave.bottom() - 24 * s))
         else:
@@ -815,6 +852,9 @@ class SamplerEditor:
         self.panel.box(p, rect, "#0e1116", BORDER, radius=8)
         if self.loading:
             self.draw_spinner(p, rect)
+            return
+        if self.env_open:
+            self.draw_envelope(p, rect)
             return
         if not self.samples or not self.frames:
             self.panel.text(p, rect, "LOAD a WAV to see its waveform", DIM, 14)
@@ -898,6 +938,8 @@ class SamplerEditor:
         fit = QRectF(zoom_out.left() - 46 * s, zoom_in.top(), 42 * s, 24 * s)
         stop = QRectF(fit.left() - 58 * s, zoom_in.top(), 52 * s, 24 * s)
         locate = QRectF(stop.left() - 64 * s, zoom_in.top(), 58 * s, 24 * s)
+        env = QRectF(locate.left() - 64 * s, zoom_in.top(), 58 * s, 24 * s)
+        self.panel.button(p, env, "ADSR", self.toggle_env)
         self.panel.button(p, locate, "LOCATE", self.focus_pad)
         self.panel.button(p, stop, "STOP", self.stop_all, color=WARN)
         self.panel.button(p, zoom_in, "+", lambda: self.zoom(1.6))
@@ -906,6 +948,97 @@ class SamplerEditor:
         self.panel.text(p, QRectF(rect.left() + 8 * s, rect.bottom() - 16 * s, rect.width() - 16 * s, 14 * s),
                         "drag to pan · yellow lines chop · white handles resize · the white bar moves the slice",
                         DIM, 10, Qt.AlignLeft | Qt.AlignVCenter, elide=True)
+
+    def draw_envelope(self, p, rect):
+        """The amp/filter envelopes over the selected slice, with the slice's waveform as a dim ghost."""
+        s = self.panel.s
+        pad = self.pads[self.pad]
+        header = QRectF(rect.left() + 10 * s, rect.top() + 6 * s, rect.width() - 20 * s, 28 * s)
+        amp, filt, _, wave = split(header, [62 * s, 66 * s, 0, 58 * s], 6 * s)
+        self.panel.button(p, amp, "AMP", lambda: setattr(self, "env_tab", "amp"), on=self.env_tab == "amp")
+        self.panel.button(p, filt, "FILTER", lambda: setattr(self, "env_tab", "filter"),
+                          on=self.env_tab == "filter")
+        self.panel.button(p, wave, "WAVE", self.toggle_env)
+        if not pad or not self.frames or pad.get("file") != self.current:
+            self.panel.text(p, QRectF(rect.left(), header.bottom(), rect.width(), rect.bottom() - header.bottom()),
+                            "select a pad with a slice first", DIM, 14)
+            return
+        env = pad.get("amp" if self.env_tab == "amp" else "filter") or [0.0, 0.0, 1.0, 0.0]
+        body = QRectF(rect.left() + 10 * s, header.bottom() + 8 * s, rect.width() - 20 * s,
+                      rect.height() - header.bottom() - 18 * s)
+        ghost_h = body.height() * 0.26
+        ghost = QRectF(body.left(), body.bottom() - ghost_h, body.width(), ghost_h)
+        area = QRectF(body.left(), body.top(), body.width(), body.height() - ghost_h - 8 * s)
+        side = None
+        if self.env_tab == "filter":
+            side = QRectF(area.right() - 138 * s, area.top(), 138 * s, area.height())
+            area = QRectF(area.left(), area.top(), area.width() - 148 * s, area.height())
+
+        start = max(0, min(self.frames, int(pad["start"])))
+        end = max(start + 1, min(self.frames, int(pad["end"])))
+        columns = max(1, int(ghost.width() / (2 * s)))
+        key = ("env", self.current, start, end, columns)
+        values = self.peak_cache.get(key)
+        if values is None:
+            values = peaks_range(self.samples, start, end, columns)
+            self.peak_cache[key] = values
+        p.setPen(QPen(QColor(56, 214, 255, 95), 1.0 * s))
+        for n, (low, high) in enumerate(values):
+            x = ghost.left() + (n + 0.5) * ghost.width() / max(1, len(values))
+            y0 = ghost.center().y() - high * ghost.height() * 0.45
+            y1 = ghost.center().y() - low * ghost.height() * 0.45
+            p.drawLine(QPointF(x, y0), QPointF(x, y1))
+        self.panel.text(p, ghost.adjusted(2 * s, 0, 0, 0), "slice", QColor(56, 214, 255, 140), 10,
+                        Qt.AlignLeft | Qt.AlignTop)
+
+        self.panel.box(p, area, "#0e1116", BORDER, radius=6)
+        for value in (0.0, 0.5, 1.0):
+            y = area.bottom() - value * area.height()
+            p.setPen(QPen(QColor(255, 255, 255, 25), 1))
+            p.drawLine(QPointF(area.left(), y), QPointF(area.right(), y))
+        points = []
+        steps = 160
+        for i in range(steps + 1):
+            t = i / steps
+            points.append(QPointF(area.left() + t * area.width(),
+                                  area.bottom() - self.env_value(env, t) * area.height()))
+        colour = "#4ade80" if self.env_tab == "amp" else "#38d6ff"
+        p.setPen(QPen(QColor(colour), 2 * s))
+        p.setBrush(Qt.NoBrush)
+        p.drawPolyline(QPolygonF(points))
+        a, d, sus, r = env
+        for which, t, v in (("attack", a, 1.0), ("decay", min(1.0, a + d), sus),
+                            ("release", max(0.0, 1.0 - r), sus)):
+            c = QPointF(area.left() + t * area.width(), area.bottom() - v * area.height())
+            p.setBrush(QColor("#ffffff"))
+            p.setPen(QPen(QColor("#0e1116"), 1.5 * s))
+            p.drawEllipse(c, 6 * s, 6 * s)
+            self.panel.region(QRectF(c.x() - 14 * s, c.y() - 14 * s, 28 * s, 28 * s),
+                              lambda pos, which=which: EnvDrag(self, area, which, pos))
+        self.panel.text(p, QRectF(area.left(), area.top() + 2 * s, area.width(), 14 * s),
+                        f"A {a * 100:.0f}%  D {d * 100:.0f}%  S {sus * 100:.0f}%  R {r * 100:.0f}%",
+                        DIM, 10, Qt.AlignRight | Qt.AlignTop)
+
+        if side is not None:
+            knob_h = (side.height() - 12 * s) / 3
+            controls = (
+                ("CUTOFF", math.log(max(20.0, pad.get("cutoff", 20000.0)) / 20) / math.log(1000),
+                 lambda: math.log(max(20.0, self.pads[self.pad].get("cutoff", 20000.0)) / 20) / math.log(1000),
+                 lambda v: self.pads[self.pad].__setitem__("cutoff", 20.0 * 1000.0 ** v),
+                 lambda v: f"{20.0 * 1000.0 ** v:.0f} Hz"),
+                ("RESO", pad.get("reso", 0.0),
+                 lambda: self.pads[self.pad].get("reso", 0.0),
+                 lambda v: self.pads[self.pad].__setitem__("reso", v),
+                 lambda v: f"{v * 100:.0f}%"),
+                ("ENV", pad.get("env", 0.0),
+                 lambda: self.pads[self.pad].get("env", 0.0),
+                 lambda v: self.pads[self.pad].__setitem__("env", v),
+                 lambda v: f"{v:.1f} oct"),
+            )
+            for n, (label, value, get_, set_, show) in enumerate(controls):
+                r_ = QRectF(side.left(), side.top() + n * (knob_h + 6 * s), side.width(), knob_h)
+                self.knob(p, r_, label, value, 0, 1 if label != "ENV" else 8, 1.5 * s,
+                          0.01 if label != "ENV" else 0.05, get_, set_, show=show)
 
     def draw_spinner(self, p, rect):
         """A turning arc while a sample is read in the background."""
@@ -1058,13 +1191,50 @@ class SamplerEditor:
             if abs(pad["pitch"] - near) <= 0.08:
                 pad["pitch"] = float(near)
 
-    def knob(self, p, rect, label, value, lo, hi, px, unit, get, set_, snap=None):
+    def knob(self, p, rect, label, value, lo, hi, px, unit, get, set_, snap=None, show=None):
         s = self.panel.s
         self.panel.box(p, rect, PANEL, BORDER, radius=8)
         self.panel.text(p, rect.adjusted(0, 3 * s, 0, 0), label, DIM, 10, Qt.AlignHCenter | Qt.AlignTop)
-        self.panel.text(p, rect.adjusted(0, 16 * s, 0, 0), f"{value:.2f}", TEXT, 15, bold=True)
+        self.panel.text(p, rect.adjusted(0, 16 * s, 0, 0), show(value) if show else f"{value:.2f}", TEXT, 15,
+                        bold=True)
         self.panel.region(rect, lambda pos: PadDrag(pos, get, set_, lo, hi, px, unit, self.save_reload, snap,
                                                     self.save_live))
+
+    def toggle_env(self):
+        """The waveform area becomes the amp/filter envelope editor."""
+        self.env_open = not self.env_open
+
+    @staticmethod
+    def env_value(env, t):
+        """The same curve the plugin plays: attack, decay, sustain, release, all fractions of the slice."""
+        a, d, s, r = env
+        if t <= 0.0:
+            return 0.0 if a > 0.0 else 1.0
+        if a > 0.0 and t < a:
+            return t / a
+        if d > 0.0 and t < a + d:
+            return 1.0 - (1.0 - s) * (t - a) / d
+        if r > 0.0:
+            rr = 1.0 - r
+            if t >= rr:
+                return s * max(0.0, 1.0 - (t - rr) / r)
+        return s
+
+    def set_env(self, which, t, v):
+        """Move one envelope point: attack, decay (and sustain with its height) or release."""
+        pad = self.pads[self.pad]
+        if not pad:
+            return
+        env = pad.setdefault("amp" if self.env_tab == "amp" else "filter", [0.0, 0.0, 1.0, 0.0])
+        a, d, s, r = env
+        if which == "attack":
+            a = min(max(0.0, t), max(0.0, 1.0 - d - r))
+        elif which == "decay":
+            d = min(max(0.0, t - a), max(0.0, 1.0 - a - r))
+            s = max(0.0, min(1.0, v))
+        else:
+            r = min(max(0.0, 1.0 - t), max(0.0, 1.0 - a - d))
+        env[:] = [a, d, s, r]
 
     def toggle_mono(self):
         self.mono = not self.mono

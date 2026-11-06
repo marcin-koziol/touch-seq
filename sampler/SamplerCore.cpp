@@ -31,6 +31,17 @@ static std::shared_ptr<const std::vector<float>> readSample(const std::string& p
     return samples;
 }
 
+static void setPadEnvelope(SamplerPad& pad, float aA, float aD, float aS, float aR,
+                           float fA, float fD, float fS, float fR,
+                           float cutoff, float reso, float envAmount) {
+    auto clamp01 = [](float v) { return std::max(0.0f, std::min(1.0f, v)); };
+    pad.amp = Envelope{clamp01(aA), clamp01(aD), clamp01(aS), clamp01(aR)};
+    pad.filter = Envelope{clamp01(fA), clamp01(fD), clamp01(fS), clamp01(fR)};
+    pad.cutoff = std::max(20.0f, std::min(20000.0f, cutoff));
+    pad.reso = clamp01(reso);
+    pad.envAmount = std::max(0.0f, std::min(8.0f, envAmount));
+}
+
 void SamplerCore::prepare(double sampleRate) {
     rate = sampleRate > 1000.0 ? sampleRate : 48000.0;
     releaseStep = 1.0f / (0.005f * float(rate));  // 5 ms fade on note-off
@@ -80,11 +91,15 @@ void SamplerCore::load() {
         int rootNote = 36;
         float gain = 1.0f, pan = 0.0f, pitch = 0.0f;
         int loop = 0, reverse = 0, gate = 0, group = 0, stretch = 0;
+        float ampA = 0.0f, ampD = 0.0f, ampS = 1.0f, ampR = 0.0f;
+        float fA = 0.0f, fD = 0.0f, fS = 1.0f, fR = 0.0f;
+        float cutoff = 20000.0f, reso = 0.0f, envAmt = 0.0f;
         if (!(in >> index >> name >> start >> end >> rootNote >> gain >> pan >> pitch >> loop >> reverse))
             continue;
         in >> gate;     // older manifests have no gate field: one-shot
         in >> group;    // and no group field: no playback group
         in >> stretch;  // and no stretch field: resample (the pitch changes the length)
+        in >> ampA >> ampD >> ampS >> ampR >> fA >> fD >> fS >> fR >> cutoff >> reso >> envAmt;
         if (index < 0 || index >= kPads)
             continue;
 
@@ -111,6 +126,7 @@ void SamplerCore::load() {
         pad.reverse = reverse != 0;
         pad.gate = gate != 0;
         pad.stretch = stretch != 0;
+        setPadEnvelope(pad, ampA, ampD, ampS, ampR, fA, fD, fS, fR, cutoff, reso, envAmt);
     }
 
     std::atomic_store(&bank, std::shared_ptr<const SamplerBank>(next));
@@ -190,11 +206,15 @@ void SamplerCore::applyMap() {
         int rootNote = 36;
         float gain = 1.0f, pan = 0.0f, pitch = 0.0f;
         int loop = 0, reverse = 0, gate = 0, group = 0, stretch = 0;
+        float ampA = 0.0f, ampD = 0.0f, ampS = 1.0f, ampR = 0.0f;
+        float fA = 0.0f, fD = 0.0f, fS = 1.0f, fR = 0.0f;
+        float cutoff = 20000.0f, reso = 0.0f, envAmt = 0.0f;
         if (!(in >> index >> name >> start >> end >> rootNote >> gain >> pan >> pitch >> loop >> reverse))
             continue;
         in >> gate;
         in >> group;
         in >> stretch;
+        in >> ampA >> ampD >> ampS >> ampR >> fA >> fD >> fS >> fR >> cutoff >> reso >> envAmt;
         if (index < 0 || index >= kPads)
             continue;
         SamplerPad& pad = next->pads[index];
@@ -208,6 +228,7 @@ void SamplerCore::applyMap() {
         pad.reverse = reverse != 0;
         pad.gate = gate != 0;
         pad.stretch = stretch != 0;
+        setPadEnvelope(pad, ampA, ampD, ampS, ampR, fA, fD, fS, fR, cutoff, reso, envAmt);
         if (current && current->pads[index].file == name && current->pads[index].data) {
             pad.data = current->pads[index].data;  // the same sample: keep it, no gap
             pad.fileRate = current->pads[index].fileRate;
@@ -281,6 +302,8 @@ void SamplerCore::noteOn(int note, int velocity) {
     voice->gate = pad.gate;
     voice->releasing = false;
     voice->release = 1.0f;
+    voice->clock = 0.0;
+    voice->ic1eq = voice->ic2eq = 0.0f;
     voice->active = true;
     voice->age = ++nextAge;
 }
@@ -414,7 +437,28 @@ void SamplerCore::process(float* left, float* right, uint32_t frames) {
                 voice.active = false;
             }
 
-            const float gain = voice.gain * voice.release;
+            const double stepAbs = std::fabs(voice.stretch ? voice.baseStep : voice.step);
+            const double span = double(pad.end - pad.start);
+            const float t = span > 0.0 ? float(voice.clock * stepAbs / span) : 0.0f;
+            const bool withRelease = !voice.loop;  // a loop holds sustain; a one-shot releases at its end
+            const float amp = pad.amp.value(t, withRelease);
+            if (pad.cutoff < 19900.0f || pad.envAmount > 0.001f) {
+                const float fenv = pad.filter.value(t, withRelease);
+                float cutoff = pad.cutoff * std::pow(2.0f, pad.envAmount * fenv);
+                cutoff = std::max(20.0f, std::min(20000.0f, cutoff));
+                const float g = std::tan(3.141592653589793f * cutoff / float(rate));
+                const float k = 1.0f / (0.707f + 9.3f * pad.reso);  // Q from 0.707 to 10
+                const float a1 = 1.0f / (1.0f + g * (g + k));
+                const float a2 = g * a1, a3 = g * a2;
+                const float v3 = sample - voice.ic2eq;
+                const float v1 = a1 * voice.ic1eq + a2 * v3;
+                const float v2 = voice.ic2eq + a2 * voice.ic1eq + a3 * v3;
+                voice.ic1eq = 2.0f * v1 - voice.ic1eq;
+                voice.ic2eq = 2.0f * v2 - voice.ic2eq;
+                sample = v2;
+            }
+            voice.clock += 1.0;
+            const float gain = voice.gain * voice.release * amp;
             outL += sample * gain * voice.panL;
             outR += sample * gain * voice.panR;
         }
