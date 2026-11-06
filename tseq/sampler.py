@@ -112,6 +112,8 @@ def read_manifest(path):
                     if len(parts) >= 29:  # the LFO
                         pad["lfo_wave"], pad["lfo_rate"] = int(parts[25]), float(parts[26])
                         pad["lfo_depth"], pad["lfo_target"] = float(parts[27]), int(parts[28])
+                    if len(parts) >= 31:
+                        pad["lfo_sync"], pad["lfo_div"] = int(parts[29]), int(parts[30])
                     pads[index] = pad
     except (OSError, ValueError):
         pass
@@ -137,7 +139,8 @@ def write_manifest(path, current, pads, mono=0):
                          + f" {pad.get('cutoff', 20000.0):.3f} {pad.get('reso', 0.0):.6f} "
                            f"{pad.get('env', 0.0):.6f} {int(pad.get('lfo_wave', 0))} "
                            f"{pad.get('lfo_rate', 2.0):.6f} {pad.get('lfo_depth', 0.0):.6f} "
-                           f"{int(pad.get('lfo_target', 0))}")
+                           f"{int(pad.get('lfo_target', 0))} {int(pad.get('lfo_sync', 0))} "
+                           f"{int(pad.get('lfo_div', 2))}")
     # write beside it and rename: the plugin reads the manifest from the audio thread, and a half-written file
     # (or a light map update during a slice drag) would make pads vanish for a moment
     temporary = path.with_suffix(path.suffix + ".tmp")
@@ -563,7 +566,8 @@ class SamplerEditor:
                 "gain": 1.0, "pan": 0.0, "pitch": 0.0, "loop": 0, "reverse": 0, "gate": 0, "group": 0,
                 "stretch": 0, "amp": [0.0, 0.0, 1.0, 0.0], "filter": [0.0, 0.0, 1.0, 0.0],
                 "cutoff": 20000.0, "reso": 0.0, "env": 0.0,
-                "lfo_wave": 0, "lfo_rate": 2.0, "lfo_depth": 0.0, "lfo_target": 0}
+                "lfo_wave": 0, "lfo_rate": 2.0, "lfo_depth": 0.0, "lfo_target": 0,
+                "lfo_sync": 0, "lfo_div": 2}
 
     def copy_pad(self):
         """Arm a copy: the next pad tapped gets this slice and its settings. The target keeps its own note as
@@ -959,6 +963,8 @@ class SamplerEditor:
 
     LFO_WAVES = ("SINE", "TRI", "SQUARE", "SAW")
     LFO_TARGETS = ("AMP", "FILTER", "PITCH")
+    LFO_DIVS = (("1/1", 0.25), ("1/2", 0.5), ("1/4", 1.0), ("1/8", 2.0), ("1/16", 4.0),
+                ("1/8T", 1.5), ("1/16T", 3.0))
 
     @staticmethod
     def lfo_value(wave, phase):
@@ -982,28 +988,74 @@ class SamplerEditor:
             pad["lfo_target"] = (int(pad.get("lfo_target", 0)) + 1) % len(self.LFO_TARGETS)
             self.save_reload()
 
+    def toggle_lfo_sync(self):
+        pad = self.pads[self.pad]
+        if pad:
+            pad["lfo_sync"] = 0 if pad.get("lfo_sync", 0) else 1
+            self.save_reload()
+
+    def cycle_lfo_div(self):
+        pad = self.pads[self.pad]
+        if pad:
+            pad["lfo_div"] = (int(pad.get("lfo_div", 2)) + 1) % len(self.LFO_DIVS)
+            self.save_reload()
+
+    def filter_controls(self, pad):
+        """(label, value, get, set, show) for the pad's low-pass, shared by the filter tab and the LFO view."""
+        return (
+            ("CUTOFF", math.log(max(20.0, pad.get("cutoff", 20000.0)) / 20) / math.log(1000),
+             lambda: math.log(max(20.0, self.pads[self.pad].get("cutoff", 20000.0)) / 20) / math.log(1000),
+             lambda v: self.pads[self.pad].__setitem__("cutoff", 20.0 * 1000.0 ** v),
+             lambda v: f"{20.0 * 1000.0 ** v:.0f} Hz"),
+            ("RESO", pad.get("reso", 0.0),
+             lambda: self.pads[self.pad].get("reso", 0.0),
+             lambda v: self.pads[self.pad].__setitem__("reso", v),
+             lambda v: f"{v * 100:.0f}%"),
+            ("ENV", pad.get("env", 0.0),
+             lambda: self.pads[self.pad].get("env", 0.0),
+             lambda v: self.pads[self.pad].__setitem__("env", v),
+             lambda v: f"{v:.1f} oct"),
+        )
+
     def draw_envelope(self, p, rect):
-        """The amp/filter envelopes or the LFO over the selected slice, with the slice as a dim ghost."""
+        """The amp/filter envelopes or the LFO over the selected slice, with the slice as a dim ghost and the
+        trigger at the bottom. The LFO view also shows the filter controls there, where there is room."""
         s = self.panel.s
         pad = self.pads[self.pad]
         header = QRectF(rect.left() + 10 * s, rect.top() + 6 * s, rect.width() - 20 * s, 28 * s)
-        amp, filt, lfo, trigger, _, wave = split(
-            header, [58 * s, 62 * s, 44 * s, 86 * s, 0, 58 * s], 6 * s)
+        amp, filt, lfo, _, wave = split(header, [58 * s, 62 * s, 44 * s, 0, 58 * s], 6 * s)
         self.panel.button(p, amp, "AMP", lambda: setattr(self, "env_tab", "amp"), on=self.env_tab == "amp")
         self.panel.button(p, filt, "FILTER", lambda: setattr(self, "env_tab", "filter"),
                           on=self.env_tab == "filter")
         self.panel.button(p, lfo, "LFO", lambda: setattr(self, "env_tab", "lfo"), on=self.env_tab == "lfo")
-        self.panel.box(p, trigger, PANEL, "#4ade80", radius=6)
-        self.panel.text(p, trigger, "TRIGGER", "#4ade80", 14, bold=True)
-        self.panel.region(trigger, lambda pos: PadHold(self, self.pad))
         self.panel.button(p, wave, "WAVE", self.toggle_env)
         if not pad or not self.frames or pad.get("file") != self.current:
             self.panel.text(p, QRectF(rect.left(), header.bottom(), rect.width(), rect.bottom() - header.bottom()),
                             "select a pad with a slice first", DIM, 14)
             return
         tab = self.env_tab
-        area = QRectF(rect.left() + 10 * s, header.bottom() + 8 * s, rect.width() - 20 * s,
+        body = QRectF(rect.left() + 10 * s, header.bottom() + 8 * s, rect.width() - 20 * s,
                       rect.height() - header.bottom() - 18 * s)
+        bottom_h = min(58 * s, max(36 * s, body.height() * 0.20))
+        bottom = QRectF(body.left(), body.bottom() - bottom_h, body.width(), bottom_h)
+        work = QRectF(body.left(), body.top(), body.width(), body.height() - bottom_h - 8 * s)
+        trigger = QRectF(bottom.left(), bottom.top(), min(104 * s, bottom.width() * 0.22), bottom.height())
+        self.panel.box(p, trigger, PANEL, "#4ade80", radius=6)
+        self.panel.text(p, trigger, "TRIGGER", "#4ade80", 14, bold=True)
+        self.panel.region(trigger, lambda pos: PadHold(self, self.pad))
+        if tab == "lfo":  # the filter is here too, where the LFO view has room
+            knob_rects = split(QRectF(trigger.right() + 8 * s, bottom.top(),
+                                      max(0.0, bottom.right() - trigger.right() - 8 * s), bottom.height()),
+                               [0, 0, 0], 8 * s)
+            for r_, (label, value, get_, set_, show) in zip(knob_rects, self.filter_controls(pad)):
+                self.knob(p, r_, label, value, 0, 1 if label != "ENV" else 8, 1.2 * s,
+                          0.01 if label != "ENV" else 0.05, get_, set_, show=show)
+        else:
+            self.panel.text(p, QRectF(trigger.right() + 10 * s, bottom.top(),
+                                      max(0.0, bottom.width() - trigger.width() - 10 * s), bottom.height()),
+                            "hold to audition the pad", DIM, 11, Qt.AlignLeft | Qt.AlignVCenter)
+
+        area = work
         side = None
         if tab in ("filter", "lfo"):
             side = QRectF(area.right() - 138 * s, area.top(), 138 * s, area.height())
@@ -1067,34 +1119,28 @@ class SamplerEditor:
 
         if side is not None:
             knob_h = (side.height() - 12 * s) / 3
-            controls = (
-                ("CUTOFF", math.log(max(20.0, pad.get("cutoff", 20000.0)) / 20) / math.log(1000),
-                 lambda: math.log(max(20.0, self.pads[self.pad].get("cutoff", 20000.0)) / 20) / math.log(1000),
-                 lambda v: self.pads[self.pad].__setitem__("cutoff", 20.0 * 1000.0 ** v),
-                 lambda v: f"{20.0 * 1000.0 ** v:.0f} Hz"),
-                ("RESO", pad.get("reso", 0.0),
-                 lambda: self.pads[self.pad].get("reso", 0.0),
-                 lambda v: self.pads[self.pad].__setitem__("reso", v),
-                 lambda v: f"{v * 100:.0f}%"),
-                ("ENV", pad.get("env", 0.0),
-                 lambda: self.pads[self.pad].get("env", 0.0),
-                 lambda v: self.pads[self.pad].__setitem__("env", v),
-                 lambda v: f"{v:.1f} oct"),
-            )
-            for n, (label, value, get_, set_, show) in enumerate(controls):
+            for n, (label, value, get_, set_, show) in enumerate(self.filter_controls(pad)):
                 r_ = QRectF(side.left(), side.top() + n * (knob_h + 6 * s), side.width(), knob_h)
                 self.knob(p, r_, label, value, 0, 1 if label != "ENV" else 8, 1.5 * s,
                           0.01 if label != "ENV" else 0.05, get_, set_, show=show)
 
     def draw_lfo(self, p, area, side, pad, start, end, mirror):
-        """The LFO curve over the slice, and its wave/rate/depth/target controls on the side."""
+        """The LFO curve over the slice, with wave/sync/rate/depth/target on the side."""
         s = self.panel.s
         wave = int(pad.get("lfo_wave", 0))
         rate = float(pad.get("lfo_rate", 2.0))
         depth = max(0.0, min(1.0, float(pad.get("lfo_depth", 0.0))))
         target = int(pad.get("lfo_target", 0))
+        sync = bool(pad.get("lfo_sync", 0))
+        div = max(0, min(len(self.LFO_DIVS) - 1, int(pad.get("lfo_div", 2))))
+        bpm = getattr(getattr(self.panel, "project", None), "bpm", 120)
+        if sync:
+            div_label, multiplier = self.LFO_DIVS[div]
+            rate_hz = bpm / 60.0 * multiplier
+        else:
+            div_label, rate_hz = "", rate
         seconds = max(1e-6, (end - start) / max(1.0, float(self.rate)))
-        cycles = min(64.0, rate * seconds)  # a very long slice would draw as a solid band
+        cycles = min(64.0, rate_hz * seconds)  # a very long slice would draw as a solid band
         steps = 240
         points = []
         for i in range(steps + 1):
@@ -1108,28 +1154,30 @@ class SamplerEditor:
         p.setPen(QPen(QColor("#facc15"), 2 * s))
         p.setBrush(Qt.NoBrush)
         p.drawPolyline(QPolygonF(points))
+        rate_label = f"{div_label} · {rate_hz:.2f} Hz" if sync else f"{rate_hz:.2f} Hz"
         self.panel.text(p, QRectF(area.left(), area.top() + 2 * s, area.width(), 14 * s),
-                        f"{self.LFO_WAVES[wave]}  ·  {rate:.2f} Hz  ·  depth {depth * 100:.0f}%  ·  "
+                        f"{self.LFO_WAVES[wave]}  ·  {rate_label}  ·  depth {depth * 100:.0f}%  ·  "
                         f"{self.LFO_TARGETS[target]}", DIM, 10, Qt.AlignRight | Qt.AlignTop)
 
         if side is None:
             return
-        row = side.height() / 4
-        wave_btn = QRectF(side.left(), side.top(), side.width(), min(34 * s, row - 4 * s))
-        self.panel.button(p, wave_btn, self.LFO_WAVES[wave], self.cycle_lfo_wave)
-        rate_knob = QRectF(side.left(), wave_btn.bottom() + 6 * s, side.width(), row - 6 * s)
-        self.knob(p, rate_knob, "RATE", math.log(max(0.05, rate) / 0.05) / math.log(400.0),
-                  0, 1, 1.5 * s, 0.01,
-                  lambda: math.log(max(0.05, self.pads[self.pad].get("lfo_rate", 2.0)) / 0.05) / math.log(400.0),
-                  lambda v: self.pads[self.pad].__setitem__("lfo_rate", 0.05 * 400.0 ** v),
-                  show=lambda v: f"{0.05 * 400.0 ** v:.2f} Hz")
-        depth_knob = QRectF(side.left(), rate_knob.bottom() + 6 * s, side.width(), row - 6 * s)
-        self.knob(p, depth_knob, "DEPTH", depth, 0, 1, 1.5 * s, 0.01,
+        row = side.height() / 5
+        cells = [QRectF(side.left(), side.top() + n * row, side.width(), row - 5 * s) for n in range(5)]
+        self.panel.button(p, cells[0], self.LFO_WAVES[wave], self.cycle_lfo_wave)
+        self.panel.button(p, cells[1], "SYNC", self.toggle_lfo_sync, on=sync, color="#facc15")
+        if sync:
+            self.panel.button(p, cells[2], div_label, self.cycle_lfo_div)
+        else:
+            self.knob(p, cells[2], "RATE", math.log(max(0.05, rate) / 0.05) / math.log(400.0),
+                      0, 1, 1.5 * s, 0.01,
+                      lambda: math.log(max(0.05, self.pads[self.pad].get("lfo_rate", 2.0)) / 0.05) / math.log(400.0),
+                      lambda v: self.pads[self.pad].__setitem__("lfo_rate", 0.05 * 400.0 ** v),
+                      show=lambda v: f"{0.05 * 400.0 ** v:.2f} Hz")
+        self.knob(p, cells[3], "DEPTH", depth, 0, 1, 1.5 * s, 0.01,
                   lambda: self.pads[self.pad].get("lfo_depth", 0.0),
                   lambda v: self.pads[self.pad].__setitem__("lfo_depth", v),
                   show=lambda v: f"{v * 100:.0f}%")
-        target_btn = QRectF(side.left(), side.bottom() - row + 4 * s, side.width(), min(34 * s, row - 8 * s))
-        self.panel.button(p, target_btn, f"TGT {self.LFO_TARGETS[target]}", self.cycle_lfo_target)
+        self.panel.button(p, cells[4], f"TGT {self.LFO_TARGETS[target]}", self.cycle_lfo_target)
 
     def draw_spinner(self, p, rect):
         """A turning arc while a sample is read in the background."""

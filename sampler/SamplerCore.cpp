@@ -40,11 +40,20 @@ static float lfoValue(int wave, double phase) {
     }
 }
 
-static void setPadLfo(SamplerPad& pad, int wave, float rate, float depth, int target) {
+static void setPadLfo(SamplerPad& pad, int wave, float rate, float depth, int target, int sync, int div) {
     pad.lfoWave = std::max(0, std::min(3, wave));
     pad.lfoRate = std::max(0.01f, std::min(50.0f, rate));
     pad.lfoDepth = std::max(0.0f, std::min(1.0f, depth));
     pad.lfoTarget = std::max(0, std::min(2, target));
+    pad.lfoSync = sync != 0;
+    pad.lfoDiv = std::max(0, std::min(6, div));
+}
+
+// Cycles per beat for the synced LFO: 1/1 .. 1/16T.
+static float lfoRateHz(const SamplerPad& pad, float tempo) {
+    static const float divisions[7] = {0.25f, 0.5f, 1.0f, 2.0f, 4.0f, 1.5f, 3.0f};
+    const int d = std::max(0, std::min(6, pad.lfoDiv));
+    return pad.lfoSync ? (tempo / 60.0f) * divisions[d] : pad.lfoRate;
 }
 
 static void setPadEnvelope(SamplerPad& pad, float aA, float aD, float aS, float aR,
@@ -110,7 +119,7 @@ void SamplerCore::load() {
         float ampA = 0.0f, ampD = 0.0f, ampS = 1.0f, ampR = 0.0f;
         float fA = 0.0f, fD = 0.0f, fS = 1.0f, fR = 0.0f;
         float cutoff = 20000.0f, reso = 0.0f, envAmt = 0.0f;
-        int lfoWave = 0, lfoTarget = 0;
+        int lfoWave = 0, lfoTarget = 0, lfoSync = 0, lfoDiv = 2;
         float lfoRate = 2.0f, lfoDepth = 0.0f;
         if (!(in >> index >> name >> start >> end >> rootNote >> gain >> pan >> pitch >> loop >> reverse))
             continue;
@@ -118,7 +127,7 @@ void SamplerCore::load() {
         in >> group;    // and no group field: no playback group
         in >> stretch;  // and no stretch field: resample (the pitch changes the length)
         in >> ampA >> ampD >> ampS >> ampR >> fA >> fD >> fS >> fR >> cutoff >> reso >> envAmt;
-        in >> lfoWave >> lfoRate >> lfoDepth >> lfoTarget;
+        in >> lfoWave >> lfoRate >> lfoDepth >> lfoTarget >> lfoSync >> lfoDiv;
         if (index < 0 || index >= kPads)
             continue;
 
@@ -146,7 +155,7 @@ void SamplerCore::load() {
         pad.gate = gate != 0;
         pad.stretch = stretch != 0;
         setPadEnvelope(pad, ampA, ampD, ampS, ampR, fA, fD, fS, fR, cutoff, reso, envAmt);
-        setPadLfo(pad, lfoWave, lfoRate, lfoDepth, lfoTarget);
+        setPadLfo(pad, lfoWave, lfoRate, lfoDepth, lfoTarget, lfoSync, lfoDiv);
     }
 
     std::atomic_store(&bank, std::shared_ptr<const SamplerBank>(next));
@@ -229,7 +238,7 @@ void SamplerCore::applyMap() {
         float ampA = 0.0f, ampD = 0.0f, ampS = 1.0f, ampR = 0.0f;
         float fA = 0.0f, fD = 0.0f, fS = 1.0f, fR = 0.0f;
         float cutoff = 20000.0f, reso = 0.0f, envAmt = 0.0f;
-        int lfoWave = 0, lfoTarget = 0;
+        int lfoWave = 0, lfoTarget = 0, lfoSync = 0, lfoDiv = 2;
         float lfoRate = 2.0f, lfoDepth = 0.0f;
         if (!(in >> index >> name >> start >> end >> rootNote >> gain >> pan >> pitch >> loop >> reverse))
             continue;
@@ -237,7 +246,7 @@ void SamplerCore::applyMap() {
         in >> group;
         in >> stretch;
         in >> ampA >> ampD >> ampS >> ampR >> fA >> fD >> fS >> fR >> cutoff >> reso >> envAmt;
-        in >> lfoWave >> lfoRate >> lfoDepth >> lfoTarget;
+        in >> lfoWave >> lfoRate >> lfoDepth >> lfoTarget >> lfoSync >> lfoDiv;
         if (index < 0 || index >= kPads)
             continue;
         SamplerPad& pad = next->pads[index];
@@ -252,7 +261,7 @@ void SamplerCore::applyMap() {
         pad.gate = gate != 0;
         pad.stretch = stretch != 0;
         setPadEnvelope(pad, ampA, ampD, ampS, ampR, fA, fD, fS, fR, cutoff, reso, envAmt);
-        setPadLfo(pad, lfoWave, lfoRate, lfoDepth, lfoTarget);
+        setPadLfo(pad, lfoWave, lfoRate, lfoDepth, lfoTarget, lfoSync, lfoDiv);
         if (current && current->pads[index].file == name && current->pads[index].data) {
             pad.data = current->pads[index].data;  // the same sample: keep it, no gap
             pad.fileRate = current->pads[index].fileRate;
@@ -449,7 +458,7 @@ void SamplerCore::process(float* left, float* right, uint32_t frames) {
                 voice.pos += readStep;
             }
             if (pad.lfoDepth > 0.0f) {
-                voice.lfoPhase += double(pad.lfoRate) / rate;
+                voice.lfoPhase += double(lfoRateHz(pad, tempo)) / rate;
                 if (voice.lfoPhase >= 1.0)
                     voice.lfoPhase -= 1.0;
             }

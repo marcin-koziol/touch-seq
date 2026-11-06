@@ -2653,11 +2653,16 @@ img.fill(0); q = QPainter(img); editor.draw(q, QRectF(0, 0, 700, 400), fake_plug
 img.save(str(OUT / "sampler_adsr_filter.png"))
 # LFO: wave/rate/depth/target, stored with the pad and drawn over the slice
 editor.env_tab = "lfo"
-editor.pads[0].update({"lfo_wave": 2, "lfo_rate": 5.0, "lfo_depth": 0.6, "lfo_target": 1})
+editor.pads[0].update({"lfo_wave": 2, "lfo_rate": 5.0, "lfo_depth": 0.6, "lfo_target": 1,
+                      "lfo_sync": 1, "lfo_div": 3})
 editor.save_map()
 _, lfosaved, _ = read_manifest(manifest)
 assert (lfosaved[0]["lfo_wave"], lfosaved[0]["lfo_target"]) == (2, 1)
 assert abs(lfosaved[0]["lfo_rate"] - 5.0) < 1e-6 and abs(lfosaved[0]["lfo_depth"] - 0.6) < 1e-6
+assert (lfosaved[0]["lfo_sync"], lfosaved[0]["lfo_div"]) == (1, 3)
+editor.toggle_lfo_sync(); assert editor.pads[0]["lfo_sync"] == 0
+editor.cycle_lfo_div(); assert editor.pads[0]["lfo_div"] == 4
+editor.pads[0]["lfo_sync"] = 1  # leave the sync view in the screenshot
 assert abs(editor.lfo_value(2, 0.25) - 1.0) < 1e-9 and abs(editor.lfo_value(2, 0.75) + 1.0) < 1e-9
 editor.cycle_lfo_wave(); assert editor.pads[0]["lfo_wave"] == 3
 editor.cycle_lfo_target(); assert editor.pads[0]["lfo_target"] == 2

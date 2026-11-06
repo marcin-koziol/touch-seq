@@ -8,7 +8,7 @@ START_NAMESPACE_DISTRHO
 
 class SamplerPlugin : public Plugin {
 public:
-    enum Param { kSlot, kReload, kLoad, kPlayhead, kPlayPad, kParamCount };
+    enum Param { kSlot, kReload, kLoad, kBpm, kPlayhead, kPlayPad, kParamCount };
 
     SamplerPlugin() : Plugin(kParamCount, 0, 0) {
         core.prepare(getSampleRate());
@@ -44,6 +44,11 @@ protected:
             p.symbol = "load";
             p.hints = kParameterIsInteger;
             p.ranges = ParameterRanges(0.0f, 0.0f, 1000000.0f);
+        } else if (index == kBpm) {
+            p.name = "BPM";  // the project's tempo, written by the app: a tempo-synced LFO follows it
+            p.symbol = "bpm";
+            p.hints = kParameterIsAutomatable | kParameterIsInteger;
+            p.ranges = ParameterRanges(120.0f, 20.0f, 300.0f);
         } else if (index == kPlayhead) {
             // outputs: the editor draws the playhead over the waveform from these
             p.name = "Playhead";
@@ -65,6 +70,8 @@ protected:
             return float(reload);
         if (index == kLoad)
             return float(loads);
+        if (index == kBpm)
+            return bpm;
         if (index == kPlayhead)
             return playhead;
         if (index == kPlayPad)
@@ -82,6 +89,9 @@ protected:
         } else if (index == kLoad) {
             loads = int(value + 0.5f);
             core.setSlot(slot);  // the samples changed: reread the manifest and the WAVs
+        } else if (index == kBpm) {
+            bpm = value;
+            core.setTempo(value);
         }
     }
 
@@ -133,6 +143,7 @@ private:
     int slot = 0;
     int reload = 0;  // bumped by the editor for a light map update
     int loads = 0;   // bumped by the editor when the samples themselves changed
+    float bpm = 120.0f;  // input: the project tempo for a synced LFO
     float playhead = 0.0f;  // output: the newest voice's position within its slice
     int playPad = -1;       // output: that voice's pad, or -1 when nothing is playing
 

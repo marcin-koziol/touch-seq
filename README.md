@@ -73,10 +73,11 @@ cursor, and change the arrangement **on the bar** instead of on the downbeat of 
   shift, not resampling). **STOP** silences every voice. **ADSR** turns the waveform into the amp or filter
   envelope editor: the slice's waveform is a dim ghost behind the curve. The times are fractions of the slice,
   so lengthening the slice stretches the envelope with it; a reversed pad mirrors the envelope, so it fires
-  from the slice's end. **TRIGGER** holds the pad for auditioning, exactly like tapping it, and the filter tab
-  also has **Cutoff**, **Reso** and the envelope depth. The third tab is an **LFO**: SINE/TRI/SQUARE/SAW,
-  0.05–20 Hz, depth and a target — AMP (tremolo), FILTER (±2 octaves) or PITCH (±2 semitones); it retriggers
-  with every note. The editor's pads play while held, like PLAY-12's, so
+  from the slice's end. **TRIGGER** (under the curve) holds the pad for auditioning, exactly like tapping it,
+  and the filter tab also has **Cutoff**, **Reso** and the envelope depth. The third tab is an **LFO**:
+  SINE/TRI/SQUARE/SAW, 0.05–20 Hz or **SYNC** to the project tempo (1/1 … 1/16T), depth and a target — AMP
+  (tremolo), FILTER (±2 octaves) or PITCH (±2 semitones); it retriggers with every note. The LFO view keeps
+  the filter's Cutoff/Reso/Env at the bottom, so both can be shaped without changing tabs. The editor's pads play while held, like PLAY-12's, so
   GATE and LOOP are heard; dragging the slice handles or the **↔** bar updates a held loop as you drag, with no
   gap. **LOCATE** centres the waveform on the selected pad's slice, zoomed so it fills about a third of the
   view. **PRESETS**
@@ -254,7 +255,8 @@ the first free name (*Touch-Seq 2*, …) and says so in HOST-4's status line: bo
   length, and **STOP** silences every voice. **ADSR** draws the amp/filter envelope over the slice's ghost,
   scaled to the slice (so it stretches when the slice does; a reversed pad mirrors it) with a **TRIGGER** to
   audition; the filter tab adds a low-pass with Cutoff, Reso and envelope depth. The **LFO** tab has the same
-  four waves, rate, depth and an AMP/FILTER/PITCH target. The editor's pads play while held, so GATE/LOOP work as in
+  four waves, a free rate or **SYNC** to the project tempo (1/1 … 1/16T), depth and an AMP/FILTER/PITCH target,
+  with the filter controls at the bottom. The editor's pads play while held, so GATE/LOOP work as in
   PLAY-12, and slice edits are heard on a held loop as it is dragged. **PRESETS** saves the pads and the
   samples they use on the machine (not in the project's plugin folder): a track or project deleted later
   leaves the preset intact, and one preset can be loaded into another project; SAVE asks for the name on the

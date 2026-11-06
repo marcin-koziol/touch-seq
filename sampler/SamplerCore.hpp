@@ -61,6 +61,8 @@ struct SamplerPad {
     float lfoRate = 2.0f;     // Hz
     float lfoDepth = 0.0f;    // 0..1
     int lfoTarget = 0;        // 0 amp, 1 filter, 2 pitch
+    bool lfoSync = false;     // follow the tempo instead of lfoRate
+    int lfoDiv = 2;           // 0 1/1 .. 6 1/16T (see lfoRateHz)
 
     bool loaded() const { return data && end > start && end <= data->size(); }
 };
@@ -77,6 +79,7 @@ public:
 
     void prepare(double sampleRate);
     void setSlot(int slot);
+    void setTempo(float bpm) { tempo = std::max(20.0f, std::min(300.0f, bpm)); }
     void reload() { load(); }
     void applyMap();  // a light reload: the pad map changed, the samples are reused
 
@@ -123,6 +126,7 @@ private:
     void resetGrains(Voice& voice);
 
     double rate = 48000.0;
+    float tempo = 120.0f;  // the project's BPM, for a tempo-synced LFO
     int slot = 0;
     std::shared_ptr<const SamplerBank> bank;
     std::shared_ptr<const SamplerBank> pending;  // a light map update, adopted by the audio thread

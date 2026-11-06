@@ -82,6 +82,10 @@ int main() {
     lfos << "mono 0\n";
     lfos << "pad 0 tone.wav 0 48000 36 1.0 0.0 0 0 0 0 0 0 0 0 1 0 0 0 1 0 20000 0 0 0 10 1 0\n";
     lfos.close();
+    std::ofstream synced(root / "sampler" / "sampler-14.txt");
+    synced << "mono 0\n";
+    synced << "pad 0 tone.wav 0 48000 36 1.0 0.0 0 0 0 0 0 0 0 0 1 0 0 0 1 0 20000 0 0 0 0.1 1 0 1 2\n";
+    synced.close();
 
     setenv("TOUCHSEQ_SAMPLER_DIR", root.c_str(), 1);
     SamplerCore core;
@@ -227,6 +231,21 @@ int main() {
     assert(lfoHigh > lfoLow * 3.0);
     core.allNotesOff();
     std::puts("LFO OK");
+
+    core.setSlot(14);  // the same at 1/4 at 120 BPM: 2 Hz
+    core.setTempo(120.0f);
+    core.noteOn(36, 127);
+    core.process(left.data(), right.data(), 48000);
+    double syncLow = 1e9, syncHigh = 0.0;
+    for (int w = 0; w + 2400 <= 48000; w += 2400) {
+        const double r = rms_range(left, w, w + 2400);
+        syncLow = std::min(syncLow, r);
+        syncHigh = std::max(syncHigh, r);
+    }
+    std::printf("synced lfo: %.4f..%.4f\n", syncLow, syncHigh);
+    assert(syncHigh > syncLow * 3.0);
+    core.allNotesOff();
+    std::puts("tempo sync OK");
 
     core.setSlot(8);  // no manifest for this slot
     core.noteOn(36, 127);

@@ -420,6 +420,9 @@ class HostPanel(Panel):
             parameter = next((q for q in plugin.params if q.name == "Slot"), None)
             if parameter:
                 self.set_param(plugin, parameter.index, float(self.sampler_slot(strip, k)), source="sampler")
+            bpm = next((q for q in plugin.params if q.name.lower() == "bpm"), None)
+            if bpm:  # a tempo-synced LFO follows the project
+                self.set_param(plugin, bpm.index, float(self.project.bpm), source="tempo")
 
     def ensure_port(self, tr):
         """The JACK MIDI port feeding this track's instrument (one JACK client per track)."""
@@ -622,7 +625,7 @@ class HostPanel(Panel):
     def follow_tempo(self):
         """Plugins that keep their own tempo (Space's synced delay): give them the project's, when it changes."""
         for plugin in list(self.loaded.values()):
-            if plugin.ref.label not in SPACE_LABELS:
+            if plugin.ref.label not in SPACE_LABELS and plugin.ref.label not in SAMPLER_LABELS:
                 continue
             prm = next((q for q in plugin.params if q.name.lower() == "bpm"), None)
             if prm and round(self.host.value(plugin, prm.index)) != self.project.bpm:
