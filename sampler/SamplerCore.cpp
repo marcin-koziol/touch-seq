@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: ISC
+// SPDX-License-Identifier: GPL-3.0-or-later
 #define DR_WAV_IMPLEMENTATION
 #include "dr_wav.h"
 
@@ -70,9 +70,15 @@ static void setPadEnvelope(SamplerPad& pad, float aA, float aD, float aS, float 
 void SamplerCore::prepare(double sampleRate) {
     rate = sampleRate > 1000.0 ? sampleRate : 48000.0;
     releaseStep = 1.0f / (0.005f * float(rate));  // 5 ms fade on note-off
-    for (int i = 0; i <= 1024; ++i)
-        window[i] = 0.5f * (1.0f - std::cos(2.0 * 3.141592653589793 * i / 1024.0));
     voices = {};
+    for (auto& voice : voices) {  // one shifter per voice: they can overlap and each has its own pitch
+        voice.shifter = std::make_unique<RubberBand::RubberBandLiveShifter>(
+            size_t(rate), 1, RubberBand::RubberBandLiveShifter::OptionWindowMedium);
+        voice.shiftBlock = voice.shifter->getBlockSize();
+        voice.shiftIn.assign(voice.shiftBlock, 0.0f);
+        voice.shiftOut.assign(voice.shiftBlock, 0.0f);
+        voice.shiftRead = voice.shiftBlock;
+    }
 }
 
 void SamplerCore::setSlot(int newSlot) {
@@ -164,17 +170,49 @@ void SamplerCore::load() {
 void SamplerCore::setVoiceStep(Voice& voice, const SamplerPad& pad) {
     const double noteRatio = std::pow(2.0, double(voice.note - pad.root) / 12.0);
     const double base = (double(pad.fileRate) / rate) * noteRatio;
-    voice.stretch = pad.stretch;
+    voice.stretch = pad.stretch && voice.shifter != nullptr;
     voice.baseStep = pad.reverse ? -base : base;
-    voice.grainStep = voice.baseStep * std::pow(2.0, double(pad.pitch) / 12.0);
-    voice.step = voice.grainStep;  // without stretch the grain step is the playback step
-    voice.grainLen = std::max(64.0, 0.05 * rate);
+    voice.step = voice.baseStep * std::pow(2.0, double(pad.pitch) / 12.0);
 }
 
-void SamplerCore::resetGrains(Voice& voice) {
-    voice.grainPos[0] = voice.grainPos[1] = voice.pos;
-    voice.grainAge[0] = 0.0;
-    voice.grainAge[1] = voice.grainLen * 0.5;
+void SamplerCore::resetShift(Voice& voice, const SamplerPad& pad) {
+    if (!voice.shifter)
+        return;
+    voice.shifter->reset();
+    voice.shifter->setPitchScale(std::pow(2.0, double(pad.pitch) / 12.0));
+    voice.shiftDelay = double(voice.shifter->getStartDelay());
+    voice.shiftRead = voice.shiftBlock;  // fill a block on the first frame
+    voice.shiftDrain = false;
+    voice.drainLeft = 0;
+}
+
+// One frame of the slice at the timeline speed (the note transposition and the file's rate), which is what
+// the shifter expects: it adds the pad's PITCH itself. False once a non-looped slice has ended.
+bool SamplerCore::nextInput(Voice& voice, const SamplerPad& pad, float& value) {
+    value = 0.0f;
+    const double start = double(pad.start), end = double(pad.end);
+    if (voice.pos >= end || voice.pos < start) {
+        if (!voice.loop)
+            return false;
+        const double span = end - start;
+        if (span <= 1.0)
+            return false;
+        voice.pos = start + std::fmod(voice.pos - start, span);
+        if (voice.pos < start)
+            voice.pos += span;
+    }
+    const std::vector<float>& data = *pad.data;
+    const int size = int(data.size());
+    const int index = int(voice.pos);
+    if (index < 0 || index >= size || index + 1 >= size) {
+        value = index >= 0 && index < size ? data[index] : 0.0f;
+        voice.pos += voice.baseStep;
+        return true;
+    }
+    const float first = data[index];
+    value = first + (data[index + 1] - first) * float(voice.pos - index);
+    voice.pos += voice.baseStep;
+    return true;
 }
 
 void SamplerCore::adopt(Voice& voice, const std::shared_ptr<const SamplerBank>& next) {
@@ -183,6 +221,7 @@ void SamplerCore::adopt(Voice& voice, const std::shared_ptr<const SamplerBank>& 
         voice.active = false;
         return;
     }
+    const bool wasStretch = voice.stretch;
     voice.bank = next;
     setVoiceStep(voice, pad);
     voice.gain = pad.gain * voice.velocityGain;
@@ -195,8 +234,8 @@ void SamplerCore::adopt(Voice& voice, const std::shared_ptr<const SamplerBank>& 
         voice.pos = double(pad.start);
     if (voice.pos >= double(pad.end))
         voice.pos = pad.loop ? double(pad.start) : double(pad.end) - 1.0;
-    if (voice.stretch)
-        resetGrains(voice);
+    if (voice.stretch && !wasStretch)
+        resetShift(voice, pad);  // this voice just became a stretch voice
 }
 
 void SamplerCore::applyMap() {
@@ -324,7 +363,7 @@ void SamplerCore::noteOn(int note, int velocity) {
     voice->pos = pad.reverse ? double(pad.end) - 1.0 : double(pad.start);
     setVoiceStep(*voice, pad);
     if (voice->stretch)
-        resetGrains(*voice);
+        resetShift(*voice, pad);
     const float velocityGain = 0.2f + 0.8f * std::max(0.0f, std::min(1.0f, velocity / 127.0f));
     voice->velocityGain = velocityGain;
     voice->gain = pad.gain * velocityGain;
@@ -376,8 +415,19 @@ void SamplerCore::playhead(float& position, int& pad) const {
         return;
     }
     const SamplerPad& slice = newest->bank->pads[newest->pad];
+    double pos = newest->pos;
+    if (newest->stretch) {  // the shifter was fed ahead of what is being heard
+        pos -= newest->shiftDelay * newest->baseStep;
+        const double span = double(slice.end) - double(slice.start);
+        if (newest->loop && span > 1.0) {
+            pos = double(slice.start) + std::fmod(pos - double(slice.start), span);
+            if (pos < double(slice.start))
+                pos += span;
+        }
+        pos = std::max(double(slice.start), std::min(double(slice.end), pos));
+    }
     const double span = double(slice.end) - double(slice.start);
-    position = span > 0.0 ? float((newest->pos - double(slice.start)) / span) : 0.0f;
+    position = span > 0.0 ? float((pos - double(slice.start)) / span) : 0.0f;
     position = std::max(0.0f, std::min(1.0f, position));
     pad = newest->pad;
 }
@@ -409,44 +459,32 @@ void SamplerCore::process(float* left, float* right, uint32_t frames) {
                 continue;
             }
 
-            const std::vector<float>& data = *pad.data;
-            const int size = int(data.size());
             const float lfo = pad.lfoDepth > 0.0f ? lfoValue(pad.lfoWave, voice.lfoPhase) : 0.0f;
-            double readStep = voice.stretch ? voice.grainStep : voice.step;
-            if (pad.lfoTarget == 2 && pad.lfoDepth > 0.0f)  // pitch LFO, in semitones
-                readStep *= std::exp2(double(pad.lfoDepth) * 2.0 * double(lfo) / 12.0);
             float sample = 0.0f;
-            if (voice.stretch) {  // two overlapping grains: the pitch moves, the timeline keeps its length
-                for (int g = 0; g < 2; ++g) {
-                    const double age = voice.grainAge[g];
-                    if (age < voice.grainLen) {
-                        double read = voice.grainPos[g];
-                        if (voice.loop) {
-                            const double start = pad.start, end = pad.end, span = end - start;
-                            if (span > 1.0) {
-                                read = start + std::fmod(read - start, span);
-                                if (read < start)
-                                    read += span;
-                            } else {
-                                read = start;
-                            }
+            if (voice.stretch) {  // the shifter takes the slice at its own speed and returns it at the pad's pitch
+                if (voice.shiftRead >= voice.shiftBlock) {  // one fixed block of the shifter at a time
+                    const double lfoPitch = pad.lfoTarget == 2 ? 2.0 * double(pad.lfoDepth) * double(lfo) : 0.0;
+                    voice.shifter->setPitchScale(std::exp2((double(pad.pitch) + lfoPitch) / 12.0));
+                    for (size_t i = 0; i < voice.shiftBlock; ++i) {
+                        float value = 0.0f;
+                        if (!voice.shiftDrain && !nextInput(voice, pad, value)) {
+                            voice.shiftDrain = true;  // the slice ended; the shifter still holds its tail
+                            voice.drainLeft = int(voice.shiftDelay) + 2 * int(voice.shiftBlock);
                         }
-                        const int idx = int(read);
-                        if (idx >= 0 && idx + 1 < size) {
-                            const float s = data[idx] + (data[idx + 1] - data[idx]) * float(read - idx);
-                            const float w = window[int((age / voice.grainLen) * 1024.0) & 1023];
-                            sample += s * w;
-                        }
-                        voice.grainPos[g] += readStep;
-                        voice.grainAge[g] = age + 1.0;
+                        voice.shiftIn[i] = value;
                     }
-                    if (voice.grainAge[g] >= voice.grainLen) {
-                        voice.grainAge[g] = 0.0;
-                        voice.grainPos[g] = voice.pos;
-                    }
+                    const float* input[1] = {voice.shiftIn.data()};
+                    float* output[1] = {voice.shiftOut.data()};
+                    voice.shifter->shift(input, output);
+                    voice.shiftRead = 0;
                 }
-                voice.pos += voice.baseStep;
+                sample = voice.shiftOut[voice.shiftRead++];
             } else {
+                const std::vector<float>& data = *pad.data;
+                const int size = int(data.size());
+                double readStep = voice.step;
+                if (pad.lfoTarget == 2 && pad.lfoDepth > 0.0f)  // pitch LFO, in semitones
+                    readStep *= std::exp2(double(pad.lfoDepth) * 2.0 * double(lfo) / 12.0);
                 const int index = int(voice.pos);
                 if (index < 0 || index >= size) {
                     voice.active = false;
@@ -463,26 +501,30 @@ void SamplerCore::process(float* left, float* right, uint32_t frames) {
                     voice.lfoPhase -= 1.0;
             }
 
-            if (voice.loop) {
-                const double start = pad.start;
-                const double end = pad.end;
-                if (voice.pos >= end || voice.pos < start) {
-                    const double span = end - start;
-                    if (span > 1.0) {
-                        voice.pos = start + std::fmod(voice.pos - start, span);
-                        if (voice.pos < start)
-                            voice.pos += span;
-                    } else {
-                        voice.active = false;
+            if (!voice.stretch) {  // a stretch voice wraps and ends where it feeds the shifter (nextInput)
+                if (voice.loop) {
+                    const double start = pad.start;
+                    const double end = pad.end;
+                    if (voice.pos >= end || voice.pos < start) {
+                        const double span = end - start;
+                        if (span > 1.0) {
+                            voice.pos = start + std::fmod(voice.pos - start, span);
+                            if (voice.pos < start)
+                                voice.pos += span;
+                        } else {
+                            voice.active = false;
+                        }
                     }
+                } else if (voice.pos >= pad.end || voice.pos < pad.start) {
+                    voice.active = false;
                 }
-            } else if (voice.pos >= pad.end || voice.pos < pad.start) {
-                voice.active = false;
             }
 
             const double stepAbs = std::fabs(voice.stretch ? voice.baseStep : voice.step);
             const double span = double(pad.end - pad.start);
-            const float t = span > 0.0 ? float(voice.clock * stepAbs / span) : 0.0f;
+            // the shifter's output lags its input: move the envelope by the same delay
+            const double audible = voice.stretch ? std::max(0.0, voice.clock - voice.shiftDelay) : voice.clock;
+            const float t = span > 0.0 ? float(audible * stepAbs / span) : 0.0f;
             const bool withRelease = !voice.loop;  // a loop holds sustain; a one-shot releases at its end
             float amp = pad.amp.value(t, withRelease);
             if (pad.lfoTarget == 0 && pad.lfoDepth > 0.0f)  // tremolo, never below silence
@@ -510,6 +552,8 @@ void SamplerCore::process(float* left, float* right, uint32_t frames) {
             const float gain = voice.gain * voice.release * amp;
             outL += sample * gain * voice.panL;
             outR += sample * gain * voice.panR;
+            if (voice.stretch && voice.shiftDrain && --voice.drainLeft <= 0)
+                voice.active = false;  // the delayed tail is out
         }
         left[n] = std::tanh(outL);
         right[n] = std::tanh(outR);

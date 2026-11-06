@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: ISC
+// SPDX-License-Identifier: GPL-3.0-or-later
 // The sampler's engine: silence without a manifest, a pad sounds, a one-shot ignores note-off, a looped pad
 // stops on note-off, and a missing slot is silent.
 #include "SamplerCore.hpp"
@@ -73,6 +73,10 @@ int main() {
     stretch << "pad 1 tone.wav 0 48000 37 1.0 0.0 12 0 0 0 0 1\n";   // +12, stretch: same length
     stretch << "pad 2 tone.wav 0 48000 38 1.0 0.0 12 0 0 0 0 0\n";   // +12, resample: half the length
     stretch.close();
+    std::ofstream down(root / "sampler" / "sampler-15.txt");
+    down << "mono 0\n";
+    down << "pad 0 tone.wav 0 48000 36 1.0 0.0 -12 0 0 0 0 1\n";  // -12, stretch: an octave down, still 48000 frames
+    down.close();
     std::ofstream envelopes(root / "sampler" / "sampler-12.txt");
     envelopes << "mono 0\n";
     envelopes << "pad 0 tone.wav 0 48000 36 1.0 0.0 0 0 0 0 0 0 0.5 0 1 0 0 0 1 0 20000 0 0\n";  // slow attack
@@ -196,9 +200,28 @@ int main() {
     std::printf("stretch: RMS %.4f, voices %d\n", rms_range(left, 0, 24000), core.activeVoices());
     assert(core.activeVoices() == 1 && rms_range(left, 0, 24000) > 0.01);
     core.process(left.data(), right.data(), 24000);
-    assert(core.activeVoices() == 0);  // the full 48000-frame slice
+    // the shifter delays its output by its own latency, so the last frames of the 48000-frame slice follow
+    int tail = 0;
+    while (core.activeVoices() && tail < 24000) {
+        core.process(left.data(), right.data(), 4096);
+        tail += 4096;
+    }
+    std::printf("stretch tail: %d frames, voices %d\n", tail, core.activeVoices());
+    assert(core.activeVoices() == 0);  // the full 48000-frame slice, plus the shifter's delay
     core.noteOn(38, 127);  // the same +12 without stretch: twice as fast, half the length
     core.process(left.data(), right.data(), 24000);
+    assert(core.activeVoices() == 0);
+    core.setSlot(15);  // an octave down, stretch: the same length too
+    core.noteOn(36, 127);
+    core.process(left.data(), right.data(), 24000);
+    std::printf("stretch down: RMS %.4f, voices %d\n", rms_range(left, 0, 24000), core.activeVoices());
+    assert(core.activeVoices() == 1 && rms_range(left, 0, 24000) > 0.01);
+    core.process(left.data(), right.data(), 24000);
+    tail = 0;
+    while (core.activeVoices() && tail < 24000) {
+        core.process(left.data(), right.data(), 4096);
+        tail += 4096;
+    }
     assert(core.activeVoices() == 0);
     core.allNotesOff();
     std::puts("stretch OK");

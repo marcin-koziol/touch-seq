@@ -1,8 +1,10 @@
-// SPDX-License-Identifier: ISC
+// SPDX-License-Identifier: GPL-3.0-or-later
 // The sampler's engine: 16 pads, each a slice of a WAV file, played from MIDI notes 36..51. The pad map is a
 // small text manifest written by Touch-Seq's sampler editor in <project>.plugins/sampler/; the plugin reads it
 // from TOUCHSEQ_SAMPLER_DIR + sampler/sampler-<slot>.txt, so samples travel with the project and nothing has
-// to go through Carla's state. Mono samples, linear interpolation, one-shot or looped, 16 voices.
+// to go through Carla's state. Mono samples, linear interpolation, one-shot or looped, 16 voices. STRETCH
+// shifts the pitch without changing the slice's length through Rubber Band (GPL-2.0-or-later), vendored in
+// rubberband/ and linked statically.
 #ifndef SAMPLER_CORE_HPP_INCLUDED
 #define SAMPLER_CORE_HPP_INCLUDED
 
@@ -14,6 +16,8 @@
 #include <memory>
 #include <string>
 #include <vector>
+
+#include <rubberband/RubberBandLiveShifter.h>
 
 #include "dr_wav.h"
 
@@ -99,7 +103,7 @@ private:
         int note = 36;              // the note that started it, to recompute the step on a map update
         float velocityGain = 1.0f;
         double pos = 0.0;
-        double step = 1.0;
+        double step = 1.0;           // the playback step, pitch included (without stretch)
         float gain = 1.0f;
         float panL = 0.707107f;
         float panR = 0.707107f;
@@ -109,21 +113,27 @@ private:
         bool releasing = false;
         bool active = false;
         uint64_t age = 0;
-        bool stretch = false;        // granular pitch shift: PITCH does not change the slice's length
+        bool stretch = false;        // Rubber Band pitch shift: PITCH does not change the slice's length
         double baseStep = 1.0;       // the timeline (note transposition), without the pad's PITCH
-        double grainStep = 1.0;      // how fast a grain reads (the pitch)
-        double grainPos[2] = {0.0, 0.0};
-        double grainAge[2] = {0.0, 0.0};
-        double grainLen = 1.0;
         double clock = 0.0;          // output frames since note-on, for the envelope
         double lfoPhase = 0.0;       // 0..1, reset on note-on
         float ic1eq = 0.0f, ic2eq = 0.0f;  // the voice's low-pass state
+        // the stretch voice's shifter: the slice feeds it at the timeline speed, it returns the same number
+        // of frames at the pad's pitch, delayed by its own latency
+        std::unique_ptr<RubberBand::RubberBandLiveShifter> shifter;
+        std::vector<float> shiftIn, shiftOut;
+        size_t shiftBlock = 0;       // frames per shift() call, fixed by the shifter
+        size_t shiftRead = 0;        // the next frame to take from shiftOut
+        double shiftDelay = 0.0;     // the shifter's output latency, in frames
+        bool shiftDrain = false;     // the slice ended: feed zeros while the delayed tail comes out
+        int drainLeft = 0;           // frames of that tail still to play
     };
 
     void load();
     void adopt(Voice& voice, const std::shared_ptr<const SamplerBank>& next);  // point a playing voice at a new map
     void setVoiceStep(Voice& voice, const SamplerPad& pad);
-    void resetGrains(Voice& voice);
+    void resetShift(Voice& voice, const SamplerPad& pad);  // a fresh shifter for a new note
+    bool nextInput(Voice& voice, const SamplerPad& pad, float& value);  // one frame at the timeline speed
 
     double rate = 48000.0;
     float tempo = 120.0f;  // the project's BPM, for a tempo-synced LFO
@@ -133,7 +143,6 @@ private:
     std::array<Voice, 16> voices;
     uint64_t nextAge = 0;
     float releaseStep = 0.01f;  // one sample's share of the 5 ms note-off fade
-    std::array<float, 1025> window{};  // Hann, for the two overlapping grains
 };
 
 #endif // SAMPLER_CORE_HPP_INCLUDED

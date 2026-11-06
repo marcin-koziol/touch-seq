@@ -72,7 +72,7 @@ cursor, and change the arrangement **on the bar** instead of on the downbeat of 
   held vs one-shot) and a **GRP** playback group: pads in the same group cut each other, like MONO for that
   group. **MONO** cuts the previous pad when a new one starts. **PITCH** moves in whole semitones,
   from three octaves down (−36) to one up (+12); **STRETCH** shifts the pitch
-  without changing the slice's length (a granular shift, not resampling). **STOP** silences every voice. **ADSR** turns the waveform into the amp or filter
+  without changing the slice's length (Rubber Band, not resampling). **STOP** silences every voice. **ADSR** turns the waveform into the amp or filter
   envelope editor: the slice's waveform is a dim ghost behind the curve. The times are fractions of the slice,
   so lengthening the slice stretches the envelope with it; a reversed pad mirrors the envelope, so it fires
   from the slice's end. **TRIGGER** (under the curve) holds the pad for auditioning, exactly like tapping it.
@@ -522,10 +522,11 @@ xyfx/install.sh monitor/install.sh eq/install.sh click/install.sh space/install.
 
 The XYFX can also be used outside Touch-Seq (in a DAW, or any plugin host): releases carry
 `touchseq-xyfx-*.tar.gz`, and its parameters (Engage, X, Y, BPM, Mode) can be automated from any host.
-The app is GPL-3.0-or-later; our plugins are ISC licensed, except **Acid**, which is GPL-3.0-or-later: it
-includes the MIT-licensed **Open303** engine (Copyright (c) 2009 Robin Schmidt, `acid/open303/LICENSE`) and
-the GPL-3.0 GuitarML BYOD overdrive from jc303 (`acid/overdrive/LICENSE`). RTNeural is BSD-3
-(`acid/rtneural/LICENSE`).
+The app is GPL-3.0-or-later; our plugins are ISC licensed, except **Acid** and **Sampler**, which are
+GPL-3.0-or-later. Acid includes the MIT-licensed **Open303** engine (Copyright (c) 2009 Robin Schmidt,
+`acid/open303/LICENSE`) and the GPL-3.0 GuitarML BYOD overdrive from jc303 (`acid/overdrive/LICENSE`);
+RTNeural is BSD-3 (`acid/rtneural/LICENSE`). The sampler's STRETCH uses **Rubber Band** 4.0.0
+(GPL-2.0-or-later, vendored in `sampler/rubberband/`, its `COPYING` there).
 
 ### Tests and builds
 
@@ -541,6 +542,7 @@ aarch64 and publishes a release (with Carla's source attached, as its GPL requir
 
 ## License
 
-Touch-Seq is GPL-3.0-or-later ([LICENSE](LICENSE)). XYFX is ISC ([xyfx/LICENSE](xyfx/LICENSE)). The AppImage
+Touch-Seq is GPL-3.0-or-later ([LICENSE](LICENSE)). XYFX is ISC ([xyfx/LICENSE](xyfx/LICENSE)); the
+sampler is GPL-3.0-or-later too, with Rubber Band's GPL-2.0-or-later source in `sampler/rubberband/`. The AppImage
 bundles Carla (GPL-2.0-or-later, built from a pinned git commit; its source is attached to each release),
 PySide6/Qt (LGPL-3.0) and python-rtmidi (MIT).

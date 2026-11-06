@@ -1375,7 +1375,7 @@ class SamplerEditor:
         self.save_reload()  # the plugin has to see the new group
 
     def toggle_stretch(self):
-        """Pitch without changing the slice's length (a granular shift) instead of resampling."""
+        """Pitch without changing the slice's length (through Rubber Band) instead of resampling."""
         pad = self.pads[self.pad]
         if not pad:
             self.say("tap a pad first", error=True)

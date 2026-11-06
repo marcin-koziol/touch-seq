@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: ISC
+// SPDX-License-Identifier: GPL-3.0-or-later
 // DPF wrapper around SamplerCore: a 16-pad MPC-style sampler, MIDI in, stereo out, no UI (Touch-Seq's sampler
 // editor and PLAY-12 pads are its face).
 #include "DistrhoPlugin.hpp"
@@ -22,7 +22,7 @@ protected:
     }
 
     const char* getMaker() const override { return "Touch-Seq"; }
-    const char* getLicense() const override { return "ISC"; }
+    const char* getLicense() const override { return "GPL-3.0-or-later"; }
     uint32_t getVersion() const override { return d_version(1, 0, 0); }
     int64_t getUniqueId() const override { return d_cconst('T', 'S', 'S', 'm'); }
 
