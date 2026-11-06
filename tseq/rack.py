@@ -3,7 +3,7 @@ toolbar, autosave and project switching."""
 import shutil
 import time
 
-from PySide6.QtCore import QPointF, QTimer
+from PySide6.QtCore import QPointF, QRectF, QTimer
 from PySide6.QtGui import QColor, QFont, QPen, Qt
 
 from .constants import WARN
@@ -108,9 +108,9 @@ class Rack(Window):
         k = self.k
         inner = r.adjusted(14 * k, 7 * k, -14 * k, -7 * k)
         logo, *cols = split(
-            inner, [150 * k, 50 * k, 50 * k, 50 * k, 14 * k, 54 * k, 54 * k, 14 * k, 96 * k, 0, 250 * k,
+            inner, [150 * k, 50 * k, 50 * k, 50 * k, 14 * k, 54 * k, 54 * k, 14 * k, 96 * k, 90 * k, 0, 250 * k,
                     108 * k], 10 * k)
-        file_, settings, patch, sep1, click, count, sep2, bpm, name, info, save = cols
+        file_, settings, patch, sep1, click, count, sep2, bpm, dsp, name, info, save = cols
         f = QFont("sans-serif")
         f.setPixelSize(round(19 * k))
         f.setBold(True)
@@ -135,6 +135,7 @@ class Rack(Window):
         self.rail_button(p, count, "COUNT", self.cycle_count_in, icon="sticks", on=bars > 0,
                          sub=str(bars) if bars else None)
         self.draw_bpm(p, bpm)
+        self.draw_dsp(p, dsp)
         f.setPixelSize(round(22 * k))
         p.setFont(f)
         p.drawText(name.adjusted(20 * k, 0, 0, 0), Qt.AlignLeft | Qt.AlignVCenter, self.path.stem)
@@ -148,6 +149,33 @@ class Rack(Window):
         state = "UNSAVED" if dirty else f"SAVED {time.strftime('%H:%M:%S', self.saved_at)}"
         p.drawText(info.adjusted(0, 0, -10 * k, 0), Qt.AlignRight | Qt.AlignVCenter,
                    f"{self.project.key_name.upper()}   ·   {state}")
+
+    def draw_dsp(self, p, r):
+        """A small DSP load box: the percentage and a bar, green to red."""
+        k = self.k
+        info = getattr(self.host, "dsp", lambda: None)()
+        load = None if info is None else max(0.0, min(100.0, info[0]))
+        p.setPen(QPen(QColor("#5a606b"), 1))
+        p.setBrush(QColor("#1a1e26"))
+        p.drawRoundedRect(r, 4 * k, 4 * k)
+        f = QFont("sans-serif")
+        f.setPixelSize(round(9 * k))
+        f.setBold(False)
+        p.setFont(f)
+        p.setPen(QColor("#8a929e"))
+        p.drawText(r.adjusted(6 * k, 1 * k, -6 * k, 0), Qt.AlignLeft | Qt.AlignTop, "DSP")
+        p.setPen(QColor("#e6e9ee"))
+        p.drawText(r.adjusted(0, 1 * k, -6 * k, 0), Qt.AlignRight | Qt.AlignTop,
+                   "--" if load is None else f"{load:.0f}%")
+        bar = QRectF(r.left() + 6 * k, r.bottom() - 9 * k, r.width() - 12 * k, 4 * k)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor("#2a2e35"))
+        p.drawRoundedRect(bar, 2 * k, 2 * k)
+        if load is not None:
+            colour = "#4ade80" if load < 60 else "#facc15" if load < 85 else WARN
+            p.setBrush(QColor(colour))
+            p.drawRoundedRect(QRectF(bar.left(), bar.top(), bar.width() * load / 100.0, bar.height()),
+                              2 * k, 2 * k)
 
     def draw_bpm(self, p, r):
         """The project's tempo, where the transport is: tap it for the tempo dialog (drag, nudge, tap it out)."""

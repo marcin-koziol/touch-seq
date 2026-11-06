@@ -411,6 +411,7 @@ device is unplugged its notes are simply not sent, and they come back when it re
 | everywhere | **hold** (~1 s) on DELETE / REMOVE | destructive actions need a hold |
 | module rail | **⤢ / ⤡** | module full screen and back |
 | top bar | tap **BPM** | the tempo: drag the number, ±1/5/10, TAP it out |
+| top bar | **DSP** box | the plugin host's DSP load, with a bar that turns yellow/red as it fills |
 | sequencer | tap a track header twice | opens it in EDIT |
 | SONG | tap a step | plays it from the next bar; its bars / ×repeats change on a tap, ✕ deletes on a hold |
 | GRID / SONG | hold a row, then drag | moves a track (GRID) or a step (SONG) to another place in the list |

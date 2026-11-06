@@ -622,6 +622,11 @@ class HostPanel(Panel):
                 self.sink_changed = False
                 self.rewire()
 
+    def dsp(self):
+        """The plugin host's DSP load (percent) and xruns, or None when it is not running."""
+        runtime = getattr(self.host, "runtime", None)
+        return runtime() if runtime else None
+
     def follow_tempo(self):
         """Plugins that keep their own tempo (Space's synced delay): give them the project's, when it changes."""
         for plugin in list(self.loaded.values()):

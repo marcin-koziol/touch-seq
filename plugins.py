@@ -272,6 +272,16 @@ class Host:
         if self.loaded(plugin):
             self.h.set_parameter_value(plugin.pid, index, value)
 
+    def runtime(self):
+        """Carla's engine load and xrun count, as (percent, xruns); None when the engine is not running."""
+        try:
+            if not getattr(self.h, "is_engine_running", lambda: True)():
+                return None
+            info = self.h.get_runtime_engine_info()
+            return float(info.get("load", 0.0)), int(info.get("xruns", 0))
+        except Exception:
+            return None
+
     def output_params(self, plugin):
         """Indices of a plugin's output parameters: our EQ writes its analyser's spectrum there (a host can
         only read numbers, and Touch-Seq has no audio buffers of its own to measure)."""
