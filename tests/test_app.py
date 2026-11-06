@@ -1081,6 +1081,7 @@ pp.ref.label = "touchseq.xyfx"  # our own plugins keep their parameters out of t
 pp.params = [type("Pr", (), {"index": i})() for i in (7, 8)]
 pph = FakeHostPanel(ts.Project())
 pph.state_dir = OUT / "params.plugins"
+_sh.rmtree(pph.state_dir, ignore_errors=True)  # no stale state from an earlier run in the same folder
 pph.host = ParamCarla()
 pph.loaded = {(pph.project.master, 0): pp}
 pph.save_states()

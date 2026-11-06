@@ -54,7 +54,7 @@ cursor, and change the arrangement **on the bar** instead of on the downbeat of 
 
 ![The whole rack, as it comes up: performance controls, the plugin host, the sequencer and the live pads](docs/screenshots/overview.png)
 
-## New in 0.12.0
+## New in 0.12.1
 
 - **Acid** — our 303-style bass (`acid/`): the **Open303** engine (Robin Schmidt's, the one jc303 uses),
   with a saw/square oscillator, the TeeBee ladder filter, Cutoff / Reso / Env Mod / Decay, Accent, Slide and
@@ -296,7 +296,7 @@ the first free name (*Touch-Seq 2*, …) and says so in HOST-4's status line: bo
 | ![The sampler: Project 6's choir chopped into 16 pads, with playback groups and the drum colors](docs/screenshots/sampler.png) | ![The sampler's presets: the pads and their samples kept outside the project](docs/screenshots/sampler-presets.png) |
 | ![PLAY-12: the sampler's 16 pads in the drum colors](docs/screenshots/sampler-pads.png) | ![The playhead: a green line through the playing pad's slice](docs/screenshots/sampler-playhead.png) |
 | ![The amp envelope over the slice ghost](docs/screenshots/sampler-adsr.png) | ![The filter envelope and its low-pass](docs/screenshots/sampler-adsr-filter.png) |
-| ![The LFO over the slice: wave, rate, depth and target](docs/screenshots/sampler-lfo.png) | |
+| ![The LFO over the slice: wave, rate, depth and target](docs/screenshots/sampler-lfo.png) | ![The Acid 303: OSC, FILTER and AMP knobs in HOST-4](docs/screenshots/acid.png) |
 | ![The plugin browser on BUILTIN: our own plugins first](docs/screenshots/builtin.png) | |
 | ![Plugin knobs grouped by section: OSC, ENVELOPE, FILTER, DELAY, each in its own box](docs/screenshots/knobs.png) | ![A sequence of parameters as bars: Sideous' 16 LFO steps, bipolar around the middle line](docs/screenshots/steps.png) |
 
@@ -381,8 +381,8 @@ Download the AppImage for your machine from [Releases](https://github.com/marcin
 then:
 
 ```sh
-chmod +x Touch-Seq-0.12.0-x86_64.AppImage
-./Touch-Seq-0.12.0-x86_64.AppImage
+chmod +x Touch-Seq-0.12.1-x86_64.AppImage
+./Touch-Seq-0.12.1-x86_64.AppImage
 ```
 
 It contains Python, Qt (PySide6), Carla and Touch-Seq's own plugins (XYFX, Monitor, EQ, Click, Space,
