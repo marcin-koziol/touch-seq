@@ -956,7 +956,11 @@ class HostPanel(Panel):
         for strip in [s for s in self.meters if s not in live]:
             del self.meters[strip]
         if changed:
-            self.invalidate()  # the bars move: one frame per change
+            window = getattr(self, "window_ref", None)
+            if window is not None:
+                window.meters_changed()  # the bars move: repaint their boxes, not the rack
+            else:
+                self.invalidate()
 
     def draw_meter(self, p, r, strip):
         """A stereo peak meter: two bars from -60 to 0 dB, with a peak line that holds and falls."""
@@ -1018,6 +1022,8 @@ class HostPanel(Panel):
         level = track.height() * strip.volume
         self.box(p, QRectF(track.left(), track.bottom() - level, track.width(), level), QColor(74, 222, 128, 150),
                  None, radius=6)
+        self.meter_rects[("fader", id(strip))] = (
+            meter, lambda p, r, strip=strip: self.draw_meter(p, r, strip))
         self.draw_meter(p, meter, strip)
         if label:
             self.text(p, QRectF(r.left(), track.bottom() + 2 * s, r.width(), 20 * s), f"{round(strip.volume * 100)}%",

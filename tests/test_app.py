@@ -387,6 +387,26 @@ btn = rail_button_of(rack, rack.seq)
 rack.press(41, btn.center()); rack.release(41, btn.center()); rack.grab()
 assert rack.zoomed is None and len(rack.screens) == 4
 print("zoom OK")
+# meters live in their own small widgets: a moving needle must not repaint the whole rack
+class MeterPanel(ts.Panel):
+    def draw(self, p):
+        p.fillRect(self.rect(), ts.QColor(ts.BG))
+        rect = QRectF(40, 50, 10, 100)
+        self.meter_rects["level"] = (rect, lambda p, r: p.fillRect(r, ts.QColor("#4ade80")))
+    def tick(self):
+        self.window_ref.meters_changed()
+mp = MeterPanel()
+mw = ts.Window([(0, 0, "M", "meter", mp)])
+mw.resize(800, 600)
+mw.show()
+mw.grab()
+mw.sync_meters()
+assert len(mw.meter_views) == 1, mw.meter_views
+mv = next(iter(mw.meter_views.values()))
+assert (mv.width(), mv.height()) == (10, 100), mv.geometry()
+mw.tick()
+assert not mw.meters_dirty, "the meter clock consumed the change without a full frame"
+mw.close()
 # --- same-pitch notes don't run into each other ---
 prn = ts.Project(tracks=[ts.Track("melody", 2, 4)])
 trn = prn.tracks[0]; patn = trn.current

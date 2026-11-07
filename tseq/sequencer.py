@@ -992,8 +992,11 @@ class Sequencer(Panel):
         self.region(head.intersected(clip), lambda pos, tr=tr: ScrollOrTap(
             pos, lambda: self.scroll, lambda v: setattr(self, "scroll", v), lambda: self.select(tr)))
         if not tr.external:  # its chain's level, right beside the M
-            self.draw_track_meter(p, QRectF(head.right() - 64 * s, head.top() + 6 * s, 10 * s, head.height() - 12 * s),
-                                  tr)
+            level = QRectF(head.right() - 64 * s, head.top() + 6 * s, 10 * s, head.height() - 12 * s)
+            if clip.contains(level):  # a header scrolled halfway out keeps its meter in the panel's own frame
+                self.meter_rects[("track", id(tr))] = (
+                    level, lambda p, r, tr=tr: self.draw_track_meter(p, r, tr))
+            self.draw_track_meter(p, level, tr)
         mute = QRectF(head.right() - 50 * s, head.top() + 6 * s, 44 * s, head.height() - 12 * s)
         self.button(p, mute, "M", lambda tr=tr: self.set_mute(tr), on=tr.mute, color=WARN)
         self.hits[-1] = (mute.intersected(clip), self.hits[-1][1])

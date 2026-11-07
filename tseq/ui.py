@@ -39,6 +39,10 @@ class Panel:
         self.hits = []
         self.stale = False  # changed outside a touch: repaint even though nothing is animating
         self.zoomed = False  # set by the window: this panel fills the rack (HOST-4 keeps its chain narrow)
+        # level meters, key -> (rect here, draw(painter, rect)): the window draws each in its own small
+        # child widget so a moving meter does not repaint the whole screen
+        self.meter_rects = {}
+        self.window_ref = None  # the window that holds this panel, set for the meters' repaint clock
 
     def invalidate(self):
         """Ask for a repaint after a change made without a touch (touches repaint by themselves)."""
@@ -55,6 +59,7 @@ class Panel:
     def paint(self, p, w, h):
         self.w, self.h, self.s = w, h, min(w / 1024, h / 600)
         self.hits = []
+        self.meter_rects = {}
         self.draw(p)
 
     def draw(self, p):
@@ -267,6 +272,24 @@ def param_color(name):
     return next((color for key, color, _, _ in PARAM_FAMILIES if key == family), "#38d6ff")
 
 
+class MeterView(QWidget):
+    """One level meter: a small child widget over its panel, so a moving needle (or peak line) repaints
+    only this box instead of the whole screen. It is transparent to input; the panel keeps drawing the
+    same box in its own full frames, and this sits on top of it."""
+
+    def __init__(self, parent, draw):
+        super().__init__(parent)
+        self.draw = draw
+        self.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self.setAttribute(Qt.WA_NoSystemBackground)
+        self.setAutoFillBackground(False)
+
+    def paintEvent(self, _):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        self.draw(p, QRectF(0, 0, self.width(), self.height()))
+
+
 class Window(QWidget):
     """Full-screen touch window of modules: panels on modular-synth style faceplates in a 2x2 grid (a
     single module fills the window), an optional toolbar on top and modal dialogs (a module over the rest).
@@ -290,6 +313,11 @@ class Window(QWidget):
         self.broken = set()  # panels whose tick raised: reported once, the clock keeps going
         self.broken_paint = set()  # panels whose draw raised: drawn as an error, the rest still paints
         self.slow_paint_at = 0.0  # when a slow frame was last reported
+        self.painted_panels = set()  # what the last full frame drew (the meters follow only these)
+        self.meter_views = {}  # (panel id, key) -> MeterView
+        self.meters_dirty = False  # a level changed: repaint the meter boxes, not the whole rack
+        for panel in self.panels:
+            panel.window_ref = self
         QTimer(self, interval=40, timeout=self.tick).start()
 
     # --- input ----------------------------------------------------------
@@ -411,6 +439,46 @@ class Window(QWidget):
             for panel in panels:
                 panel.stale = False
             self.update()
+        self.sync_meters()
+        if self.meters_dirty:
+            self.meters_dirty = False
+            if self.meter_views:
+                for view in self.meter_views.values():
+                    view.update()  # the needles only, not the rack
+            else:
+                self.update()  # no boxes located yet: one full frame records where they go
+
+    def meters_changed(self):
+        """A level moved. The meters live in their own small widgets, so this does not mean a full frame."""
+        self.meters_dirty = True
+
+    def sync_meters(self):
+        """One MeterView per meter the last frame registered, placed over its panel's screen."""
+        seen = set()
+        for panel in self.painted_panels:
+            screen = self.screens.get(panel)
+            if screen is None:
+                continue
+            for key, (rect, draw) in list(panel.meter_rects.items()):
+                place = QRectF(screen.left() + rect.left(), screen.top() + rect.top(),
+                               max(1.0, rect.width()), max(1.0, rect.height()))
+                if not screen.contains(place):  # scrolled halfway out: the panel's own clipped frame has it
+                    continue
+                gkey = (id(panel), key)
+                seen.add(gkey)
+                view = self.meter_views.get(gkey)
+                if view is None:
+                    view = self.meter_views[gkey] = MeterView(self, draw)
+                else:
+                    view.draw = draw
+                geo = place.toRect()
+                if view.geometry() != geo:
+                    view.setGeometry(geo)
+                if not view.isVisible():
+                    view.show()
+        for gkey, view in list(self.meter_views.items()):
+            if gkey not in seen:
+                view.hide()
 
     def animating(self):
         """Is anything on screen changing by itself? Repainting is expensive (a full 4K frame is a lot of
@@ -426,6 +494,7 @@ class Window(QWidget):
         self.k = k = min(self.width() / 1920, self.height() / 1080)
         gap = 6 * k
         self.screens, self.rail_buttons = {}, []
+        self.painted_panels = set()
         top = 0.0
         if self.TOOLBAR:
             bar = QRectF(gap, gap, self.width() - 2 * gap, self.TOOLBAR * k)
@@ -446,6 +515,7 @@ class Window(QWidget):
             screen = self.draw_faceplate(p, r, n, name, desc, panel, zoom)
             if panel:
                 self.screens[panel] = screen
+                self.painted_panels.add(panel)
                 self.paint_panel(p, panel, screen)
         if self.dialog:
             p.fillRect(self.rect(), QColor(0, 0, 0, 160))
@@ -454,6 +524,7 @@ class Window(QWidget):
             name, desc, panel = self.dialog
             self.screens[panel] = self.draw_faceplate(p, self.dialog_rect, 7, name, desc, panel,
                                                       ("✕", self.close_dialog))
+            self.painted_panels.add(panel)
             self.paint_panel(p, panel, self.screens[panel])
         spent = time.perf_counter() - started
         if spent > 0.25 and time.monotonic() - self.slow_paint_at > 5.0:  # a frame this slow is a frozen screen
