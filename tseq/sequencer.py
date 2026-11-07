@@ -995,7 +995,8 @@ class Sequencer(Panel):
             level = QRectF(head.right() - 64 * s, head.top() + 6 * s, 10 * s, head.height() - 12 * s)
             if clip.contains(level):  # a header scrolled halfway out keeps its meter in the panel's own frame
                 self.meter_rects[("track", id(tr))] = (
-                    level, lambda p, r, tr=tr: self.draw_track_meter(p, r, tr))
+                    level, lambda p, r, tr=tr: self.draw_track_meter(p, r, tr),
+                    "#1b2130" if selected else PANEL)
             self.draw_track_meter(p, level, tr)
         mute = QRectF(head.right() - 50 * s, head.top() + 6 * s, 44 * s, head.height() - 12 * s)
         self.button(p, mute, "M", lambda tr=tr: self.set_mute(tr), on=tr.mute, color=WARN)

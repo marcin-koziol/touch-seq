@@ -277,16 +277,17 @@ class MeterView(QWidget):
     only this box instead of the whole screen. It is transparent to input; the panel keeps drawing the
     same box in its own full frames, and this sits on top of it."""
 
-    def __init__(self, parent, draw):
+    def __init__(self, parent, draw, background):
         super().__init__(parent)
-        self.draw = draw
+        self.draw, self.background = draw, background
         self.setAttribute(Qt.WA_TransparentForMouseEvents)
-        self.setAttribute(Qt.WA_NoSystemBackground)
+        self.setAttribute(Qt.WA_OpaquePaintEvent)  # it paints every pixel: no repaint of the rack behind it
         self.setAutoFillBackground(False)
 
     def paintEvent(self, _):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
+        p.fillRect(self.rect(), QColor(self.background))
         self.draw(p, QRectF(0, 0, self.width(), self.height()))
 
 
@@ -459,7 +460,7 @@ class Window(QWidget):
             screen = self.screens.get(panel)
             if screen is None:
                 continue
-            for key, (rect, draw) in list(panel.meter_rects.items()):
+            for key, (rect, draw, background) in list(panel.meter_rects.items()):
                 place = QRectF(screen.left() + rect.left(), screen.top() + rect.top(),
                                max(1.0, rect.width()), max(1.0, rect.height()))
                 if not screen.contains(place):  # scrolled halfway out: the panel's own clipped frame has it
@@ -468,9 +469,9 @@ class Window(QWidget):
                 seen.add(gkey)
                 view = self.meter_views.get(gkey)
                 if view is None:
-                    view = self.meter_views[gkey] = MeterView(self, draw)
+                    view = self.meter_views[gkey] = MeterView(self, draw, background)
                 else:
-                    view.draw = draw
+                    view.draw, view.background = draw, background
                 geo = place.toRect()
                 if view.geometry() != geo:
                     view.setGeometry(geo)

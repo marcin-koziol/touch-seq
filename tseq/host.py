@@ -1010,7 +1010,7 @@ class HostPanel(Panel):
             p.restore()
         self.region(r, lambda pos: Hold(action, key=key))
 
-    def draw_fader(self, p, r, strip, label=True):
+    def draw_fader(self, p, r, strip, label=True, background=BG):
         s = self.s
         mute = QRectF(r.left(), r.bottom() - 40 * s, r.width(), 40 * s)
         self.button(p, mute, "M", lambda: self.set_mix(strip, mute=not strip.mute), on=strip.mute, color=WARN)
@@ -1023,7 +1023,7 @@ class HostPanel(Panel):
         self.box(p, QRectF(track.left(), track.bottom() - level, track.width(), level), QColor(74, 222, 128, 150),
                  None, radius=6)
         self.meter_rects[("fader", id(strip))] = (
-            meter, lambda p, r, strip=strip: self.draw_meter(p, r, strip))
+            meter, lambda p, r, strip=strip: self.draw_meter(p, r, strip), background)
         self.draw_meter(p, meter, strip)
         if label:
             self.text(p, QRectF(r.left(), track.bottom() + 2 * s, r.width(), 20 * s), f"{round(strip.volume * 100)}%",
@@ -1089,7 +1089,7 @@ class HostPanel(Panel):
                           "#38d6ff", 11, Qt.AlignRight | Qt.AlignTop, bold=True)
             self.on_press(head, lambda tr=tr: self.open_track(tr))
             self.draw_fader(p, QRectF(col.left() + 8 * s, head.bottom() + 6 * s, col.width() - 16 * s,
-                                      col.bottom() - head.bottom() - 14 * s), tr.strip)
+                                      col.bottom() - head.bottom() - 14 * s), tr.strip, background=PANEL)
         for n, bus in enumerate(bus_shown):
             col = QRectF(bus_area.left() + n * (128 * s + 10 * s), bus_area.top(), 128 * s,
                          bus_area.height() - 44 * s)
@@ -1113,7 +1113,7 @@ class HostPanel(Panel):
             self.on_press(slot, lambda k=k, ref=ref: self.show("master", (m, k)) if ref else self.open_browser(m, k))
             y = slot.bottom() + 6 * s
         self.draw_fader(p, QRectF(master.left() + 8 * s, y + 6 * s, master.width() - 16 * s, master.bottom() - y - 14 * s),
-                        m)
+                        m, background="#1a1810")
 
     def draw_bus_column(self, p, col, bus):
         """A bus in the mixer: its chain (tap a slot to fill or edit it) and its level."""
@@ -1135,7 +1135,7 @@ class HostPanel(Panel):
             self.hits[-1] = (slot, lambda pos, strip=strip, k=k: self.bus_slot(strip, k))
             y = slot.bottom() + 4 * s
         self.draw_fader(p, QRectF(col.left() + 8 * s, y + 4 * s, col.width() - 16 * s, col.bottom() - y - 14 * s),
-                        strip)
+                        strip, background=PANEL)
 
     def focus_first(self, strip):
         """Choose the first plugin of a chain when nothing on it is chosen yet (the track just changed)."""

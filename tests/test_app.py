@@ -392,7 +392,7 @@ class MeterPanel(ts.Panel):
     def draw(self, p):
         p.fillRect(self.rect(), ts.QColor(ts.BG))
         rect = QRectF(40, 50, 10, 100)
-        self.meter_rects["level"] = (rect, lambda p, r: p.fillRect(r, ts.QColor("#4ade80")))
+        self.meter_rects["level"] = (rect, lambda p, r: p.fillRect(r, ts.QColor("#4ade80")), ts.PANEL)
     def tick(self):
         self.window_ref.meters_changed()
 mp = MeterPanel()
