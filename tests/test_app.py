@@ -2679,11 +2679,17 @@ for _ in range(ts.SAMPLER_GROUPS):
 assert editor.pads[0]["group"] == 0, "after group 8 comes off"
 editor.cycle_group()
 assert editor.pads[0]["group"] == 1, "and then group 1 again"
-assert (SamplerEditor.PITCH_LO, SamplerEditor.PITCH_HI) == (-36.0, 12.0)
+assert (SamplerEditor.PITCH_LO, SamplerEditor.PITCH_HI) == (-36.0, 36.0)
+assert (SamplerEditor.FINE_LO, SamplerEditor.FINE_HI) == (-100.0, 100.0)
 editor.pads[0]["pitch"] = SamplerEditor.PITCH_LO
 editor.save_map()
 _, lowpitched, _ = read_manifest(manifest)
 assert lowpitched[0]["pitch"] == -36.0, lowpitched[0]["pitch"]
+editor.pads[0]["pitch"] = 0.0
+editor.pads[0]["fine"] = -37.0
+editor.save_map()
+_, tuned, _ = read_manifest(manifest)
+assert abs(tuned[0]["fine"] + 37.0) < 1e-6, tuned[0].get("fine")
 # STRETCH: pitch without changing the slice's length, stored in the map
 editor.toggle_stretch()
 assert editor.pads[0]["stretch"] == 1
@@ -2768,6 +2774,11 @@ ppd.move(QPointF(0, -10)); ppd.move(QPointF(0, -74))  # 64 px: 8 whole semitones
 assert pitchv[-1] == 8.0, pitchv
 ppd.move(QPointF(0, -71))  # a 3 px wobble stays on the same note
 assert pitchv[-1] == 8.0, pitchv
+finev = []
+fpd = PadDrag(QPointF(0, 0), lambda: 0.0, finev.append, SamplerEditor.FINE_LO, SamplerEditor.FINE_HI,
+              1.0, 1.0, lambda: None)
+fpd.move(QPointF(0, -10)); fpd.move(QPointF(0, -74))  # 64 px: +64 cents
+assert finev[-1] == 64.0, finev
 # the waveform is read in the background in the app: the editor can paint a spinner and poll for it
 panel2 = ts.Panel(); panel2.s = 1.0; panel2.state_dir = state; panel2.set_param = lambda *a, **k: None
 ed2 = SamplerEditor(panel2, background=True)

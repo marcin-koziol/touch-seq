@@ -52,6 +52,7 @@ struct SamplerPad {
     float gain = 1.0f;
     float pan = 0.0f;
     float pitch = 0.0f;
+    float fine = 0.0f;  // cents, added to PITCH: -100..+100
     int group = 0;  // playback group: only one pad of a non-zero group sounds at a time
     bool loop = false;
     bool reverse = false;

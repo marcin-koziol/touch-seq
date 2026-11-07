@@ -120,7 +120,7 @@ void SamplerCore::load() {
         std::string name;
         uint64_t start = 0, end = 0;
         int rootNote = 36;
-        float gain = 1.0f, pan = 0.0f, pitch = 0.0f;
+        float gain = 1.0f, pan = 0.0f, pitch = 0.0f, fine = 0.0f;
         int loop = 0, reverse = 0, gate = 0, group = 0, stretch = 0;
         float ampA = 0.0f, ampD = 0.0f, ampS = 1.0f, ampR = 0.0f;
         float fA = 0.0f, fD = 0.0f, fS = 1.0f, fR = 0.0f;
@@ -134,6 +134,7 @@ void SamplerCore::load() {
         in >> stretch;  // and no stretch field: resample (the pitch changes the length)
         in >> ampA >> ampD >> ampS >> ampR >> fA >> fD >> fS >> fR >> cutoff >> reso >> envAmt;
         in >> lfoWave >> lfoRate >> lfoDepth >> lfoTarget >> lfoSync >> lfoDiv;
+        in >> fine;  // appended after the LFO: older manifests stop here and keep 0 cents
         if (index < 0 || index >= kPads)
             continue;
 
@@ -155,6 +156,7 @@ void SamplerCore::load() {
         pad.gain = gain;
         pad.pan = std::max(-1.0f, std::min(1.0f, pan));
         pad.pitch = pitch;
+        pad.fine = fine;
         pad.group = group;
         pad.loop = loop != 0;
         pad.reverse = reverse != 0;
@@ -172,14 +174,15 @@ void SamplerCore::setVoiceStep(Voice& voice, const SamplerPad& pad) {
     const double base = (double(pad.fileRate) / rate) * noteRatio;
     voice.stretch = pad.stretch && voice.shifter != nullptr;
     voice.baseStep = pad.reverse ? -base : base;
-    voice.step = voice.baseStep * std::pow(2.0, double(pad.pitch) / 12.0);
+    const double semitones = double(pad.pitch) + double(pad.fine) / 100.0;
+    voice.step = voice.baseStep * std::pow(2.0, semitones / 12.0);
 }
 
 void SamplerCore::resetShift(Voice& voice, const SamplerPad& pad) {
     if (!voice.shifter)
         return;
     voice.shifter->reset();
-    voice.shifter->setPitchScale(std::pow(2.0, double(pad.pitch) / 12.0));
+    voice.shifter->setPitchScale(std::pow(2.0, (double(pad.pitch) + double(pad.fine) / 100.0) / 12.0));
     voice.shiftDelay = double(voice.shifter->getStartDelay());
     voice.shiftRead = voice.shiftBlock;  // fill a block on the first frame
     voice.shiftDrain = false;
@@ -272,7 +275,7 @@ void SamplerCore::applyMap() {
         std::string name;
         uint64_t start = 0, end = 0;
         int rootNote = 36;
-        float gain = 1.0f, pan = 0.0f, pitch = 0.0f;
+        float gain = 1.0f, pan = 0.0f, pitch = 0.0f, fine = 0.0f;
         int loop = 0, reverse = 0, gate = 0, group = 0, stretch = 0;
         float ampA = 0.0f, ampD = 0.0f, ampS = 1.0f, ampR = 0.0f;
         float fA = 0.0f, fD = 0.0f, fS = 1.0f, fR = 0.0f;
@@ -286,6 +289,7 @@ void SamplerCore::applyMap() {
         in >> stretch;
         in >> ampA >> ampD >> ampS >> ampR >> fA >> fD >> fS >> fR >> cutoff >> reso >> envAmt;
         in >> lfoWave >> lfoRate >> lfoDepth >> lfoTarget >> lfoSync >> lfoDiv;
+        in >> fine;  // appended after the LFO: older manifests stop here and keep 0 cents
         if (index < 0 || index >= kPads)
             continue;
         SamplerPad& pad = next->pads[index];
@@ -294,6 +298,7 @@ void SamplerCore::applyMap() {
         pad.gain = gain;
         pad.pan = std::max(-1.0f, std::min(1.0f, pan));
         pad.pitch = pitch;
+        pad.fine = fine;
         pad.group = group;
         pad.loop = loop != 0;
         pad.reverse = reverse != 0;
@@ -464,7 +469,8 @@ void SamplerCore::process(float* left, float* right, uint32_t frames) {
             if (voice.stretch) {  // the shifter takes the slice at its own speed and returns it at the pad's pitch
                 if (voice.shiftRead >= voice.shiftBlock) {  // one fixed block of the shifter at a time
                     const double lfoPitch = pad.lfoTarget == 2 ? 2.0 * double(pad.lfoDepth) * double(lfo) : 0.0;
-                    voice.shifter->setPitchScale(std::exp2((double(pad.pitch) + lfoPitch) / 12.0));
+                    voice.shifter->setPitchScale(
+                        std::exp2((double(pad.pitch) + double(pad.fine) / 100.0 + lfoPitch) / 12.0));
                     for (size_t i = 0; i < voice.shiftBlock; ++i) {
                         float value = 0.0f;
                         if (!voice.shiftDrain && !nextInput(voice, pad, value)) {

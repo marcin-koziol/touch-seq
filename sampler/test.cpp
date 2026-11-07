@@ -25,6 +25,14 @@ static double rms_range(const std::vector<float>& v, size_t from, size_t to) {
     return std::sqrt(sum / double(to - from));
 }
 
+static double frequency(const std::vector<float>& v, size_t n, double rate) {
+    int crossings = 0;
+    for (size_t i = 1; i < n; ++i)
+        if (v[i - 1] <= 0.0f && v[i] > 0.0f)
+            ++crossings;
+    return n ? crossings * rate / double(n) : 0.0;
+}
+
 int main() {
     namespace fs = std::filesystem;
     const fs::path root = fs::temp_directory_path() / "touchseq-sampler-test";
@@ -73,6 +81,15 @@ int main() {
     stretch << "pad 1 tone.wav 0 48000 37 1.0 0.0 12 0 0 0 0 1\n";   // +12, stretch: same length
     stretch << "pad 2 tone.wav 0 48000 38 1.0 0.0 12 0 0 0 0 0\n";   // +12, resample: half the length
     stretch.close();
+    std::ofstream fine(root / "sampler" / "sampler-16.txt");
+    fine << "mono 0\n";
+    fine << "pad 0 tone.wav 0 48000 36 1.0 0.0 0 0 0 0 0 0 "  // up to stretch
+         << "0 0 1 0 "   // amp A D S R
+         << "0 0 1 0 "   // filter A D S R
+         << "20000 0 0 " // cutoff, reso, envelope amount
+         << "0 2 0 0 0 2 "  // LFO wave, rate, depth, target, sync, division
+         << "100\n";     // FINE: +100 cents
+    fine.close();
     std::ofstream down(root / "sampler" / "sampler-15.txt");
     down << "mono 0\n";
     down << "pad 0 tone.wav 0 48000 36 1.0 0.0 -12 0 0 0 0 1\n";  // -12, stretch: an octave down, still 48000 frames
@@ -223,6 +240,14 @@ int main() {
         tail += 4096;
     }
     assert(core.activeVoices() == 0);
+    core.setSlot(16);  // FINE +100 cents: the same 440 Hz tone, a semitone up
+    core.noteOn(36, 127);
+    core.process(left.data(), right.data(), 24000);
+    const double sharp = frequency(left, 24000, sr);
+    std::printf("fine +100 cents: %.1f Hz\n", sharp);
+    assert(std::abs(sharp - 466.16) < 3.0);
+    core.allNotesOff();
+    std::puts("fine tuning OK");
     core.allNotesOff();
     std::puts("stretch OK");
 

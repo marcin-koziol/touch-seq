@@ -104,7 +104,8 @@ def read_manifest(path):
                            "pitch": float(parts[8]), "loop": int(parts[9]), "reverse": int(parts[10]),
                            "gate": int(parts[11]) if len(parts) >= 12 else 0,
                            "group": int(parts[12]) if len(parts) >= 13 else 0,
-                           "stretch": int(parts[13]) if len(parts) >= 14 and parts[13].isdigit() else 0}
+                           "stretch": int(parts[13]) if len(parts) >= 14 and parts[13].isdigit() else 0,
+                           "fine": float(parts[31]) if len(parts) >= 32 else 0.0}
                     if len(parts) >= 25:  # envelopes and the filter
                         pad["amp"] = [float(parts[k]) for k in (14, 15, 16, 17)]
                         pad["filter"] = [float(parts[k]) for k in (18, 19, 20, 21)]
@@ -141,7 +142,7 @@ def write_manifest(path, current, pads, mono=0):
                            f"{pad.get('env', 0.0):.6f} {int(pad.get('lfo_wave', 0))} "
                            f"{pad.get('lfo_rate', 2.0):.6f} {pad.get('lfo_depth', 0.0):.6f} "
                            f"{int(pad.get('lfo_target', 0))} {int(pad.get('lfo_sync', 0))} "
-                           f"{int(pad.get('lfo_div', 2))}")
+                           f"{int(pad.get('lfo_div', 2))} {pad.get('fine', 0.0):.2f}")
     # write beside it and rename: the plugin reads the manifest from the audio thread, and a half-written file
     # (or a light map update during a slice drag) would make pads vanish for a moment
     temporary = path.with_suffix(path.suffix + ".tmp")
@@ -580,7 +581,8 @@ class SamplerEditor:
 
     def new_pad(self, start, end, root):
         return {"file": self.current, "start": int(start), "end": int(end), "root": int(root),
-                "gain": 1.0, "pan": 0.0, "pitch": 0.0, "loop": 0, "reverse": 0, "gate": 0, "group": 0,
+                "gain": 1.0, "pan": 0.0, "pitch": 0.0, "fine": 0.0, "loop": 0, "reverse": 0,
+                "gate": 0, "group": 0,
                 "stretch": 0, "amp": [0.0, 0.0, 1.0, 0.0], "filter": [0.0, 0.0, 1.0, 0.0],
                 "cutoff": 20000.0, "reso": 0.0, "env": 0.0,
                 "lfo_wave": 0, "lfo_rate": 2.0, "lfo_depth": 0.0, "lfo_target": 0,
@@ -1064,7 +1066,8 @@ class SamplerEditor:
                         "drag to pan · yellow lines chop · white handles resize · the white bar moves the slice",
                         DIM, 10, Qt.AlignLeft | Qt.AlignVCenter, elide=True)
 
-    PITCH_LO, PITCH_HI = -36.0, 12.0  # three octaves down, one up
+    PITCH_LO, PITCH_HI = -36.0, 36.0  # three octaves down, three up
+    FINE_LO, FINE_HI = -100.0, 100.0  # cents, on top of PITCH
     LFO_WAVES = ("SINE", "TRI", "SQUARE", "SAW")
     LFO_TARGETS = ("AMP", "FILTER", "PITCH")
     LFO_DIVS = (("1/1", 0.25), ("1/2", 0.5), ("1/4", 1.0), ("1/8", 2.0), ("1/16", 4.0),
@@ -1398,7 +1401,9 @@ class SamplerEditor:
             return
         gain = QRectF(rect.left(), rect.top(), rect.width() / 2 - 4 * s, 62 * s)
         pan = QRectF(rect.center().x() + 4 * s, rect.top(), rect.width() / 2 - 4 * s, 62 * s)
-        pitch = QRectF(rect.left(), gain.bottom() + 6 * s, rect.width() / 2 - 4 * s, 62 * s)
+        quarter = rect.width() / 4
+        pitch = QRectF(rect.left(), gain.bottom() + 6 * s, quarter - 3 * s, 62 * s)
+        fine = QRectF(pitch.right() + 2 * s, pitch.top(), quarter - 3 * s, 62 * s)
         buttons = QRectF(rect.center().x() + 4 * s, pitch.top(), rect.width() / 2 - 4 * s, 62 * s)
         # gain goes past unity (a pad can be pushed, up to +12 dB) and moves in 0.02 steps
         self.knob(p, gain, "GAIN", pad["gain"], 0.0, 4.0, 1.2 * s, 0.02,
@@ -1409,6 +1414,11 @@ class SamplerEditor:
         self.knob(p, pitch, "PITCH", pad["pitch"], self.PITCH_LO, self.PITCH_HI, 8 * s, 1.0,
                   lambda: self.pads[self.pad]["pitch"], lambda v: self.pads[self.pad].__setitem__("pitch", v),
                   show=lambda v: "0" if abs(v) < 0.5 else f"{int(round(v)):+d}")
+        # cents, on top of PITCH: land between the semitones without losing the easy whole-note drag
+        self.knob(p, fine, "FINE", pad.get("fine", 0.0), self.FINE_LO, self.FINE_HI, 1.0 * s, 1.0,
+                  lambda: self.pads[self.pad].get("fine", 0.0),
+                  lambda v: self.pads[self.pad].__setitem__("fine", v),
+                  show=lambda v: "0¢" if abs(v) < 0.5 else f"{int(round(v)):+d}¢")
         gate = QRectF(buttons.left(), buttons.top(), buttons.width(), 18 * s)
         loop = QRectF(buttons.left(), gate.bottom() + 2 * s, buttons.width(), 18 * s)
         reverse = QRectF(buttons.left(), loop.bottom() + 2 * s, buttons.width(), 18 * s)

@@ -55,6 +55,12 @@ cursor, and change the arrangement **on the bar** instead of on the downbeat of 
 
 ![The whole rack, as it comes up: performance controls, the plugin host, the sequencer and the live pads](docs/screenshots/overview.png)
 
+## New in 0.14.0
+
+- **Sampler pitch** — **PITCH** now covers three octaves up as well as down (−36…+36 semitones), and a
+  separate **FINE** knob moves the pad by ±100 cents in one-cent steps on top of the semitone. Both are
+  stored in the pad map and travel with copies and presets.
+
 ## New in 0.13.0
 
 - **Sampler pitch** — **PITCH** now covers three octaves down (−36) to one up (+12) and moves in whole
@@ -84,9 +90,9 @@ cursor, and change the arrangement **on the bar** instead of on the downbeat of 
   pad's envelopes and LFO along, as independent copies. The pads use the same fixed
   colors as the drum voices. Each pad has Gain (up to 4×), Pan, Pitch, Loop, Reverse and **Gate** (play while
   held vs one-shot) and a **GRP** playback group: pads in the same group cut each other, like MONO for that
-  group. **MONO** cuts the previous pad when a new one starts. **PITCH** moves at 12 px per semitone and snaps
-  to a whole semitone on release (±12); **STRETCH** shifts the pitch without changing the slice's length
-  (a granular shift, not resampling). **STOP** silences every voice. **ADSR** turns the waveform into the amp or filter
+  group. **MONO** cuts the previous pad when a new one starts. **PITCH** moves in whole semitones, from three
+  octaves down to three up (−36…+36); **FINE** adds ±100 cents on top of it. **STRETCH** shifts the pitch
+  without changing the slice's length (Rubber Band, not resampling). **STOP** silences every voice. **ADSR** turns the waveform into the amp or filter
   envelope editor: the slice's waveform is a dim ghost behind the curve. The times are fractions of the slice,
   so lengthening the slice stretches the envelope with it; a reversed pad mirrors the envelope, so it fires
   from the slice's end. **TRIGGER** (under the curve) holds the pad for auditioning, exactly like tapping it.
