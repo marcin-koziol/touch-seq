@@ -7,9 +7,10 @@ from pathlib import Path
 
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QPen
+from PySide6.QtWidgets import QFileDialog
 
-from .constants import BORDER, DIM, PANEL, TEXT, WARN
-from .sampler import manifest_path, read_manifest
+from .constants import BORDER, DIM, PANEL, SAMPLER_NOTE_BASE, TEXT, WARN
+from .sampler import import_sample, manifest_path, read_manifest, sampler_dir, write_manifest
 from .wav import peaks_range, read_wav
 
 PLAY = "#4ade80"
@@ -141,6 +142,46 @@ class GrainEditor:
         self.apply_loaded()
         self.refresh()
 
+    def new_pad(self, name, frames, index):
+        """A fresh sampler pad for this source (the sampler ignores the Grain-only fields, and vice versa)."""
+        return {"file": name, "start": 0, "end": int(frames), "root": SAMPLER_NOTE_BASE + index,
+                "gain": 1.0, "pan": 0.0, "pitch": 0.0, "fine": 0.0, "loop": 0, "reverse": 0,
+                "gate": 0, "group": 0, "stretch": 0, "amp": [0.0, 0.0, 1.0, 0.0],
+                "filter": [0.0, 0.0, 1.0, 0.0], "cutoff": 20000.0, "reso": 0.0, "env": 0.0,
+                "lfo_wave": 0, "lfo_rate": 2.0, "lfo_depth": 0.0, "lfo_target": 0,
+                "lfo_sync": 0, "lfo_div": 2}
+
+    def load_sample(self):
+        """LOAD: import a file into the project and make it this Grain's source pad."""
+        path, _ = QFileDialog.getOpenFileName(None, "Load sample", "",
+                                              "Audio (*.wav *.aif *.aiff *.flac *.mp3 *.ogg);;All files (*)")
+        if path:
+            self.use_sample(path)
+
+    def use_sample(self, path):
+        slot = int(round(self.value("Slot", self.slot)))
+        pad = int(round(self.value("Pad", self.pad)))
+        try:
+            name = import_sample(path, self.panel.state_dir)
+            samples, rate, frames = read_wav(sampler_dir(self.panel.state_dir) / name)
+            self.cache[name] = (samples, rate, frames)
+            manifest = manifest_path(self.panel.state_dir, slot)
+            _, pads, mono = read_manifest(manifest)
+            if not 0 <= pad < len(pads):
+                pad = 0
+            pads[pad] = self.new_pad(name, frames, pad)
+            write_manifest(manifest, name, pads, mono)
+            self.slot, self.pad = slot, pad
+            self.name, self.start, self.end = name, 0, int(frames)
+            self.samples, self.rate, self.frames = samples, rate, frames
+            self.seen = None
+            self.reload_source()  # tell the plugin to reread, and show the new source now
+            self.panel.message = f"grain: loaded {name}"
+            self.panel.invalidate()
+        except Exception as error:
+            self.panel.message = f"grain: {error}"
+            self.panel.invalidate()
+
     def reload_source(self):
         prm = self.param("Reload")
         host = getattr(self.panel, "host", None)
@@ -160,9 +201,11 @@ class GrainEditor:
         header = QRectF(r.left(), r.top(), r.width(), 26 * s)
         source = f"PAD {self.pad + 1}" if self.pads else "PAD -"
         title = f"{source}  ·  {self.name}" if self.name else source
-        self.panel.text(p, header.adjusted(2 * s, 0, -90 * s, 0), title, DIM if not self.name else TEXT, 12,
+        self.panel.text(p, header.adjusted(2 * s, 0, -170 * s, 0), title, DIM if not self.name else TEXT, 12,
                         Qt.AlignLeft | Qt.AlignVCenter, elide=True)
         reload_btn = QRectF(header.right() - 84 * s, header.top(), 82 * s, 24 * s)
+        load_btn = QRectF(reload_btn.left() - 78 * s, header.top(), 76 * s, 24 * s)
+        self.panel.button(p, load_btn, "LOAD", self.load_sample)
         self.panel.button(p, reload_btn, "RELOAD", self.reload_source)
         wave = QRectF(r.left(), header.bottom() + 5 * s, r.width(), max(80 * s, (r.height() - 31 * s) * 0.42))
         self.draw_wave(p, wave)

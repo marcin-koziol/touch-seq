@@ -2816,6 +2816,11 @@ img.fill(0); q = QPainter(img)
 grain.draw(q, QRectF(0, 0, 700, 400), types.SimpleNamespace(params=[]), 99)
 q.end()
 assert grain.name == "" and grain.samples is None
+grain.slot, grain.pad = 99, 0
+grain.use_sample(wav_path)  # the GRAIN editor's own LOAD, without the file dialog
+_, grain_pads, _ = read_manifest(state / "sampler" / "sampler-99.txt")
+assert grain_pads[0] and grain_pads[0]["file"] == grain.name, grain_pads[0]
+assert grain.samples is not None and grain.end == frames and grain.frames == frames
 # a playing pad moves the waveform playhead: only its old/new strips are queued, not the whole panel
 editor.wave_rect = QRectF(0, 0, 400, 200)
 editor.view_start, editor.view_end = 0, editor.frames
