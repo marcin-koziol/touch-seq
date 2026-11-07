@@ -21,6 +21,7 @@ from .constants import (BG, BORDER, BUILTIN_LABELS, CLICK_ACCENT, CLICK_BEAT, CL
                         GRAIN_LABELS, INTERNAL_LABELS, MONITOR_LABELS, PALETTE, PANEL, PARAM_LOG,
                         SAMPLER_LABELS, SAMPLER_NOTE_BASE, SLOTS, SPACE_LABELS, TEXT, WARN, XYFX_LABELS)
 from .eq import EqEditor
+from .grain import GrainEditor
 from .gestures import Drag, Hold, ScrollOrTap, Slide
 from .sampler import SamplerEditor, manifest_path as sampler_manifest_file, read_manifest
 from .ui import Panel, param_color, param_family, param_section, split
@@ -168,6 +169,7 @@ class HostPanel(Panel):
         self._builtin = None  # our own plugins, found on disk once (a stale catalog must not hide them)
         self.eq = EqEditor(self)  # the EQ's own editor, drawn in the parameter area
         self.sampler = SamplerEditor(self, background=True)  # the sampler's editor, drawn in the parameter area
+        self.grain = GrainEditor(self)  # the chromatic granular synth's editor
         self._sampler_cache = {}  # manifest path -> (mtime, pads), so PLAY-12 doesn't read a file every frame
         self._preview_tokens = {}  # pad -> last audition, so an old note-off can't stop a newer retrigger
         os.environ["TOUCHSEQ_SAMPLER_DIR"] = str(self.state_dir)  # where the sampler finds its pad maps
@@ -613,6 +615,9 @@ class HostPanel(Panel):
         sampler = getattr(self, "sampler", None)
         if sampler:
             sampler.poll()  # a background waveform read lands on the UI thread here
+        grain = getattr(self, "grain", None)
+        if grain:
+            grain.poll()
         self.router.refresh(self.project.tracks)  # external tracks: look for their MIDI outputs again
         if self.host:
             self.host.idle()
@@ -645,7 +650,8 @@ class HostPanel(Panel):
         plugin used to count as "animating", which repainted the whole rack 25 times a second for nothing -
         a plugin's parameters only change when we set them, and that invalidates the panel itself."""
         sampler = getattr(self, "sampler", None)
-        return super().animating() or bool(sampler and sampler.loading)
+        grain = getattr(self, "grain", None)
+        return super().animating() or bool(sampler and sampler.loading) or bool(grain and grain.loading)
 
     # --- fader links (Controls target "param") ------------------------------------
     def link_plugin(self, link):
@@ -1238,6 +1244,11 @@ class HostPanel(Panel):
                                         inner.bottom() - title.bottom() - 8 * s), plugin,
                               self.sampler_slot(strip, sel[1]), self.sampler_manifest_path(strip, sel[1]))
             return
+        if plugin.ref.label in GRAIN_LABELS:  # our grain synth: the source slice and its cloud, then knobs
+            self.grain.draw(p, QRectF(inner.left(), title.bottom() + 8 * s, inner.width(),
+                                      inner.bottom() - title.bottom() - 8 * s), plugin,
+                            self.sampler_slot(strip, sel[1]))
+            return
         if plugin.ref.label in EQ_LABELS:  # our EQ: the curve, not a grid of knobs
             self.eq.draw(p, QRectF(inner.left(), title.bottom() + 8 * s, inner.width(),
                                    inner.bottom() - title.bottom() - 8 * s), plugin)
@@ -1307,8 +1318,13 @@ class HostPanel(Panel):
         color = QColor(param_color(prm.name))
         p.setPen(QPen(color, 5 * s, Qt.SolidLine, Qt.RoundCap))
         p.drawArc(dial, 225 * 16, round(-270 * 16 * max(0.0, min(1.0, f))))
-        self.text(p, dial.adjusted(6 * s, 0, -6 * s, 0), self.short(host.text(plugin, prm.index)), TEXT, 11,
-                  elide=True)
+        shown = self.short(host.text(plugin, prm.index))
+        if prm.integer or prm.boolean:  # a slot or a note is a count, not 0.00
+            try:
+                shown = str(int(round(host.value(plugin, prm.index))))
+            except Exception:
+                pass
+        self.text(p, dial.adjusted(6 * s, 0, -6 * s, 0), shown, TEXT, 11, elide=True)
         self.text(p, QRectF(r.left(), dial.bottom() + 2 * s, r.width(), 18 * s), prm.name, color.lighter(115).name(),
                   11, elide=True)
 
@@ -1402,6 +1418,8 @@ class HostPanel(Panel):
             v = float(text)
         except ValueError:
             return text
+        if abs(v) >= 1000:  # 16000 Hz reads better as 16k than as a number that gets elided
+            return f"{v / 1000:.1f}k".replace(".0k", "k")
         return f"{v:.0f}" if abs(v) >= 100 else f"{v:.1f}" if abs(v) >= 10 else f"{v:.2f}"
 
     # --- plugin browser -----------------------------------------------------

@@ -63,6 +63,8 @@ cursor, and change the arrangement **on the bar** instead of on the downbeat of 
   parameters — **Root** (the sample's pitch), **Keytrack** (100% = chromatic, 0% = a fixed drone), Position,
   Size, Density, Spray, Coarse/Fine, Reverse, Pan Spread, Level, ADSR, Cutoff and Reso. A **Slot**/`Pad`
   pair chooses which sampler map and pad are the source (the slot is set by the app automatically).
+  The **GRAIN** editor draws the source waveform, the slice and position/spray band, a preview of the grain
+  cloud, and the knobs below; **RELOAD** re-reads the sampler pad.
 - **Sampler pitch** — **PITCH** now covers three octaves up as well as down (−36…+36 semitones), and a
   separate **FINE** knob moves the pad by ±100 cents in one-cent steps on top of the semitone. Both are
   stored in the pad map and travel with copies and presets.
@@ -272,11 +274,15 @@ the first free name (*Touch-Seq 2*, …) and says so in HOST-4's status line: bo
   shows its OSC, FILTER and AMP knobs, and the **UI** button is hidden for our own plugins. Pick it in slot 0
   of a melody track; it is a synth, not an effect
 - **Grain** is the chromatic granular synth (`grain/`): one sampler slice, played across the keyboard with
-  overlapping grains. It has no window of its own yet; HOST-4 shows its knobs. The source is a sampler pad:
+  overlapping grains. Its editor is HOST-4's parameter area. The source is a sampler pad:
   put the Sampler in a slot, load and slice the sample, then **CHANGE** the slot to **Grain** (the source
   map stays in the project) and set **Root** to the sample's pitch. **Keytrack** at 100% tracks the keyboard,
   at 0% it holds one pitch; **Coarse/Fine** transpose it. **Position**, **Size**, **Density**, **Spray**,
-  **Reverse** and **Pan Spread** shape the grain cloud, then the ADSR, Cutoff and Reso.
+  **Reverse** and **Pan Spread** shape the grain cloud, then the ADSR, Cutoff and Reso. HOST-4 draws the
+  **GRAIN** editor: the source waveform and slice, the position/spray band, a grain-cloud preview, and the
+  knobs; **RELOAD** re-reads the sampler pad after its sample or slice changed.
+
+![The Grain editor: the sampler slice as the source, its grain cloud, and the synth's knobs](docs/screenshots/grain.png)
 - **Sampler** is our MPC-style pad sampler (`sampler/`): a waveform with chop markers, 16 pads, and
   Gain / Pan / Pitch / Loop / Reverse for the selected pad. **LOAD** imports a file into the project's
   `.plugins/sampler/` folder (WAV directly; ffmpeg converts other formats), **CHOP** makes 16 equal slices,

@@ -2508,6 +2508,7 @@ import struct
 import wave as wavelib
 from tseq.sampler import (PadDrag, SamplerEditor, WaveScroll, chop_regions, import_sample, preset_folders,
                           read_manifest, write_manifest)
+from tseq.grain import GrainEditor
 from tseq.wav import read_wav
 
 wav_path = OUT / "sampler-test.wav"
@@ -2809,6 +2810,12 @@ panel.host.index = -1
 editor.read_playhead()
 assert editor.playhead is None, "nothing playing: no playhead"
 del panel.host, panel.loaded
+# the Grain editor survives an empty source (it is drawn before a sampler pad is picked)
+grain = GrainEditor(panel)
+img.fill(0); q = QPainter(img)
+grain.draw(q, QRectF(0, 0, 700, 400), types.SimpleNamespace(params=[]), 99)
+q.end()
+assert grain.name == "" and grain.samples is None
 # a playing pad moves the waveform playhead: only its old/new strips are queued, not the whole panel
 editor.wave_rect = QRectF(0, 0, 400, 200)
 editor.view_start, editor.view_end = 0, editor.frames
