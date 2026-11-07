@@ -1021,6 +1021,17 @@ bh.gestures.clear()
 bh.sampler = types.SimpleNamespace(loading=True)
 assert bh.animating(), "the sampler spinner still turns"
 bh.sampler.loading = False
+# a meter must fall all the way to zero: a per-tick threshold used to leave the last visible bar and peak
+bh.host.level = 1.0
+for _ in range(3):
+    bh.sample_meters()
+meter = bh.meters[t1.strip]
+assert meter["l"] > 0.5 and meter["peak"] > 0.5, meter
+bh.host.level = 0.0
+meter["at"] -= 2.0  # its 1.2 s hold is over: the peak may slide
+for _ in range(400):
+    bh.sample_meters()
+assert (meter["l"], meter["r"], meter["peak"]) == (0.0, 0.0, 0.0), meter
 assert bh.strips() == [t1.strip, t2.strip, bus.strip, prb.master]
 assert bh.owner_name(t1.strip) == "T1" and bh.owner_name(bus.strip) == "BUS 1"
 assert bh.owner_name(prb.master) == "MASTER" and bh.bus_of(bus.strip) is bus

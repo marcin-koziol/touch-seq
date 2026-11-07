@@ -959,6 +959,7 @@ class HostPanel(Panel):
         now = time.monotonic()
         live = set(self.strips())
         changed = False
+        floor = 1e-4  # linear (-80 dB): below this the bar has no height, so snap to true silence
         for strip in live:
             chain = self.chain(strip)
             if not chain:  # no plugin, no node: its meter goes rather than freezing at the last value
@@ -971,12 +972,18 @@ class HostPanel(Panel):
             before = (meter["l"], meter["r"], meter["peak"])
             meter["l"] = max(left, meter["l"] * 0.72)  # a needle that falls back between frames
             meter["r"] = max(right, meter["r"] * 0.72)
+            if meter["l"] < floor:
+                meter["l"] = 0.0
+            if meter["r"] < floor:
+                meter["r"] = 0.0
             top = max(left, right)
             if top >= meter["peak"]:
                 meter["peak"], meter["at"] = top, now
             elif now - meter["at"] > 1.2:  # the peak holds, then slides down
                 meter["peak"] = max(meter["l"], meter["r"], meter["peak"] * 0.94)
-            if max(abs(a - b) for a, b in zip(before, (meter["l"], meter["r"], meter["peak"]))) > 0.002:
+                if meter["peak"] < floor:
+                    meter["peak"] = 0.0
+            if max(abs(a - b) for a, b in zip(before, (meter["l"], meter["r"], meter["peak"]))) > 1e-6:
                 changed = True
         for strip in [s for s in self.meters if s not in live]:
             del self.meters[strip]
