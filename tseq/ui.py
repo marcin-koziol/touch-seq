@@ -13,7 +13,7 @@ from PySide6.QtGui import (QColor, QFont, QFontMetrics, QLinearGradient, QPainte
 from PySide6.QtWidgets import QWidget
 
 from .constants import BG, BORDER, DIM, MIN_TEXT, MOUSE_ID, PANEL, PARAM_FAMILIES, TEXT, TOUCH_LOG, WARN
-from .gestures import Drag, Gesture
+from .gestures import Drag, Gesture, Hold
 
 
 def split(r, widths, gap):
@@ -50,9 +50,11 @@ class Panel:
         self.stale = True
 
     def animating(self):
-        """Is anything in this panel changing on its own? While a gesture is down (a drag, a held knob's
-        progress ring) the UI needs frames; otherwise a repaint has to be asked for."""
-        return bool(self.gestures)
+        """Is anything in this panel changing on its own? A held pad or a finger on a fader moves only when
+        the finger moves (each move asks for a frame); the one thing that changes while still is a Hold's
+        progress ring. Treating every held gesture as an animation repainted the whole rack 25 times a
+        second for as long as a chord pad was down."""
+        return any(isinstance(g, Hold) for g in self.gestures.values())
 
     def rect(self):
         return QRectF(0, 0, self.w, self.h)

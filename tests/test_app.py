@@ -1013,8 +1013,10 @@ bh.loaded = {(t1.strip, 1): FakePlugin("T1.2 Rev"), (t2.strip, 1): FakePlugin("T
              (bus.strip, 0): FakePlugin("B1.1 Rev", "Reverb")}
 # a loaded plugin is not an animation: with nothing held and nothing loading the rack must sleep (idle CPU)
 assert not bh.animating(), "the host panel repaints on its own just because a plugin is loaded"
-bh.gestures[1] = object()
-assert bh.animating(), "a held gesture still needs frames"
+bh.gestures[1] = object()  # a held pad or a finger on a fader: it moves only on touch moves
+assert not bh.animating(), "a held pad does not need free-running frames"
+bh.gestures[1] = ts.Hold(lambda: None)
+assert bh.animating(), "a Hold's progress ring still needs frames"
 bh.gestures.clear()
 bh.sampler = types.SimpleNamespace(loading=True)
 assert bh.animating(), "the sampler spinner still turns"
