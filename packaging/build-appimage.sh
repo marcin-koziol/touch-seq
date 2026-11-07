@@ -80,6 +80,13 @@ sampler-build/sampler-test
 install -Dm755 sampler-build/bin/touchseq-sampler.clap AppDir/usr/lib/clap/touchseq-sampler.clap
 cp -r sampler-build/bin/touchseq-sampler.lv2 AppDir/usr/lib/lv2/
 
+echo "== Grain"
+cmake -B grain-build -S "$ROOT/grain" -DCMAKE_BUILD_TYPE=Release >/dev/null
+cmake --build grain-build -j"$(nproc)" >/dev/null
+grain-build/grain-test
+install -Dm755 grain-build/bin/touchseq-grain.clap AppDir/usr/lib/clap/touchseq-grain.clap
+cp -r grain-build/bin/touchseq-grain.lv2 AppDir/usr/lib/lv2/
+
 echo "== app"
 install -Dm644 "$ROOT/touchseq.py" AppDir/usr/share/touch-seq/touchseq.py
 install -Dm644 "$ROOT/plugins.py" AppDir/usr/share/touch-seq/plugins.py

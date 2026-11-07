@@ -18,8 +18,8 @@ import plugins
 
 from .model import Bus
 from .constants import (BG, BORDER, BUILTIN_LABELS, CLICK_ACCENT, CLICK_BEAT, CLICK_LABELS, DIM, EQ_LABELS,
-                        INTERNAL_LABELS, MONITOR_LABELS, PALETTE, PANEL, PARAM_LOG, SAMPLER_LABELS,
-                        SAMPLER_NOTE_BASE, SLOTS, SPACE_LABELS, TEXT, WARN, XYFX_LABELS)
+                        GRAIN_LABELS, INTERNAL_LABELS, MONITOR_LABELS, PALETTE, PANEL, PARAM_LOG,
+                        SAMPLER_LABELS, SAMPLER_NOTE_BASE, SLOTS, SPACE_LABELS, TEXT, WARN, XYFX_LABELS)
 from .eq import EqEditor
 from .gestures import Drag, Hold, ScrollOrTap, Slide
 from .sampler import SamplerEditor, manifest_path as sampler_manifest_file, read_manifest
@@ -418,10 +418,12 @@ class HostPanel(Panel):
             self.host.load_state(plugin, state)
             self.host.refresh_params(plugin)
             self.restore_params(plugin, state)
-        if ref.label in SAMPLER_LABELS:  # tell it which pad map in the project's sampler folder to read
+        if ref.label in SAMPLER_LABELS or ref.label in GRAIN_LABELS:
+            # the sampler's pad map, and the grain synth that reads a slice from it
             parameter = next((q for q in plugin.params if q.name == "Slot"), None)
             if parameter:
-                self.set_param(plugin, parameter.index, float(self.sampler_slot(strip, k)), source="sampler")
+                self.set_param(plugin, parameter.index, float(self.sampler_slot(strip, k)),
+                               source="sampler" if ref.label in SAMPLER_LABELS else "grain")
             bpm = next((q for q in plugin.params if q.name.lower() == "bpm"), None)
             if bpm:  # a tempo-synced LFO follows the project
                 self.set_param(plugin, bpm.index, float(self.project.bpm), source="tempo")

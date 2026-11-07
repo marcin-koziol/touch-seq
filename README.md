@@ -57,6 +57,12 @@ cursor, and change the arrangement **on the bar** instead of on the downbeat of 
 
 ## New in 0.14.0
 
+- **Grain** — a chromatic granular synth (`grain/`), our first instrument that is not tied to pads: load a
+  sample in the sampler, pick its pad/slice, then put **Grain** in the same slot. It reads that slice and
+  maps the keyboard onto it chromatically, with one voice per note and overlapping grains. HOST-4 shows its
+  parameters — **Root** (the sample's pitch), **Keytrack** (100% = chromatic, 0% = a fixed drone), Position,
+  Size, Density, Spray, Coarse/Fine, Reverse, Pan Spread, Level, ADSR, Cutoff and Reso. A **Slot**/`Pad`
+  pair chooses which sampler map and pad are the source (the slot is set by the app automatically).
 - **Sampler pitch** — **PITCH** now covers three octaves up as well as down (−36…+36 semitones), and a
   separate **FINE** knob moves the pad by ±100 cents in one-cent steps on top of the semitone. Both are
   stored in the pad map and travel with copies and presets.
@@ -256,7 +262,7 @@ the first free name (*Touch-Seq 2*, …) and says so in HOST-4's status line: bo
   Damp, Delay, Time, Feedback and Tone as knobs. **Sync** + **Note** make the delay follow the tempo
   (1/32 … 1/2, triplets too) — and since the project's tempo follows the keyboard's clock, that is a
   MIDI-synced delay; the two effects a live set always needs, without hunting
-  for a plugin. **BUILTIN** in the browser lists our own (XYFX, EQ, Space, Acid) first, and they come first
+  for a plugin. **BUILTIN** in the browser lists our own (XYFX, EQ, Space, Acid, Grain, Sampler) first, and they come first
   in **ALL**; the two the app puts in place itself — the monitor and the click — are not offered there,
   because there is nothing to add by hand
 - **Acid** is our 303-style bass (`acid/`): the **Open303** engine (MIT, the one jc303 uses) — saw/square,
@@ -265,6 +271,12 @@ the first free name (*Touch-Seq 2*, …) and says so in HOST-4's status line: bo
   slide; velocity 100 and up triggers the accent, as on the 303. It has **no window of its own** — HOST-4
   shows its OSC, FILTER and AMP knobs, and the **UI** button is hidden for our own plugins. Pick it in slot 0
   of a melody track; it is a synth, not an effect
+- **Grain** is the chromatic granular synth (`grain/`): one sampler slice, played across the keyboard with
+  overlapping grains. It has no window of its own yet; HOST-4 shows its knobs. The source is a sampler pad:
+  put the Sampler in a slot, load and slice the sample, then **CHANGE** the slot to **Grain** (the source
+  map stays in the project) and set **Root** to the sample's pitch. **Keytrack** at 100% tracks the keyboard,
+  at 0% it holds one pitch; **Coarse/Fine** transpose it. **Position**, **Size**, **Density**, **Spray**,
+  **Reverse** and **Pan Spread** shape the grain cloud, then the ADSR, Cutoff and Reso.
 - **Sampler** is our MPC-style pad sampler (`sampler/`): a waveform with chop markers, 16 pads, and
   Gain / Pan / Pitch / Loop / Reverse for the selected pad. **LOAD** imports a file into the project's
   `.plugins/sampler/` folder (WAV directly; ffmpeg converts other formats), **CHOP** makes 16 equal slices,
@@ -407,7 +419,7 @@ chmod +x Touch-Seq-0.13.0-x86_64.AppImage
 ```
 
 It contains Python, Qt (PySide6), Carla and Touch-Seq's own plugins (XYFX, Monitor, EQ, Click, Space,
-Acid and Sampler).
+Acid, Sampler and Grain).
 The machine needs:
 
 - Linux, x86_64 or aarch64 (e.g. Raspberry Pi 4/5 with a 64-bit OS), glibc 2.35 or newer
@@ -531,19 +543,19 @@ format layer of its own (Carla has it), and no floating windows in the way (HOST
 
 The plugins in this repo are the app's own: **XYFX** (MPC-style beat repeat + filter, also the master's
 XY pad), **EQ** (eight bands, drawn in the app), **Space** (delay + reverb), **Acid** (303-style bass),
-**Sampler** (16-pad MPC-style), and the two the app puts in place itself — **Monitor** (a transparent
+**Sampler** (16-pad MPC-style), **Grain** (chromatic granular), and the two the app puts in place itself — **Monitor** (a transparent
 gain/pan) and **Click** (the metronome). All are CLAP + LV2, built with
 [DPF](https://github.com/DISTRHO/DPF), and installed with their own script:
 
 ```sh
-xyfx/install.sh monitor/install.sh eq/install.sh click/install.sh space/install.sh acid/install.sh sampler/install.sh
+xyfx/install.sh monitor/install.sh eq/install.sh click/install.sh space/install.sh acid/install.sh sampler/install.sh grain/install.sh
 # into ~/.clap and ~/.lv2
 ```
 
 The XYFX can also be used outside Touch-Seq (in a DAW, or any plugin host): releases carry
 `touchseq-xyfx-*.tar.gz`, and its parameters (Engage, X, Y, BPM, Mode) can be automated from any host.
-The app is GPL-3.0-or-later; our plugins are ISC licensed, except **Acid** and **Sampler**, which are
-GPL-3.0-or-later. Acid includes the MIT-licensed **Open303** engine (Copyright (c) 2009 Robin Schmidt,
+The app is GPL-3.0-or-later; our plugins are ISC licensed (XYFX, Monitor, EQ, Click, Space, Grain), except
+**Acid** and **Sampler**, which are GPL-3.0-or-later. Acid includes the MIT-licensed **Open303** engine (Copyright (c) 2009 Robin Schmidt,
 `acid/open303/LICENSE`) and the GPL-3.0 GuitarML BYOD overdrive from jc303 (`acid/overdrive/LICENSE`);
 RTNeural is BSD-3 (`acid/rtneural/LICENSE`). The sampler's STRETCH uses **Rubber Band** 4.0.0
 (GPL-2.0-or-later, vendored in `sampler/rubberband/`, its `COPYING` there).
