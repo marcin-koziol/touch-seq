@@ -173,6 +173,7 @@ class HostPanel(Panel):
         self._sampler_cache = {}  # manifest path -> (mtime, pads), so PLAY-12 doesn't read a file every frame
         self._preview_tokens = {}  # pad -> last audition, so an old note-off can't stop a newer retrigger
         os.environ["TOUCHSEQ_SAMPLER_DIR"] = str(self.state_dir)  # where the sampler finds its pad maps
+        os.environ["TOUCHSEQ_GRAIN_DIR"] = str(self.state_dir)  # the grain synth's own sample folder
         if self.buffer:
             plugins.set_quantum(self.buffer)  # before the engine starts, so the plugins see that size
         free = plugins.free_engine_name(name)  # a name already in the graph would rename our clients, and

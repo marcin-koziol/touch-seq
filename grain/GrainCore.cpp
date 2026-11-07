@@ -47,13 +47,12 @@ void GrainCore::setSlot(int value) {
     loadSample();
 }
 
-void GrainCore::setPad(int value) {
-    const int next = std::max(0, std::min(15, value));
-    if (next == pad && data)
-        return;
-    pad = next;
-    allNotesOff();
-    loadSample();
+void GrainCore::setRegion(float a, float b) {
+    startNorm = std::max(0.0f, std::min(1.0f, a));
+    endNorm = std::max(0.0f, std::min(1.0f, b));
+    if (endNorm <= startNorm)
+        endNorm = std::min(1.0f, startNorm + 0.001f);
+    applyRegion();
 }
 
 void GrainCore::reload() {
@@ -66,52 +65,49 @@ void GrainCore::loadSample() {
     start = end = 0;
     fileRate = 48000;
 
-    const char* root = std::getenv("TOUCHSEQ_SAMPLER_DIR");
+    const char* root = std::getenv("TOUCHSEQ_GRAIN_DIR");
+    if (root == nullptr || root[0] == '\0')
+        root = std::getenv("TOUCHSEQ_SAMPLER_DIR");
     if (root == nullptr || root[0] == '\0')
         return;
     const std::string dir = root;
-    std::ifstream file(dir + "/sampler/sampler-" + std::to_string(slot) + ".txt");
+    std::ifstream file(dir + "/grain/grain-" + std::to_string(slot) + ".txt");
     if (!file)
         return;
 
     std::string line, name;
-    uint64_t first = 0, last = 0;
-    bool found = false;
     while (std::getline(file, line)) {
         std::istringstream in(line);
         std::string tag;
-        in >> tag;
-        if (tag != "pad")
-            continue;
-        int index = -1;
-        std::string sampleName;
-        uint64_t a = 0, b = 0;
-        if (!(in >> index >> sampleName >> a >> b))
-            continue;
-        if (index == pad) {
-            name = sampleName;
-            first = a;
-            last = b;
-            found = true;
-            break;
-        }
+        if (in >> tag && tag == "sample")
+            in >> name;
     }
-    if (!found)
+    if (name.empty())
         return;
 
     uint32_t rate = 48000;
-    auto samples = readSample(dir + "/sampler/" + name, rate);
+    auto samples = readSample(dir + "/grain/" + name, rate);
     if (!samples)
         return;
-    const uint64_t frames = samples->size();
-    start = uint32_t(std::min<uint64_t>(first, frames));
-    end = uint32_t(std::min<uint64_t>(last, frames));
-    if (end <= start) {
-        start = 0;
-        end = uint32_t(frames);
-    }
     fileRate = rate;
     data = samples;
+    applyRegion();
+}
+
+void GrainCore::applyRegion() {
+    start = end = 0;
+    if (!data || data->empty())
+        return;
+    const uint64_t frames = data->size();
+    start = uint32_t(std::min<uint64_t>(uint64_t(startNorm * double(frames)), frames));
+    end = uint32_t(std::min<uint64_t>(uint64_t(endNorm * double(frames)), frames));
+    if (end <= start + 1) {
+        end = uint32_t(std::min<uint64_t>(frames, uint64_t(start) + 2));
+        if (end <= start) {
+            start = 0;
+            end = uint32_t(frames);
+        }
+    }
 }
 
 void GrainCore::setRoot(int note) { root = std::max(0, std::min(127, note)); }
@@ -130,7 +126,7 @@ void GrainCore::setCoarse(float value) { coarse = std::max(-36.0f, std::min(36.0
 void GrainCore::setFine(float value) { fine = std::max(-100.0f, std::min(100.0f, value)); }
 void GrainCore::setReverse(float value) { reverse = std::max(0.0f, std::min(1.0f, value)); }
 void GrainCore::setPan(float value) { pan = std::max(0.0f, std::min(1.0f, value)); }
-void GrainCore::setLevel(float value) { level = std::max(0.0f, std::min(1.0f, value)); }
+void GrainCore::setLevel(float value) { level = std::max(0.0f, std::min(4.0f, value)); }
 void GrainCore::setAttack(float seconds) { attack = std::max(0.0005f, std::min(2.0f, seconds)); }
 void GrainCore::setDecay(float seconds) { decay = std::max(0.0005f, std::min(2.0f, seconds)); }
 void GrainCore::setSustain(float value) { sustain = std::max(0.0f, std::min(1.0f, value)); }

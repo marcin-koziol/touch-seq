@@ -1,4 +1,4 @@
-"""The Grain editor: a sampler slice as the source, its grain cloud, and the synth's knobs. Drawn in HOST-4's
+"""The Grain editor: its own sample and slice, a grain cloud, and the synth's knobs. Drawn in HOST-4's
 parameter area when a Touch-Seq Grain plugin is selected; the plugin itself has no window of its own."""
 import math
 import threading
@@ -9,23 +9,44 @@ from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QPen
 from PySide6.QtWidgets import QFileDialog
 
-from .constants import BORDER, DIM, PANEL, SAMPLER_NOTE_BASE, TEXT, WARN
-from .sampler import import_sample, manifest_path, read_manifest, sampler_dir, write_manifest
+from .constants import BORDER, DIM, PANEL, TEXT, WARN
+from .gestures import Gesture
+from .sampler import import_sample
 from .wav import peaks_range, read_wav
 
 PLAY = "#4ade80"
 
 
+def grain_dir(state_dir):
+    return Path(state_dir) / "grain"
+
+
+def grain_manifest(state_dir, slot):
+    return grain_dir(state_dir) / f"grain-{int(slot)}.txt"
+
+
+class GrainSliceDrag(Gesture):
+    """A white handle on the Grain editor's waveform: the slice the grains read."""
+
+    def __init__(self, editor, edge, rect, pos):
+        self.editor, self.edge, self.rect = editor, edge, rect
+        self.move(pos)
+
+    def move(self, pos):
+        self.editor.set_slice(self.edge, self.rect, pos)
+
+    def release(self, pos):
+        self.editor.panel.invalidate()
+
+
 class GrainEditor:
-    """The source waveform and grain cloud above the plugin's parameters. The source is the sampler map of the
-    Grain plugin's Slot/Pad; the sampler editor is still where samples are loaded and sliced."""
+    """The grain synth's source: one WAV, a start/end slice, a position/spray band and the knobs. LOAD imports
+    a file into the project's grain folder; it does not touch the sampler's pads."""
 
     def __init__(self, panel):
         self.panel = panel
         self.plugin = None
         self.slot = 0
-        self.pad = 0
-        self.pads = [None] * 16
         self.name = ""
         self.start = 0
         self.end = 0
@@ -38,8 +59,9 @@ class GrainEditor:
         self._token = 0
         self._loaded = None
         self._lock = threading.Lock()
-        self.seen = None  # (manifest path, mtime, pad) of the last source read
-        self.wave_text = "load a sample in the sampler, then pick its pad"
+        self._loading_name = None
+        self.seen = None  # (manifest path, mtime)
+        self.wave_text = "LOAD a WAV to see the waveform"
 
     # --- source -----------------------------------------------------------------
     def param(self, name):
@@ -56,6 +78,14 @@ class GrainEditor:
             return host.value(self.plugin, prm.index)
         except Exception:
             return default
+
+    def set_param(self, name, value):
+        prm = self.param(name)
+        if prm is not None:
+            try:
+                self.panel.set_param(self.plugin, prm.index, value, source="grain")
+            except Exception:
+                pass
 
     def visible(self):
         sel = getattr(self.panel, "sel", None)
@@ -76,38 +106,42 @@ class GrainEditor:
         if not self.plugin:
             return
         slot = int(round(self.value("Slot", self.slot)))
-        pad = int(round(self.value("Pad", self.pad)))
-        path = manifest_path(self.panel.state_dir, slot)
+        path = grain_manifest(self.panel.state_dir, slot)
         try:
             mtime = path.stat().st_mtime
         except OSError:
             mtime = 0.0
-        key = (str(path), mtime, pad)
+        key = (str(path), mtime)
         if not force and key == self.seen:
             return
         self.seen = key
-        self.slot, self.pad = slot, pad
-        _, pads, _ = read_manifest(path)
-        self.pads = pads
-        source = pads[pad] if 0 <= pad < len(pads) else None
-        if not source:
-            self.name, self.samples, self.frames = "", None, 0
-            self.wave_text = f"pad {pad + 1} is empty — pick another pad, or load a sample in the sampler"
+        self.slot = slot
+        name = ""
+        try:
+            for line in path.read_text().splitlines():
+                parts = line.split(None, 1)
+                if len(parts) == 2 and parts[0] == "sample":
+                    name = parts[1].strip()
+                    break
+        except OSError:
+            pass
+        self.name = name
+        if not name:
+            self.samples, self.frames = None, 0
+            self.wave_text = "LOAD a WAV to see the waveform"
             return
-        self.name = source["file"]
-        self.start, self.end = int(source["start"]), int(source["end"])
-        cached = self.cache.get(self.name)
+        cached = self.cache.get(name)
         if cached:
             self.samples, self.rate, self.frames = cached
             self.loading = False
-        elif self.name != getattr(self, "_loading_name", None):
-            self.start_load(self.name)
+        elif name != self._loading_name:
+            self.start_load(name)
 
     def start_load(self, name):
         self._loading_name = name
         self.loading = True
         token = self._token = self._token + 1
-        folder = Path(self.panel.state_dir) / "sampler"
+        folder = grain_dir(self.panel.state_dir)
         panel = self.panel
 
         def work():
@@ -142,17 +176,8 @@ class GrainEditor:
         self.apply_loaded()
         self.refresh()
 
-    def new_pad(self, name, frames, index):
-        """A fresh sampler pad for this source (the sampler ignores the Grain-only fields, and vice versa)."""
-        return {"file": name, "start": 0, "end": int(frames), "root": SAMPLER_NOTE_BASE + index,
-                "gain": 1.0, "pan": 0.0, "pitch": 0.0, "fine": 0.0, "loop": 0, "reverse": 0,
-                "gate": 0, "group": 0, "stretch": 0, "amp": [0.0, 0.0, 1.0, 0.0],
-                "filter": [0.0, 0.0, 1.0, 0.0], "cutoff": 20000.0, "reso": 0.0, "env": 0.0,
-                "lfo_wave": 0, "lfo_rate": 2.0, "lfo_depth": 0.0, "lfo_target": 0,
-                "lfo_sync": 0, "lfo_div": 2}
-
     def load_sample(self):
-        """LOAD: import a file into the project and make it this Grain's source pad."""
+        """LOAD: import a file into the project and make it this Grain's source."""
         path, _ = QFileDialog.getOpenFileName(None, "Load sample", "",
                                               "Audio (*.wav *.aif *.aiff *.flac *.mp3 *.ogg);;All files (*)")
         if path:
@@ -160,22 +185,20 @@ class GrainEditor:
 
     def use_sample(self, path):
         slot = int(round(self.value("Slot", self.slot)))
-        pad = int(round(self.value("Pad", self.pad)))
         try:
-            name = import_sample(path, self.panel.state_dir)
-            samples, rate, frames = read_wav(sampler_dir(self.panel.state_dir) / name)
+            name = import_sample(path, self.panel.state_dir, "grain")
+            samples, rate, frames = read_wav(grain_dir(self.panel.state_dir) / name)
             self.cache[name] = (samples, rate, frames)
-            manifest = manifest_path(self.panel.state_dir, slot)
-            _, pads, mono = read_manifest(manifest)
-            if not 0 <= pad < len(pads):
-                pad = 0
-            pads[pad] = self.new_pad(name, frames, pad)
-            write_manifest(manifest, name, pads, mono)
-            self.slot, self.pad = slot, pad
-            self.name, self.start, self.end = name, 0, int(frames)
+            folder = grain_dir(self.panel.state_dir)
+            folder.mkdir(parents=True, exist_ok=True)
+            grain_manifest(self.panel.state_dir, slot).write_text(f"sample {name}\n")
+            self.slot, self.name = slot, name
             self.samples, self.rate, self.frames = samples, rate, frames
+            self.start, self.end = 0, frames
+            self.set_param("Start", 0.0)
+            self.set_param("End", 1.0)
             self.seen = None
-            self.reload_source()  # tell the plugin to reread, and show the new source now
+            self.reload_source()
             self.panel.message = f"grain: loaded {name}"
             self.panel.invalidate()
         except Exception as error:
@@ -194,13 +217,44 @@ class GrainEditor:
         self.seen = None
         self.refresh(force=True)
 
+    # --- slice ------------------------------------------------------------------
+    def slice_bounds(self):
+        if not self.frames:
+            return 0, 0
+        start = max(0.0, min(1.0, float(self.value("Start", 0.0))))
+        end = max(0.0, min(1.0, float(self.value("End", 1.0))))
+        a = int(start * self.frames)
+        b = int(end * self.frames)
+        if b <= a + 1:
+            a, b = 0, self.frames
+        return a, b
+
+    def set_slice(self, edge, rect, pos):
+        if not self.frames or not self.plugin:
+            return
+        part = max(0.0, min(1.0, (pos.x() - rect.left()) / max(1.0, rect.width())))
+        frame = part * self.frames
+        start = float(self.value("Start", 0.0))
+        end = float(self.value("End", 1.0))
+        gap = 2.0 / max(1, self.frames)
+        if edge == "start":
+            start = min(frame / self.frames, end - gap)
+            start = max(0.0, start)
+            self.set_param("Start", start)
+            self.start = int(start * self.frames)
+        else:
+            end = max(frame / self.frames, start + gap)
+            end = min(1.0, end)
+            self.set_param("End", end)
+            self.end = int(end * self.frames)
+        self.panel.invalidate()
+
     # --- drawing ----------------------------------------------------------------
     def draw(self, p, r, plugin, slot):
         self.use(plugin, slot)
         s = self.panel.s
         header = QRectF(r.left(), r.top(), r.width(), 26 * s)
-        source = f"PAD {self.pad + 1}" if self.pads else "PAD -"
-        title = f"{source}  ·  {self.name}" if self.name else source
+        title = f"SAMPLE  ·  {self.name}" if self.name else "SAMPLE  ·  none"
         self.panel.text(p, header.adjusted(2 * s, 0, -170 * s, 0), title, DIM if not self.name else TEXT, 12,
                         Qt.AlignLeft | Qt.AlignVCenter, elide=True)
         reload_btn = QRectF(header.right() - 84 * s, header.top(), 82 * s, 24 * s)
@@ -210,7 +264,7 @@ class GrainEditor:
         wave = QRectF(r.left(), header.bottom() + 5 * s, r.width(), max(80 * s, (r.height() - 31 * s) * 0.42))
         self.draw_wave(p, wave)
         body = QRectF(r.left(), wave.bottom() + 8 * s, r.width(), r.bottom() - wave.bottom() - 8 * s)
-        params = [q for q in plugin.params if q.name != "Reload"]
+        params = [q for q in plugin.params if q.name not in ("Slot", "Reload", "Start", "End")]
         if not params:
             return
         cols = 7
@@ -230,19 +284,16 @@ class GrainEditor:
         if not self.samples or not self.frames:
             self.panel.text(p, r, self.wave_text, DIM, 13, elide=True)
             return
-        start, end = self.start, self.end
-        if end <= start or end > self.frames:
-            start, end = 0, self.frames
+        start, end = self.slice_bounds()
+        self.start, self.end = start, end
         span = max(1, end - start)
-        view_start = max(0, int(start - span * 0.15))
-        view_end = min(self.frames, int(end + span * 0.15))
+        view_start, view_end = 0, self.frames
         view_span = max(1, view_end - view_start)
 
         def x_of(frame):
             return r.left() + r.width() * (frame - view_start) / view_span
 
-        # the selected slice, and the position/spray band inside it
-        x0, x1 = x_of(max(view_start, start)), x_of(min(view_end, end))
+        x0, x1 = x_of(start), x_of(end)
         p.fillRect(QRectF(x0, r.top() + 1 * s, max(1.0, x1 - x0), r.height() - 2 * s),
                    QColor(56, 214, 255, 28))
         position = max(0.0, min(1.0, self.value("Position", 0.35)))
@@ -265,7 +316,6 @@ class GrainEditor:
             p.drawLine(QPointF(x, r.center().y() - high * r.height() * 0.42),
                        QPointF(x, r.center().y() - low * r.height() * 0.42))
 
-        # the grain cloud: its density, size and spray make the dots
         density = max(1.0, self.value("Density", 30.0))
         size = max(0.005, self.value("Size", 0.08))
         count = max(6, min(140, int(density * size * 6) + 8))
@@ -288,9 +338,15 @@ class GrainEditor:
             p.setBrush(QColor(250, 204, 21, 55 + int(110 * (1.0 - u3))))
             p.drawEllipse(QRectF(x - radius, y - radius, 2 * radius, 2 * radius))
 
+        for edge, frame in (("start", start), ("end", end)):
+            x = x_of(frame)
+            p.setPen(QPen(QColor("#ffffff"), 2 * s))
+            p.drawLine(QPointF(x, r.top() + 2 * s), QPointF(x, r.bottom() - 2 * s))
+            p.setBrush(QColor("#ffffff"))
+            p.setPen(QPen(QColor("#0e1116"), 1.5 * s))
+            p.drawEllipse(QPointF(x, r.top() + 10 * s), 6 * s, 6 * s)
+            self.panel.region(QRectF(x - 14 * s, r.top(), 28 * s, r.height()),
+                              lambda pos, edge=edge: GrainSliceDrag(self, edge, r, pos))
+
         p.setPen(QPen(QColor("#facc15"), 1.6 * s))
-        p.drawLine(x_of(at), r.top() + 2 * s, x_of(at), r.bottom() - 2 * s)
-        p.setPen(QPen(QColor("#ffffff"), 1.2 * s))
-        for frame in (start, end):
-            if view_start <= frame <= view_end:
-                p.drawLine(x_of(frame), r.top() + 2 * s, x_of(frame), r.bottom() - 2 * s)
+        p.drawLine(QPointF(x_of(at), r.top() + 2 * s), QPointF(x_of(at), r.bottom() - 2 * s))

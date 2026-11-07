@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: ISC
-// DPF wrapper around GrainCore: a chromatic granular synth reading a slice from Touch-Seq's sampler map.
-// The app's sampler editor selects the sample/pad; this plugin maps the keyboard chromatically onto it.
+// DPF wrapper around GrainCore: a chromatic granular synth. Its editor loads a WAV, sets its slice and
+// plays it chromatically across the keyboard.
 #include "DistrhoPlugin.hpp"
 #include "GrainCore.hpp"
 
@@ -9,8 +9,8 @@ START_NAMESPACE_DISTRHO
 class GrainPlugin : public Plugin {
 public:
     enum Param {
-        kSlot, kPad, kReload,
-        kRoot, kKeytrack, kPosition, kSize, kDensity, kSpray,
+        kSlot, kReload,
+        kRoot, kKeytrack, kStart, kEnd, kPosition, kSize, kDensity, kSpray,
         kCoarse, kFine, kReverse, kPan, kLevel,
         kAttack, kDecay, kSustain, kRelease, kCutoff, kReso,
         kParamCount
@@ -25,7 +25,7 @@ protected:
     const char* getLabel() const override { return "Grain"; }
 
     const char* getDescription() const override {
-        return "A chromatic granular synth: grains from a sampler slice, played across the keyboard";
+        return "A chromatic granular synth: overlapping grains from a WAV slice, played across the keyboard";
     }
 
     const char* getMaker() const override { return "Touch-Seq"; }
@@ -39,10 +39,6 @@ protected:
             p.name = "Slot"; p.symbol = "slot"; p.hints = kParameterIsInteger;
             p.ranges = ParameterRanges(0.0f, 0.0f, 1023.0f);
             break;
-        case kPad:
-            p.name = "Pad"; p.symbol = "pad"; p.hints = kParameterIsInteger;
-            p.ranges = ParameterRanges(0.0f, 0.0f, 15.0f);
-            break;
         case kReload:
             p.name = "Reload"; p.symbol = "reload"; p.hints = kParameterIsInteger;
             p.ranges = ParameterRanges(0.0f, 0.0f, 1000000.0f);
@@ -53,6 +49,14 @@ protected:
             break;
         case kKeytrack:
             p.name = "Keytrack"; p.symbol = "keytrack"; p.hints = kParameterIsAutomatable;
+            p.ranges = ParameterRanges(1.0f, 0.0f, 1.0f);
+            break;
+        case kStart:
+            p.name = "Start"; p.symbol = "start"; p.hints = kParameterIsAutomatable;
+            p.ranges = ParameterRanges(0.0f, 0.0f, 1.0f);
+            break;
+        case kEnd:
+            p.name = "End"; p.symbol = "end"; p.hints = kParameterIsAutomatable;
             p.ranges = ParameterRanges(1.0f, 0.0f, 1.0f);
             break;
         case kPosition:
@@ -89,7 +93,7 @@ protected:
             break;
         case kLevel:
             p.name = "Level"; p.symbol = "level"; p.hints = kParameterIsAutomatable;
-            p.ranges = ParameterRanges(0.8f, 0.0f, 1.0f);
+            p.ranges = ParameterRanges(2.0f, 0.0f, 4.0f);
             break;
         case kAttack:
             p.name = "Attack"; p.symbol = "attack"; p.hints = kParameterIsAutomatable;
@@ -123,10 +127,11 @@ protected:
     float getParameterValue(uint32_t index) const override {
         switch (index) {
         case kSlot: return float(slot);
-        case kPad: return float(pad);
         case kReload: return float(reloads);
         case kRoot: return float(root);
         case kKeytrack: return keytrack;
+        case kStart: return start;
+        case kEnd: return end;
         case kPosition: return position;
         case kSize: return size;
         case kDensity: return density;
@@ -152,16 +157,20 @@ protected:
             slot = int(value + 0.5f);
             core.setSlot(slot);
             break;
-        case kPad:
-            pad = int(value + 0.5f);
-            core.setPad(pad);
-            break;
         case kReload:
             reloads = int(value + 0.5f);
             core.reload();
             break;
         case kRoot: root = int(value + 0.5f); core.setRoot(root); break;
         case kKeytrack: keytrack = value; core.setKeytrack(value); break;
+        case kStart:
+            start = std::max(0.0f, std::min(1.0f, value));
+            core.setRegion(start, end);
+            break;
+        case kEnd:
+            end = std::max(0.0f, std::min(1.0f, value));
+            core.setRegion(start, end);
+            break;
         case kPosition: position = value; core.setPosition(value); break;
         case kSize: size = value; core.setSize(value); break;
         case kDensity: density = value; core.setDensity(value); break;
@@ -209,6 +218,8 @@ private:
     void applyDefaults() {
         root = 60;
         keytrack = 1.0f;
+        start = 0.0f;
+        end = 1.0f;
         position = 0.35f;
         size = 0.08f;
         density = 30.0f;
@@ -217,7 +228,7 @@ private:
         fine = 0.0f;
         reverse = 0.0f;
         pan = 0.3f;
-        level = 0.8f;
+        level = 2.0f;
         attack = 0.01f;
         decay = 0.2f;
         sustain = 0.8f;
@@ -230,6 +241,7 @@ private:
     void applyValues() {
         core.setRoot(root);
         core.setKeytrack(keytrack);
+        core.setRegion(start, end);
         core.setPosition(position);
         core.setSize(size);
         core.setDensity(density);
@@ -269,12 +281,13 @@ private:
 
     GrainCore core;
     int slot = 0;
-    int pad = 0;
     int reloads = 0;
     int root = 60;
-    float keytrack = 1.0f, position = 0.35f, size = 0.08f, density = 30.0f, spray = 0.08f;
-    float coarse = 0.0f, fine = 0.0f, reverse = 0.0f, pan = 0.3f, level = 0.8f;
-    float attack = 0.01f, decay = 0.2f, sustain = 0.8f, release = 0.4f, cutoff = 16000.0f, reso = 0.1f;
+    float keytrack = 1.0f, start = 0.0f, end = 1.0f;
+    float position = 0.35f, size = 0.08f, density = 30.0f, spray = 0.08f;
+    float coarse = 0.0f, fine = 0.0f, reverse = 0.0f, pan = 0.3f;
+    float level = 2.0f, attack = 0.01f, decay = 0.2f, sustain = 0.8f, release = 0.4f;
+    float cutoff = 16000.0f, reso = 0.1f;
 
     DISTRHO_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(GrainPlugin)
 };

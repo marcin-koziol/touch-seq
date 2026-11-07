@@ -2818,8 +2818,8 @@ q.end()
 assert grain.name == "" and grain.samples is None
 grain.slot, grain.pad = 99, 0
 grain.use_sample(wav_path)  # the GRAIN editor's own LOAD, without the file dialog
-_, grain_pads, _ = read_manifest(state / "sampler" / "sampler-99.txt")
-assert grain_pads[0] and grain_pads[0]["file"] == grain.name, grain_pads[0]
+manifest_text = (state / "grain" / "grain-99.txt").read_text()
+assert manifest_text == f"sample {grain.name}\n", manifest_text
 assert grain.samples is not None and grain.end == frames and grain.frames == frames
 # a playing pad moves the waveform playhead: only its old/new strips are queued, not the whole panel
 editor.wave_rect = QRectF(0, 0, 400, 200)

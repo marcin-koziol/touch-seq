@@ -150,10 +150,10 @@ def write_manifest(path, current, pads, mono=0):
     os.replace(temporary, path)
 
 
-def import_sample(source, state_dir):
-    """Copy (or convert to) a mono WAV in the project's sampler folder; returns its name."""
+def import_sample(source, state_dir, folder="sampler"):
+    """Copy (or convert to) a mono WAV in a folder of the project; returns its name."""
     source = Path(source)
-    folder = sampler_dir(state_dir)
+    folder = Path(state_dir) / folder
     folder.mkdir(parents=True, exist_ok=True)
     stem = re.sub(r"[^A-Za-z0-9._-]+", "_", source.stem).strip("._") or "sample"
     name = f"{stem}.wav"

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: ISC
-// A chromatic granular synth: one slice of a WAV is played by overlapping grains across the keyboard. The
-// sample and slice come from Touch-Seq's sampler map (TOUCHSEQ_SAMPLER_DIR/sampler/sampler-<slot>.txt), so
-// the existing sampler editor is the source picker; this core adds the grain stream and note tracking.
+// A chromatic granular synth: one WAV and its start/end slice, played by overlapping grains across the
+// keyboard. The source is the plugin's own manifest (TOUCHSEQ_GRAIN_DIR/grain/grain-<slot>.txt); the editor
+// loads the file and moves the slice handles. This core is the grain stream and note tracking.
 #ifndef GRAIN_CORE_HPP_INCLUDED
 #define GRAIN_CORE_HPP_INCLUDED
 
@@ -17,7 +17,7 @@ public:
 
     void prepare(double sampleRate);
     void setSlot(int slot);
-    void setPad(int pad);
+    void setRegion(float start, float end);  // fractions of the file: the chosen slice
     void reload();
 
     void setRoot(int note);
@@ -72,6 +72,7 @@ private:
     };
 
     void loadSample();
+    void applyRegion();
     float read(double pos) const;
     void spawn(Voice& voice);
     double ratioFor(int note) const;
@@ -79,7 +80,7 @@ private:
 
     double rate = 48000.0;
     int slot = 0;
-    int pad = 0;
+    float startNorm = 0.0f, endNorm = 1.0f;
 
     int root = 60;
     float keytrack = 1.0f;
@@ -91,7 +92,7 @@ private:
     float fine = 0.0f;
     float reverse = 0.0f;
     float pan = 0.3f;
-    float level = 0.8f;
+    float level = 1.0f;  // up to 4x, for quiet sources
     float attack = 0.01f;
     float decay = 0.2f;
     float sustain = 0.8f;

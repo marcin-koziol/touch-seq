@@ -83,20 +83,19 @@ int main(int argc, char** argv) {
     namespace fs = std::filesystem;
     const fs::path root = fs::temp_directory_path() / "touchseq-grain-test";
     fs::remove_all(root);
-    fs::create_directories(root / "sampler");
+    fs::create_directories(root / "grain");
 
     const uint32_t sr = 48000;
-    write_source(root / "sampler" / "tone.wav", sr);
-    std::ofstream manifest(root / "sampler" / "sampler-2.txt");
-    manifest << "mono 0\n";
-    manifest << "pad 0 tone.wav 0 96000 36 1.0 0.0 0 0 0 0\n";
+    write_source(root / "grain" / "tone.wav", sr);
+    std::ofstream manifest(root / "grain" / "grain-2.txt");
+    manifest << "sample tone.wav\n";
     manifest.close();
-    setenv("TOUCHSEQ_SAMPLER_DIR", root.string().c_str(), 1);
+    setenv("TOUCHSEQ_GRAIN_DIR", root.string().c_str(), 1);
 
     GrainCore core;
     core.prepare(sr);
     core.setSlot(2);
-    core.setPad(0);
+    core.setRegion(0.0f, 1.0f);
     core.setRoot(60);
     core.setKeytrack(1.0f);
     core.setPosition(0.25f);
