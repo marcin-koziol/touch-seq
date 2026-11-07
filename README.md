@@ -55,6 +55,20 @@ cursor, and change the arrangement **on the bar** instead of on the downbeat of 
 
 ![The whole rack, as it comes up: performance controls, the plugin host, the sequencer and the live pads](docs/screenshots/overview.png)
 
+## New in 0.13.0
+
+- **Sampler pitch** — **PITCH** now covers three octaves down (−36) to one up (+12) and moves in whole
+  semitones, so a note is easy to land on. **STRETCH** is a real pitch shifter (Rubber Band 4.0.0, vendored
+  in `sampler/rubberband/` and linked statically), not the old granular effect: it keeps the slice's length
+  without the comb and phasiness, at the cost of the shifter's latency (more for deep shifts — it suits pads
+  and prepared material rather than tight live playing). The sampler is now GPL-3.0-or-later, like Acid.
+- **Desktop** — when no touchscreen is detected, the pointer is shown and mouse events drive the UI.
+- **Toolbar** — a small **DSP** box shows Carla's engine load, with a bar that turns yellow and red.
+- **Pinch zoom** on the sampler waveform keeps the frame under the fingers and does not jump back when one
+  finger lifts.
+- **Performance** — idle CPU is a fraction of what it was: the rack only repaints when something moves, and
+  level meters, the sequencer playhead, the sampler playhead and held pads each repaint just their own part.
+
 ## New in 0.12.1
 
 - **Acid** — our 303-style bass (`acid/`): the **Open303** engine (Robin Schmidt's, the one jc303 uses),
@@ -70,10 +84,9 @@ cursor, and change the arrangement **on the bar** instead of on the downbeat of 
   pad's envelopes and LFO along, as independent copies. The pads use the same fixed
   colors as the drum voices. Each pad has Gain (up to 4×), Pan, Pitch, Loop, Reverse and **Gate** (play while
   held vs one-shot) and a **GRP** playback group: pads in the same group cut each other, like MONO for that
-  group. **MONO** cuts the previous pad when a new one starts. **PITCH** moves in whole semitones,
-  from three octaves down (−36) to one up (+12); **STRETCH** shifts the pitch
-  without changing the slice's length (Rubber Band, not resampling), at the cost of the shifter's latency (more
-  for deep shifts: it suits pads and pre-made material rather than tight live playing). **STOP** silences every voice. **ADSR** turns the waveform into the amp or filter
+  group. **MONO** cuts the previous pad when a new one starts. **PITCH** moves at 12 px per semitone and snaps
+  to a whole semitone on release (±12); **STRETCH** shifts the pitch without changing the slice's length
+  (a granular shift, not resampling). **STOP** silences every voice. **ADSR** turns the waveform into the amp or filter
   envelope editor: the slice's waveform is a dim ghost behind the curve. The times are fractions of the slice,
   so lengthening the slice stretches the envelope with it; a reversed pad mirrors the envelope, so it fires
   from the slice's end. **TRIGGER** (under the curve) holds the pad for auditioning, exactly like tapping it.
@@ -383,8 +396,8 @@ Download the AppImage for your machine from [Releases](https://github.com/marcin
 then:
 
 ```sh
-chmod +x Touch-Seq-0.12.1-x86_64.AppImage
-./Touch-Seq-0.12.1-x86_64.AppImage
+chmod +x Touch-Seq-0.13.0-x86_64.AppImage
+./Touch-Seq-0.13.0-x86_64.AppImage
 ```
 
 It contains Python, Qt (PySide6), Carla and Touch-Seq's own plugins (XYFX, Monitor, EQ, Click, Space,

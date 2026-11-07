@@ -1408,7 +1408,7 @@ class SamplerEditor:
         # whole semitones: with the wide range, 0.1 steps skipped the note the finger was after
         self.knob(p, pitch, "PITCH", pad["pitch"], self.PITCH_LO, self.PITCH_HI, 8 * s, 1.0,
                   lambda: self.pads[self.pad]["pitch"], lambda v: self.pads[self.pad].__setitem__("pitch", v),
-                  show=lambda v: f"{int(round(v)):+d}")
+                  show=lambda v: "0" if abs(v) < 0.5 else f"{int(round(v)):+d}")
         gate = QRectF(buttons.left(), buttons.top(), buttons.width(), 18 * s)
         loop = QRectF(buttons.left(), gate.bottom() + 2 * s, buttons.width(), 18 * s)
         reverse = QRectF(buttons.left(), loop.bottom() + 2 * s, buttons.width(), 18 * s)
