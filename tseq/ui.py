@@ -515,7 +515,10 @@ class Window(QWidget):
             panel, self.partial_panel = self.partial_panel, None
             screen = self.screens.get(panel)
             if screen is not None:  # the playhead's columns: this panel only, clipped by the update region
-                self.paint_panel(p, panel, screen)
+                if hasattr(panel, "paint_partial"):
+                    panel.paint_partial(p, screen, event.region())
+                else:
+                    self.paint_panel(p, panel, screen)
                 return
         self.partial_panel = None
         p.fillRect(self.rect(), QColor("#08090b"))

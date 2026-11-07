@@ -2787,6 +2787,19 @@ panel.host.index = -1
 editor.read_playhead()
 assert editor.playhead is None, "nothing playing: no playhead"
 del panel.host, panel.loaded
+# a playing pad moves the waveform playhead: only its old/new strips are queued, not the whole panel
+editor.wave_rect = QRectF(0, 0, 400, 200)
+editor.view_start, editor.view_end = 0, editor.frames
+editor.pads[0]["file"] = editor.current
+editor.pads[0]["start"], editor.pads[0]["end"] = 0, editor.frames
+editor.panel.dirty_rects.clear()
+editor.panel.stale = False
+editor.playhead_at = time.monotonic() - 1
+editor.mark_playhead((0, 0.25), (0, 0.75))
+assert len(editor.panel.dirty_rects) == 2, editor.panel.dirty_rects
+assert all(r.width() < 40 for r in editor.panel.dirty_rects), editor.panel.dirty_rects
+assert not editor.panel.stale, "the playhead must not ask for a full frame"
+editor.panel.dirty_rects.clear()
 # the on-screen keyboard: shift, space, backspace, placeholder, cancel
 typed = []
 kb = ts.Keyboard("", "Name", typed.append, placeholder="Project")

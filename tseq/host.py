@@ -747,6 +747,31 @@ class HostPanel(Panel):
             self.rewire()  # an audio track's mute is its input cable, not a level
 
     # --- drawing ------------------------------------------------------------
+    def paint_partial(self, p, screen, region):
+        """A small repaint of this panel (the sampler playhead): draw just the waveform, never the chain or
+        the params. The panel's hits stay as the last full frame left them; the draw's own are thrown away."""
+        if (self.view != "track" or self.browser or isinstance(self.assigning, tuple)
+                or self.sel not in self.loaded):
+            return  # a full frame is needed (view/dialog changed); this strip is not the sampler's any more
+        p.save()
+        p.translate(screen.topLeft())
+        self.w, self.h = screen.width(), screen.height()
+        self.s = min(self.w / 1024, self.h / 600)
+        wave = getattr(self.sampler, "wave_rect", None)
+        if wave is not None:
+            p.fillRect(wave, QColor(BG))
+            hits = self.hits
+            self.hits = []
+            x0 = screen.left()
+            bounds = region.boundingRect()
+            self.sampler.partial_x = [(bounds.left() - x0 - 3, bounds.right() - x0 + 3)]
+            try:
+                self.sampler.draw_wave(p, wave)
+            finally:
+                self.sampler.partial_x = None
+                self.hits = hits
+        p.restore()
+
     def draw(self, p):
         s, g = self.s, 8 * self.s
         p.fillRect(self.rect(), QColor(BG))

@@ -352,6 +352,11 @@ class SamplerEditor:
         self._load_lock = threading.Lock()
         self.reloads = 0  # bumped after each map write so the plugin rereads it even when the slot is unchanged
         self.playhead = None  # (pad, 0..1 through its slice) of the newest voice, from the plugin's outputs
+        self.playhead_shown = None  # the mark whose line is on screen, for erasing it on the next move
+        self.playhead_at = 0.0  # when the playhead was last sent to the repaint clock
+        self.wave_rect = None  # the waveform box in panel coordinates, from the last paint
+        self.partial_x = None  # when repainting only playhead strips: the x ranges to touch
+        self.PLAYHEAD_SECONDS = 0.1  # a sample playhead at 10 fps is smooth enough and much cheaper
         self._live_at = 0.0  # when the map was last written during a drag
         self.MESSAGE_SECONDS = 3.0
         self.view_start = 0
@@ -455,11 +460,15 @@ class SamplerEditor:
         """The newest voice's position, from the plugin's output parameters (the sampler has no UI of its own,
         so this is how the editor learns where a playing pad is)."""
         host = getattr(self.panel, "host", None)
+        loaded = getattr(self.panel, "loaded", {})
+        sel = getattr(self.panel, "sel", None)
         if not self.plugin or host is None or not hasattr(host, "output_params"):
             self.playhead = None
             return
-        if self.plugin not in getattr(self.panel, "loaded", {}).values():
-            self.playhead = None
+        busy = getattr(self.panel, "browser", None) or isinstance(getattr(self.panel, "assigning", None), tuple)
+        if (self.plugin not in loaded.values() or getattr(self.panel, "view", "track") != "track" or busy
+                or (sel is not None and loaded.get(sel) is not self.plugin)):
+            self.playhead = None  # another page, view or dialog: this editor is not on screen
             return
         indices = host.output_params(self.plugin)
         if len(indices) < 2:
@@ -471,10 +480,9 @@ class SamplerEditor:
 
     def poll(self):
         """Apply a background read on the UI thread (called from the host's tick)."""
-        was = self.playhead
         self.read_playhead()
-        if self.playhead != was:  # the playhead moved: repaint it, a still rack can sleep
-            self.panel.invalidate()
+        if self.playhead != self.playhead_shown:  # the line moved: repaint its old and new strip only
+            self.mark_playhead(self.playhead_shown, self.playhead)
         with self._load_lock:
             pending, self._loaded = self._loaded, None
         if not pending:
@@ -909,8 +917,40 @@ class SamplerEditor:
         self.panel.box(p, toast, QColor(13, 15, 20, 235), BORDER, radius=8)
         self.panel.text(p, toast, self.message, self.message_color, 12, bold=True, elide=True)
 
+    def playhead_x(self, mark):
+        """The x of a playhead mark inside the current waveform view, or None when it is not on screen."""
+        if not mark or self.wave_rect is None:
+            return None
+        index, fraction = mark
+        pad = self.pads[index] if 0 <= index < len(self.pads) else None
+        if not pad or pad.get("file") != self.current or not self.frames:
+            return None
+        span = max(1, self.view_end - self.view_start)
+        frame = pad["start"] + fraction * (pad["end"] - pad["start"])
+        if not (self.view_start <= frame <= self.view_end):
+            return None
+        return self.wave_rect.left() + self.wave_rect.width() * (frame - self.view_start) / span
+
+    def mark_playhead(self, old, new):
+        """Queue the two narrow strips the playhead left and reached; the window repaints that panel."""
+        if old == new or self.env_open or self.wave_rect is None:
+            return
+        now = time.monotonic()
+        if now - self.playhead_at < self.PLAYHEAD_SECONDS:
+            return
+        self.playhead_at = now
+        s = self.panel.s
+        rects = []
+        for mark in (old, new):
+            x = self.playhead_x(mark)
+            if x is not None:
+                rects.append(QRectF(x - 8 * s, self.wave_rect.top(), 16 * s, self.wave_rect.height()))
+        if rects:
+            self.panel.dirty_rects.extend(rects)
+
     def draw_wave(self, p, rect):
         s = self.panel.s
+        self.wave_rect = QRectF(rect)
         self.panel.box(p, rect, "#0e1116", BORDER, radius=8)
         if self.loading:
             self.draw_spinner(p, rect)
@@ -934,9 +974,16 @@ class SamplerEditor:
                 p.fillRect(QRectF(x_of(a), rect.top() + 1 * s, max(1.0, x_of(b) - x_of(a)),
                                   rect.height() - 2 * s), QColor(56, 214, 255, 38))
         p.setPen(QPen(QColor("#38d6ff"), 1.2 * s))
+        only = self.partial_x
+
+        def near(x):
+            return not only or any(a - 2 <= x <= b + 2 for a, b in only)
+
         values = self.visible_peaks(rect)
         for n, (low, high) in enumerate(values):
             x = rect.left() + (n + 0.5) * rect.width() / max(1, len(values))
+            if not near(x):
+                continue
             y0 = rect.center().y() - high * rect.height() * 0.45
             y1 = rect.center().y() - low * rect.height() * 0.45
             p.drawLine(QPointF(x, y0), QPointF(x, y1))
@@ -947,6 +994,8 @@ class SamplerEditor:
             if not (self.view_start <= marker <= self.view_end):
                 continue
             x = x_of(marker)
+            if not near(x):
+                continue
             p.setPen(QPen(QColor("#facc15"), 1.5 * s))
             p.drawLine(QPointF(x, rect.top() + 2 * s), QPointF(x, rect.bottom() - 2 * s))
             if 0 < index < len(self.markers) - 1:  # the file's ends stay put; the others are handles
@@ -964,6 +1013,8 @@ class SamplerEditor:
                 if not (self.view_start <= frame <= self.view_end):
                     continue
                 x = x_of(frame)
+                if not near(x):
+                    continue
                 p.setPen(QPen(QColor("#ffffff"), 2 * s))
                 p.drawLine(QPointF(x, rect.top() + 2 * s), QPointF(x, rect.bottom() - 2 * s))
                 p.setBrush(QColor("#ffffff"))
@@ -974,12 +1025,13 @@ class SamplerEditor:
             if self.view_start <= start and end <= self.view_end:
                 x0, x1 = x_of(start), x_of(end)
                 width = min(80 * s, max(0.0, x1 - x0 - 30 * s))
-                if width >= 18 * s:
+                if width >= 18 * s and near((x0 + x1) / 2):
                     bar = QRectF((x0 + x1) / 2 - width / 2, rect.top() + 4 * s, width, 12 * s)
                     self.panel.box(p, bar, QColor("#ffffff"), None, radius=5)
                     self.panel.text(p, bar, "↔", "#0e1116", 10, bold=True)
                     self.panel.region(bar, lambda pos: RangeDrag(self, rect, pos))
 
+        self.playhead_shown = None
         if self.playhead:  # the newest voice on this file: a green line through the waveform
             index, fraction = self.playhead
             playing = self.pads[index] if 0 <= index < len(self.pads) else None
@@ -994,6 +1046,7 @@ class SamplerEditor:
                     p.drawPolygon(QPolygonF([QPointF(x - 5 * s, rect.top() + 2 * s),
                                              QPointF(x + 5 * s, rect.top() + 2 * s),
                                              QPointF(x, rect.top() + 10 * s)]))
+                    self.playhead_shown = self.playhead
 
         zoom_in = QRectF(rect.right() - 34 * s, rect.top() + 6 * s, 28 * s, 24 * s)
         zoom_out = QRectF(zoom_in.left() - 32 * s, zoom_in.top(), 28 * s, 24 * s)
