@@ -46,11 +46,25 @@ class Rack(Window):
                           (1, 1, "PLAY-12", "live chords · pads", self.perf)])
         self.saved = dump_project(project)
         self.saved_at = time.localtime()
+        self.dsp_seen = None  # the DSP box: its last value, so it only repaints when that changes
+        self.dsp_at = 0.0
         self.restart = False  # close and start again: on the start screen, or on `next_project`
         self.next_project = None
         QTimer(self, interval=2000, timeout=self.autosave).start()
         # plugin states change inside the plugins (their own UIs too), so they're saved on a clock
         QTimer(self, interval=30000, timeout=host.save_states).start()
+
+    def tick(self):
+        super().tick()
+        now = time.monotonic()
+        if now - self.dsp_at < 1.0:  # the DSP load is a number on the toolbar, not something to run at 25 fps
+            return
+        self.dsp_at = now
+        info = getattr(self.host, "dsp", lambda: None)()
+        seen = None if info is None else (int(round(info[0])), int(info[1]))
+        if seen != self.dsp_seen:
+            self.dsp_seen = seen
+            self.update()
 
     def animating(self):
         # the playhead, the count-in and the blinking borders of queued pattern/scene switches

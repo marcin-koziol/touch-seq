@@ -471,7 +471,10 @@ class SamplerEditor:
 
     def poll(self):
         """Apply a background read on the UI thread (called from the host's tick)."""
+        was = self.playhead
         self.read_playhead()
+        if self.playhead != was:  # the playhead moved: repaint it, a still rack can sleep
+            self.panel.invalidate()
         with self._load_lock:
             pending, self._loaded = self._loaded, None
         if not pending:

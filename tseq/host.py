@@ -239,6 +239,7 @@ class HostPanel(Panel):
         log_param("set", plugin, index, value, source)
         self.host.set_value(plugin, index, value)
         self.states_dirty = True
+        self.invalidate()  # a knob whose value changed draws the new one: no free-running animation needed
 
     def plugin_changed(self, plugin, index, value):
         """A plugin changed one of its own parameters (its UI, a preset): its state is worth saving now, so a
@@ -247,6 +248,7 @@ class HostPanel(Panel):
             return
         log_param("set", plugin, index, value, "plugin")
         self.states_dirty = True
+        self.invalidate()  # its editor or a preset moved a knob
 
     # --- audio graph ----------------------------------------------------------
     def chain_labels(self):
@@ -637,10 +639,11 @@ class HostPanel(Panel):
                 self.set_param(plugin, prm.index, float(self.project.bpm), source="tempo")
 
     def animating(self):
-        # knobs read the plugins' live values: their own LFOs and envelopes move them; the sampler's spinner
-        # turns while a waveform is read
+        """Only what really moves: a held gesture, the sampler's spinner while a waveform is read. A loaded
+        plugin used to count as "animating", which repainted the whole rack 25 times a second for nothing -
+        a plugin's parameters only change when we set them, and that invalidates the panel itself."""
         sampler = getattr(self, "sampler", None)
-        return super().animating() or bool(self.loaded) or bool(sampler and sampler.loading)
+        return super().animating() or bool(sampler and sampler.loading)
 
     # --- fader links (Controls target "param") ------------------------------------
     def link_plugin(self, link):

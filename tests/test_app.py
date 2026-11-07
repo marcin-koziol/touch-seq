@@ -991,6 +991,14 @@ t1, t2, bus = prb.tracks[0], prb.tracks[1], prb.buses[0]
 bh = FakeHostPanel(prb)
 bh.loaded = {(t1.strip, 1): FakePlugin("T1.2 Rev"), (t2.strip, 1): FakePlugin("T2.2 Rev"),
              (bus.strip, 0): FakePlugin("B1.1 Rev", "Reverb")}
+# a loaded plugin is not an animation: with nothing held and nothing loading the rack must sleep (idle CPU)
+assert not bh.animating(), "the host panel repaints on its own just because a plugin is loaded"
+bh.gestures[1] = object()
+assert bh.animating(), "a held gesture still needs frames"
+bh.gestures.clear()
+bh.sampler = types.SimpleNamespace(loading=True)
+assert bh.animating(), "the sampler spinner still turns"
+bh.sampler.loading = False
 assert bh.strips() == [t1.strip, t2.strip, bus.strip, prb.master]
 assert bh.owner_name(t1.strip) == "T1" and bh.owner_name(bus.strip) == "BUS 1"
 assert bh.owner_name(prb.master) == "MASTER" and bh.bus_of(bus.strip) is bus

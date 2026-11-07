@@ -127,7 +127,10 @@ class EqEditor:
             return
         indices = self.panel.host.output_params(plugin)
         if len(indices) == len(self.spectrum):
-            self.spectrum = [self.panel.host.value(plugin, i) for i in indices]
+            spectrum = [self.panel.host.value(plugin, i) for i in indices]
+            if spectrum != self.spectrum:  # the curve moves: repaint it, nothing else has to
+                self.spectrum = spectrum
+                self.panel.invalidate()
 
     # --- mapping ------------------------------------------------------------
     @staticmethod
