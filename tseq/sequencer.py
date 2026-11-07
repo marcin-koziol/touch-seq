@@ -272,6 +272,8 @@ class Sequencer(Panel):
         self.head_seen = {}
         self.cell_x = []  # (left, width) of the 16 visible step cells, from the last paint
         self.grid_clip = None  # the GRID body, from the last paint
+        self.playhead_area = None  # the EDIT body (piano roll + lane), from the last paint
+        self.slow_frame_at = 0.0  # SONG/LAUNCH/count-in: their drain does not need 25 fps
         self.transport_rect = None  # the step/beat box in the top bar
         self.pages_rect = None  # the pattern page row at the bottom
 
@@ -960,7 +962,22 @@ class Sequencer(Panel):
     def tick(self):
         super().tick()
         e = self.engine
-        if not e.playing or self.view != "grid" or self.grid_clip is None or not self.cell_x:
+        if not (e.playing or e.counting):
+            self.head_seen = {}
+            return
+        if e.counting or self.view not in ("grid", "edit"):
+            # SONG/LAUNCH move continuously (a bar, a drain), and the count-in walks: repaint this panel,
+            # not the rack, and at 10 fps - a progress bar does not need every UI frame. GRID and EDIT
+            # below repaint only the old and new step columns, at the step rate.
+            now = time.monotonic()
+            if now - self.slow_frame_at < 0.10:
+                return
+            self.slow_frame_at = now
+            self.dirty_rects.append(QRectF(0, 0, self.w, self.h))
+            self.head_seen = {}
+            return
+        area = self.grid_clip if self.view == "grid" else self.playhead_area
+        if area is None or not self.cell_x:
             self.head_seen = {}
             return
         heads = {tr: e.playhead.get(tr) for tr in self.project.tracks}
@@ -978,7 +995,7 @@ class Sequencer(Panel):
                 k = step % 16
                 if 0 <= k < len(self.cell_x):
                     x, w = self.cell_x[k]
-                    rects.append(QRectF(x - 1, self.grid_clip.top(), w + 2, self.grid_clip.height()))
+                    rects.append(QRectF(x - 1, area.top(), w + 2, area.height()))
         self.head_seen = heads
         if rects:
             if self.transport_rect is not None:
@@ -1105,6 +1122,7 @@ class Sequencer(Panel):
     # --- edit view: selected track --------------------------------------
     def draw_edit(self, p, r):
         s, tr = self.s, self.sel
+        self.playhead_area = None
         pat, color = tr.current, self.color(tr)
         g = 8 * s
         ctrl = QRectF(r.left() + g, r.top() + g, r.width() - 2 * g, 58 * s)
@@ -1252,6 +1270,7 @@ class Sequencer(Panel):
     def draw_roll(self, p, area, tr, color):
         s, pat = self.s, tr.current
         if self.lane_only:  # just the lane, as big as the panel allows
+            self.playhead_area = QRectF(area)
             self.draw_lane_strip(p, QRectF(area.left() + 72 * s, area.top(), area.width() - 72 * s, area.height()),
                                  tr, color, QRectF(area.left(), area.top(), 64 * s, area.height()))
             return
@@ -1264,6 +1283,8 @@ class Sequencer(Panel):
         self.scroll_roll(tr, 0)  # clamp to the current number of rows
         base = self.roll_base(tr)
         cells = self.cells(grid)
+        self.cell_x = [(c.left(), c.width()) for c in cells]
+        self.playhead_area = QRectF(area)
         page0 = self.page * 16
 
         def row_top(n):
@@ -1372,7 +1393,9 @@ class Sequencer(Panel):
         if self.param == "cc":
             self.draw_cc_lane(p, bars, tr, self.cc_num, color)
             return
-        for k, c in enumerate(self.cells(bars)):
+        cells = self.cells(bars)
+        self.cell_x = [(c.left(), c.width()) for c in cells]
+        for k, c in enumerate(cells):
             i = self.page * 16 + k
             self.box(p, c, "#10131a" if i >= pat.length else "#181c26", "#ffffff" if i == head else None, 1.5,
                      radius=4)
@@ -1519,6 +1542,7 @@ class Sequencer(Panel):
         and plays it."""
         s, pat = self.s, tr.current
         head = self.engine.playhead.get(tr)
+        self.playhead_area = QRectF(area)
         rh = area.height() / len(DRUM_KIT)
 
         def gate_name(g):
@@ -1542,6 +1566,7 @@ class Sequencer(Panel):
             lane = QRectF(label.right() + 10 * s, row.top(), row.right() - label.right() - 10 * s, row.height())
             steps = pat.lanes[v]
             cells = self.cells(lane)
+            self.cell_x = [(c.left(), c.width()) for c in cells]
             for k, c in enumerate(cells):
                 i = self.page * 16 + k
                 st = steps[i]
