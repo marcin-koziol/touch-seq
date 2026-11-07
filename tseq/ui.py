@@ -9,7 +9,7 @@ import traceback
 
 from PySide6.QtCore import QPointF, QRectF, Qt, QTimer
 from PySide6.QtGui import (QColor, QFont, QFontMetrics, QLinearGradient, QPainter, QPainterPath, QPen,
-                           QPolygonF, QRadialGradient)
+                           QPolygonF, QRadialGradient, QRegion)
 from PySide6.QtWidgets import QWidget
 
 from .constants import BG, BORDER, DIM, MIN_TEXT, MOUSE_ID, PANEL, PARAM_FAMILIES, TEXT, TOUCH_LOG, WARN
@@ -42,6 +42,7 @@ class Panel:
         # level meters, key -> (rect here, draw(painter, rect)): the window draws each in its own small
         # child widget so a moving meter does not repaint the whole screen
         self.meter_rects = {}
+        self.dirty_rects = []  # small regions to repaint this frame (the playhead), not the whole rack
         self.window_ref = None  # the window that holds this panel, set for the meters' repaint clock
 
     def invalidate(self):
@@ -317,6 +318,7 @@ class Window(QWidget):
         self.painted_panels = set()  # what the last full frame drew (the meters follow only these)
         self.meter_views = {}  # (panel id, key) -> MeterView
         self.meters_dirty = False  # a level changed: repaint the meter boxes, not the whole rack
+        self.partial_panel = None  # a small repaint (the playhead) draws only this panel
         for panel in self.panels:
             panel.window_ref = self
         QTimer(self, interval=40, timeout=self.tick).start()
@@ -436,18 +438,34 @@ class Window(QWidget):
         except Exception:  # a panel that cannot say whether it moves still has to let the frame through
             traceback.print_exc()
             animating = True
-        if animating or any(p.stale for p in panels):
+        full = animating or any(p.stale for p in panels)
+        if full:
             for panel in panels:
                 panel.stale = False
+            self.partial_panel = None
             self.update()
+        dirty, partial = QRegion(), None
+        for panel in panels:
+            screen = self.screens.get(panel)
+            rects = getattr(panel, "dirty_rects", ())
+            for rect in rects:
+                if screen is not None:
+                    dirty = dirty.united(QRectF(rect).translated(screen.topLeft()).toRect())
+                    partial = panel if partial in (None, panel) else False
+            if hasattr(panel, "dirty_rects"):
+                panel.dirty_rects.clear()
+        if not dirty.isEmpty() and not full:
+            if partial is False:  # more than one panel: not a single-panel repaint
+                self.partial_panel = None
+                self.update()
+            else:
+                self.partial_panel = partial
+                self.update(dirty)  # a playhead step: repaint that panel, not the whole rack
         self.sync_meters()
         if self.meters_dirty:
             self.meters_dirty = False
-            if self.meter_views:
-                for view in self.meter_views.values():
-                    view.update()  # the needles only, not the rack
-            else:
-                self.update()  # no boxes located yet: one full frame records where they go
+            for view in self.meter_views.values():
+                view.update()  # the needles only, not the rack
 
     def meters_changed(self):
         """A level moved. The meters live in their own small widgets, so this does not mean a full frame."""
@@ -487,10 +505,17 @@ class Window(QWidget):
         return any(p.animating() for p in self.panels + ([self.dialog[2]] if self.dialog else []))
 
     # --- drawing --------------------------------------------------------
-    def paintEvent(self, _):
+    def paintEvent(self, event):
         started = time.perf_counter()
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
+        if self.partial_panel is not None and event.rect() != self.rect():
+            panel, self.partial_panel = self.partial_panel, None
+            screen = self.screens.get(panel)
+            if screen is not None:  # the playhead's columns: this panel only, clipped by the update region
+                self.paint_panel(p, panel, screen)
+                return
+        self.partial_panel = None
         p.fillRect(self.rect(), QColor("#08090b"))
         self.k = k = min(self.width() / 1920, self.height() / 1080)
         gap = 6 * k

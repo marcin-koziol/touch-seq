@@ -67,8 +67,11 @@ class Rack(Window):
             self.update()
 
     def animating(self):
-        # the playhead, the count-in and the blinking borders of queued pattern/scene switches
-        return self.engine.playing or self.engine.counting or super().animating()
+        # In GRID the playhead marks a step cell: the sequencer queues those columns (dirty_rects) and the
+        # window repaints only them. The other views still move continuously and need full frames, as does
+        # the count-in.
+        playing = self.engine.playing and self.seq.view != "grid"
+        return playing or self.engine.counting or super().animating()
 
     def autosave(self):
         # Runs in the UI thread, which is the only one changing the project structure; the engine

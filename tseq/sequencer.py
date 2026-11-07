@@ -268,6 +268,12 @@ class Sequencer(Panel):
         self.input_ok = None  # the rack: is the track's MIDI input open? (None: unknown, assume it is)
         self.levels = lambda tr: (0.0, 0.0)  # the rack: the track's (left, right) meter heights
         self.reroute = lambda: None  # the rack: rebuild the audio wiring after an input or pan change
+        # the playhead changes a step at a time: repaint its old and new columns, plus the tiny step/page bars
+        self.head_seen = {}
+        self.cell_x = []  # (left, width) of the 16 visible step cells, from the last paint
+        self.grid_clip = None  # the GRID body, from the last paint
+        self.transport_rect = None  # the step/beat box in the top bar
+        self.pages_rect = None  # the pattern page row at the bottom
 
     # --- actions --------------------------------------------------------
     def set_step(self, tr, s, on):
@@ -433,6 +439,7 @@ class Sequencer(Panel):
             p.drawPolygon(QPolygonF([QPointF(c.x() - k, c.y() - k * 1.2), QPointF(c.x() - k, c.y() + k * 1.2),
                                      QPointF(c.x() + k * 1.3, c.y())]))
 
+        self.transport_rect = QRectF(bar)
         pr = self.project
         self.box(p, bar, PANEL)
         si, counting = e.step_index, e.counting
@@ -473,6 +480,8 @@ class Sequencer(Panel):
         widths = [52 * s] * 4 + [4 * s] + [0] * PATTERNS + [4 * s, 72 * s, 72 * s]
         rects = split(r, widths, 5 * s)
         pages, slots, (copy_r, clear_r) = rects[:4], rects[5:5 + PATTERNS], rects[-2:]
+        self.pages_rect = QRectF(pages[0].left(), pages[0].top(),
+                                 pages[-1].right() - pages[0].left(), pages[0].height())
         color = self.color(tr)
         head = e.playhead.get(tr)
         for i, pr_ in enumerate(pages):
@@ -915,6 +924,7 @@ class Sequencer(Panel):
         self.scroll = max(0.0, min(self.scroll, len(rows) * rh + g - r.height()))
         self.grid_rows = {}
         moving = self.moving("grid")
+        self.grid_clip = QRectF(r)
         p.save()
         p.setClipRect(r)
         for idx, tr in enumerate(rows):
@@ -946,6 +956,36 @@ class Sequencer(Panel):
             k = tr.voice if tr.drum else None
             self.region(lane.intersected(r), lambda pos, tr=tr, k=k, lane=lane: Paint(self, lane, *self.painter(tr, k), pos))
         p.restore()
+
+    def tick(self):
+        super().tick()
+        e = self.engine
+        if not e.playing or self.view != "grid" or self.grid_clip is None or not self.cell_x:
+            self.head_seen = {}
+            return
+        heads = {tr: e.playhead.get(tr) for tr in self.project.tracks}
+        old = self.head_seen
+        if heads == old:
+            return
+        rects = []
+        for tr, head in heads.items():
+            previous = old.get(tr)
+            if previous == head:
+                continue
+            for step in (previous, head):
+                if step is None or step // 16 != self.page:
+                    continue
+                k = step % 16
+                if 0 <= k < len(self.cell_x):
+                    x, w = self.cell_x[k]
+                    rects.append(QRectF(x - 1, self.grid_clip.top(), w + 2, self.grid_clip.height()))
+        self.head_seen = heads
+        if rects:
+            if self.transport_rect is not None:
+                rects.append(QRectF(self.transport_rect))
+            if self.pages_rect is not None:
+                rects.append(QRectF(self.pages_rect))
+            self.dirty_rects.extend(rects)
 
     def draw_master_row(self, p, head, clip, lane):
         """The master bus as a row: selecting it shows the XY pad (XYFX on the master) in PLAY-12."""
@@ -1039,7 +1079,9 @@ class Sequencer(Panel):
     def draw_lane(self, p, lane, tr):
         s, color, pat = self.s, self.color(tr), tr.current
         head = self.engine.playhead.get(tr)
-        for k, c in enumerate(self.cells(lane)):
+        cells = self.cells(lane)
+        self.cell_x = [(c.left(), c.width()) for c in cells]
+        for k, c in enumerate(cells):
             i = self.page * 16 + k
             if i >= pat.length:
                 self.box(p, c, "#10131a", None, radius=5)
